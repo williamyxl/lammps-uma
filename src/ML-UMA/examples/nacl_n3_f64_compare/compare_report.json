@@ -1,0 +1,75 @@
+{
+  "system": "NaCl 3x3x3 rocksalt a=5.64",
+  "natoms": 216,
+  "precision": "float64 / double",
+  "device": "cuda",
+  "gpu": "NVIDIA TITAN V",
+  "checkpoint": "/mnt/d/workdir/uma-cache/uma-s-1p2.pt",
+  "artifact_uma": "/home/xyan11/workdir/uma-lmp/uma-engine/artifacts/uma-s-1p2-omat-f64",
+  "note": "Single-point energy+forces only. FairChem LAMMPS = fix external + Predictor (not Kokkos). uma/kk = pair_style uma/kk precision double. Post denorm_energy dtype fix: preserves FP64 (was always FP32 \u2192 ~1 meV spurious gap).",
+  "ase": {
+    "label": "ASE FAIRChemCalculator FP64 (CUDA)",
+    "energy": -730.8622005199413,
+    "load_s": 10.427413400029764,
+    "eval_s_mean": 0.18105186440516263,
+    "eval_s_std": 0.0030734278799643094,
+    "eval_s_min": 0.17568075796589255,
+    "n_timing": 5
+  },
+  "fairchem_lammps": {
+    "label": "FairChem LAMMPS fix external (PyTorch CUDA, internal NL; bridge uses FP32 cell)",
+    "energy": -730.8622007531305,
+    "load_s": 9.594170747965109,
+    "eval_s_mean": 0.615597652818542,
+    "eval_s_std": 0.8484911171590914,
+    "eval_s_min": 0.18755832500755787,
+    "eval_s_steady_mean": 0.19135422301769722,
+    "n_timing": 5
+  },
+  "uma_kk_double": {
+    "label": "Native uma/kk precision double (Kokkos+LibTorch+vesin CUDA)",
+    "energy": -730.8622005199427,
+    "load_s": null,
+    "eval_s_mean": 0.170134,
+    "eval_s_std": null,
+    "eval_s_min": 0.170134,
+    "n_timing": 5,
+    "pair_section_s": 0.85067,
+    "timing_method": "LAMMPS Pair / 5 NVE steps after run 0"
+  },
+  "vs_ase": {
+    "fairchem_lammps": {
+      "abs_energy_error": 2.331892119400436e-07,
+      "force_mae": 5.078656830036207e-07,
+      "force_rmse": 6.74958079998904e-07,
+      "force_max_abs": 2.516271221567057e-06,
+      "force_max_norm_per_atom": 2.931082115841016e-06,
+      "cosine": 0.9999999999593469
+    },
+    "uma_kk_double": {
+      "abs_energy_error": 1.3642420526593924e-12,
+      "force_mae": 6.575491450370054e-08,
+      "force_rmse": 1.2887296078368844e-07,
+      "force_max_abs": 4.979589639797499e-07,
+      "force_max_norm_per_atom": 6.053875121382441e-07,
+      "cosine": 0.9999999999985183
+    }
+  },
+  "vs_fairchem_lammps": {
+    "uma_kk_double": {
+      "abs_energy_error": 2.3318784769799095e-07,
+      "force_mae": 5.185692286761835e-07,
+      "force_rmse": 6.855020754119456e-07,
+      "force_max_abs": 2.519519906811485e-06,
+      "force_max_norm_per_atom": 2.810866819701069e-06,
+      "cosine": 0.9999999999580688
+    }
+  },
+  "timing_ms_per_eval": {
+    "ase": 181.05186440516263,
+    "fairchem_lammps_mean_incl_first": 615.597652818542,
+    "fairchem_lammps_steady": 191.35422301769722,
+    "uma_kk_double": 170.13400000000001
+  },
+  "denorm_fix": "uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype"
+}

@@ -1,0 +1,104 @@
+LAMMPS (22 Jul 2025 - Update 4)
+KOKKOS mode with Kokkos version 4.6.2 is enabled
+  will use up to 1 GPU(s) per node
+package kokkos
+# UMA / omat NaCl 2x2x2 minimization (Kokkos CUDA)
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+read_data       data.nacl
+Reading data file ...
+  orthogonal box = (0 0 0) to (11.28 11.28 11.28)
+  1 by 1 by 1 MPI processor grid
+  reading atoms ...
+  64 atoms
+  read_data CPU = 0.004 seconds
+
+# LibTorch UMA engine (task omat). Artifact path relative to this directory
+# or absolute. Override via variable if needed.
+variable        uma_art string ../../uma-engine/artifacts/uma-s-1p2-omat
+
+pair_style      uma/kk precision mixed
+pair_coeff      * * ${uma_art} Na Cl
+pair_coeff      * * ../../uma-engine/artifacts/uma-s-1p2-omat Na Cl
+Pair uma: loaded artifact '../../uma-engine/artifacts/uma-s-1p2-omat' cutoff=6.000 device=cuda precision=mixed (pos/energy float32, forces float64)
+newton          off
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+thermo          1
+thermo_style    custom step pe etotal fmax fnorm
+thermo_modify   norm no
+
+dump            1 all custom 1 traj.lammpstrj id type x y z fx fy fz
+dump_modify     1 sort id
+
+min_style       cg
+minimize        1.0e-5 1.0e-7 200 1000
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 8
+  ghost atom cutoff = 8
+  binsize = 8, bins = 2 2 2
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair uma/kk, perpetual
+      attributes: full, newton off, kokkos_device
+      pair build: full/bin/kk/device
+      stencil: full/bin/3d
+      bin: kk/device
+WARNING: Fix MINIMIZE/kk not compatible with sending data in Kokkos communication (src/KOKKOS/comm_kokkos.cpp:799)
+WARNING: Fix with atom-based arrays not compatible with sending data in Kokkos communication, switching to classic exchange/border communication (src/KOKKOS/comm_kokkos.cpp:812)
+WARNING: Fix MINIMIZE/kk not compatible with Kokkos sorting on device (src/KOKKOS/atom_kokkos.cpp:213)
+WARNING: Fix with atom-based arrays not compatible with Kokkos sorting on device, switching to classic host sorting (src/KOKKOS/atom_kokkos.cpp:219)
+Per MPI rank memory allocation (min/avg/max) = 4.609 | 4.609 | 4.609 Mbytes
+   Step         PotEng         TotEng          Fmax          Fnorm     
+         0  -216.26805     -216.26805      0.3272388      1.7131409    
+         1  -216.69855     -216.69855      0.093280032    0.47859035   
+         2  -216.74585     -216.74585      0.051082607    0.20619191   
+         3  -216.75543     -216.75543      0.022708248    0.095649542  
+         4  -216.7581      -216.7581       0.012939978    0.063249586  
+         5  -216.75928     -216.75928      0.0091512706   0.038334816  
+Loop time of 0.505531 on 1 procs for 5 steps with 64 atoms
+
+95.6% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+Minimization stats:
+  Stopping criterion = energy tolerance
+  Energy initial, next-to-last, final = 
+     -216.268051147461  -216.758102416992   -216.75927734375
+  Force two-norm initial, final = 1.7131409 0.038334816
+  Force max component initial, final = 0.3272388 0.0091512706
+  Final line search alpha, max atom move = 1 0.0091512706
+  Iterations, force evaluations = 5 10
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.48383    | 0.48383    | 0.48383    |   0.0 | 95.71
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0.00094684 | 0.00094684 | 0.00094684 |   0.0 |  0.19
+Output  | 0.013906   | 0.013906   | 0.013906   |   0.0 |  2.75
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 0.006846   |            |       |  1.35
+
+Nlocal:             64 ave          64 max          64 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:            665 ave         665 max         665 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:              0 ave           0 max           0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+FullNghs:         5626 ave        5626 max        5626 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 5626
+Ave neighs/atom = 87.90625
+Neighbor list builds = 0
+Dangerous builds = 0
+
+print           "Final PE = $(pe)"
+Final PE = -216.75927734375
+Total wall time: 0:00:03

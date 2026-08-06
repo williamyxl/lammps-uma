@@ -1,0 +1,16 @@
+# UMA omat FP64 single-point (NaCl 2x2x2 perturbed)
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       data.nacl
+variable        uma_art string ../../../../../uma-engine/artifacts/uma-s-1p2-omat-f64
+pair_style      uma/kk precision double
+pair_coeff      * * ${uma_art} Na Cl
+newton          off
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+thermo          1
+thermo_style    custom step pe etotal fmax fnorm
+thermo_modify   norm no
+run             0
+print           "Final PE = $(pe)"

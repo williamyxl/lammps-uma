@@ -1,0 +1,70 @@
+{
+  "system": "NaCl 3x3x3 rocksalt a=5.696400 \u00c5 (=5.64*1.01), uniform-box rattle \u03b4=0.1 \u00c5 seed=0",
+  "natoms": 216,
+  "symbols": [
+    "Na",
+    "Cl"
+  ],
+  "structure": "structure_nacl_rattle.npz",
+  "perturbation": {
+    "mode": "uniform_box",
+    "delta_A": 0.1,
+    "seed": 0,
+    "lattice_scale": 1.01,
+    "source_npz": "structure_nacl_rattle.npz"
+  },
+  "rows": [
+    {
+      "path": "ASE FP64",
+      "energy_eV": -729.5978639736301,
+      "ms_per_eval": 136.66597601259127,
+      "abs_dE_vs_ase_f64": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "force_max_norm_per_atom": 0.0,
+      "cosine": 1.0,
+      "f_ref_max_abs": 0.38277953441505674,
+      "f_ref_rms": 0.13894447365014637
+    },
+    {
+      "path": "FairChem fix external",
+      "energy_eV": -729.5978694315597,
+      "ms_per_eval": 146.62203851912636,
+      "abs_dE_vs_ase_f64": 5.457929660224181e-06,
+      "force_mae": 5.739556206664957e-07,
+      "force_rmse": 7.56688312167379e-07,
+      "force_max_abs": 3.0361598554323743e-06,
+      "force_max_norm_per_atom": 3.640148198909518e-06,
+      "cosine": 0.9999999999856488,
+      "f_ref_max_abs": 0.38277953441505674,
+      "f_ref_rms": 0.13894447365014637
+    },
+    {
+      "path": "uma/kk precision double",
+      "energy_eV": -729.5978639736317,
+      "ms_per_eval": 127.17799999999998,
+      "abs_dE_vs_ase_f64": 1.5916157281026244e-12,
+      "force_mae": 1.4584516427433325e-07,
+      "force_rmse": 2.134831206925578e-07,
+      "force_max_abs": 4.989627981621947e-07,
+      "force_max_norm_per_atom": 7.40466130444427e-07,
+      "cosine": 0.9999999999988196,
+      "f_ref_max_abs": 0.38277953441505674,
+      "f_ref_rms": 0.13894447365014637
+    },
+    {
+      "path": "uma/kk precision mixed",
+      "energy_eV": -729.5968627929688,
+      "ms_per_eval": 70.148,
+      "abs_dE_vs_ase_f64": 0.0010011806613192675,
+      "force_mae": 6.572160665404775e-07,
+      "force_rmse": 8.454214548842936e-07,
+      "force_max_abs": 3.0229201430052866e-06,
+      "force_max_norm_per_atom": 3.3630996538222788e-06,
+      "cosine": 0.9999999999817463,
+      "f_ref_max_abs": 0.38277953441505674,
+      "f_ref_rms": 0.13894447365014637
+    }
+  ]
+}

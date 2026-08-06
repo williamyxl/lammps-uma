@@ -1,0 +1,28 @@
+# UMA / omat Si diamond 4x4x4 single-point (Kokkos CUDA)
+# Geometry: a = 5.43 * 1.01 Å, uniform-box rattle δ=0.10 Å seed=0
+# (frozen from examples/nacl_n3_final_table/structure_si4_rattle.npz)
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+read_data       data.lmp
+
+variable        uma_art string ../../../../../uma-engine/artifacts/uma-s-1p2-omat
+
+pair_style      uma/kk precision mixed
+pair_coeff      * * ${uma_art} Si
+newton          off
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+thermo          1
+thermo_style    custom step pe etotal fmax fnorm
+thermo_modify   norm no
+
+dump            1 all custom 1 forces.dump id type x y z fx fy fz
+dump_modify     1 sort id
+
+run             0
+print           "Final PE = $(pe)"

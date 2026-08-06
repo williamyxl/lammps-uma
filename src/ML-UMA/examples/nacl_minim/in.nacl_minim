@@ -1,0 +1,30 @@
+# UMA / omat NaCl 2x2x2 minimization (Kokkos CUDA)
+
+units           metal
+atom_style      atomic
+boundary        p p p
+
+read_data       data.nacl
+
+# LibTorch UMA engine (task omat). Artifact path relative to this directory
+# or absolute. Override via variable if needed.
+variable        uma_art string ../../../../../uma-engine/artifacts/uma-s-1p2-omat
+
+pair_style      uma/kk precision mixed
+pair_coeff      * * ${uma_art} Na Cl
+newton          off
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+thermo          1
+thermo_style    custom step pe etotal fmax fnorm
+thermo_modify   norm no
+
+dump            1 all custom 1 traj.lammpstrj id type x y z fx fy fz
+dump_modify     1 sort id
+
+min_style       cg
+minimize        1.0e-5 1.0e-7 200 1000
+
+print           "Final PE = $(pe)"
