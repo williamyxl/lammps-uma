@@ -1,6 +1,6 @@
 # ML-UMA: LibTorch UMA pair style (GPU-persistent engine)
 
-set(UMA_ENGINE_ROOT "${LAMMPS_SOURCE_DIR}/../../uma-engine" CACHE PATH
+set(UMA_ENGINE_ROOT "${LAMMPS_SOURCE_DIR}/ML-UMA/uma-engine" CACHE PATH
     "Path to uma-engine (LibTorch UMA inference library)")
 get_filename_component(UMA_ENGINE_ROOT "${UMA_ENGINE_ROOT}" ABSOLUTE)
 

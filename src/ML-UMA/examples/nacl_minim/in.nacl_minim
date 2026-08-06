@@ -8,7 +8,7 @@ read_data       data.nacl
 
 # LibTorch UMA engine (task omat). Artifact path relative to this directory
 # or absolute. Override via variable if needed.
-variable        uma_art string ../../../../../uma-engine/artifacts/uma-s-1p2-omat
+variable        uma_art string ../../uma-engine/artifacts/uma-s-1p2-omat
 
 pair_style      uma/kk precision mixed
 pair_coeff      * * ${uma_art} Na Cl

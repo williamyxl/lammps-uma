@@ -24,9 +24,10 @@ from ase.io import write
 
 _EXAMPLES = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_lmp_root  # noqa: E402
+from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
 
 ROOT = find_uma_lmp_root()
+ENGINE = find_uma_engine_root()
 
 
 def load_nacl() -> Atoms:
@@ -177,7 +178,7 @@ def setup_ld_path() -> dict:
     import torch
 
     env = os.environ.copy()
-    vesin = ROOT / "uma-engine" / "third_party" / "vesin" / "lib"
+    vesin = ENGINE / "third_party" / "vesin" / "lib"
     torch_lib = Path(torch.__path__[0]) / "lib"
     parts = [
         "/usr/lib/wsl/lib",
@@ -340,7 +341,7 @@ def main() -> int:
         fc = run_fairchem_lammps(atoms, ckpt, device, n_timing, Path(td))
     print(f"FairChem-LMP E={fc['energy']:.10f}  eval={fc['eval_s_mean']*1e3:.2f} ms")
 
-    art_mixed = ROOT / "uma-engine" / "artifacts" / "uma-s-1p2-omat"
+    art_mixed = ENGINE / "artifacts" / "uma-s-1p2-omat"
     with tempfile.TemporaryDirectory(prefix="uma_kk_", dir=out_dir) as td:
         uma = run_uma_kk(atoms, art_mixed, "mixed", n_timing, Path(td))
     print(f"uma/kk E={uma['energy']:.10f}  eval~={uma['eval_s_mean']*1e3:.2f} ms")

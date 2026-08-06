@@ -11,13 +11,14 @@ lammps/src/ML-UMA/examples/
   ...
 ```
 
-Workspace root is auto-detected by [`_repo.py`](_repo.py) (looks for sibling `uma-engine/` + `lammps/`).
+Roots are auto-detected by [`_repo.py`](_repo.py) (`ML-UMA/`, vendored `uma-engine/`, workspace).
 
 ```bash
 # from uma-lmp root
 ROOT=$PWD
+ENG=$ROOT/lammps/src/ML-UMA/uma-engine
 LMP=$ROOT/lammps/build-uma/lmp
-VESIN=$ROOT/uma-engine/third_party/vesin/lib
+VESIN=$ENG/third_party/vesin/lib
 TORCH_LIB=$(python -c 'import torch,os; print(os.path.join(os.path.dirname(torch.__file__),"lib"))')
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib:/usr/local/cuda/lib64:${VESIN}:${TORCH_LIB}:${LD_LIBRARY_PATH:-}"
 

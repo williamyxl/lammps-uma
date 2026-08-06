@@ -8,8 +8,8 @@
     "lattice_scale": 1.01,
     "rule": "Build ideal crystal \u2192 scale lattice\u00d7positions by lattice_scale \u2192 add Unif[-delta,delta] \u00c5 per Cartesian component (PCG64 seed) once \u2192 wrap into cell \u2192 freeze npz \u2192 all 4 paths load that npz."
   },
-  "note": "Single-point E+F. Same frozen rattled geometry for ASE / FairChem / uma double / uma mixed. ASE has no mixed mode; mixed vs ASE FP64. Post-fix: denorm_energy preserves compute dtype.",
-  "denorm_fix": "uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype",
+  "note": "Single-point E+F. Same frozen rattled geometry for ASE / FairChem / uma double / uma mixed. ASE has no mixed mode; mixed vs ASE FP64. FairChem fix-external is not labeled FP64: lammps_fc builds the cell in FP32. Post-fix: denorm_energy preserves compute dtype. Inputs/reports live under lammps/src/ML-UMA/examples/.",
+  "denorm_fix": "lammps/src/ML-UMA/uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype",
   "systems": {
     "nacl_n3_rattle": {
       "system": "NaCl 3x3x3 rocksalt a=5.696400 \u00c5 (=5.64*1.01), uniform-box rattle \u03b4=0.1 \u00c5 seed=0",
@@ -345,5 +345,14 @@
       "f_ref_max_abs": 0.38277953441505674,
       "f_ref_rms": 0.13894447365014637
     }
-  ]
+  ],
+  "report_path": "lammps/src/ML-UMA/examples/nacl_n3_final_table/",
+  "capacity_note": {
+    "system": "si_diamond_n4_rattle",
+    "natoms": 512,
+    "gpu": "NVIDIA TITAN V 12GB HBM",
+    "observation": "FP64 paths ASE/FC/uma double ~44\u201326 s/eval; uma/kk mixed ~178 ms/eval. Parity still good (uma double |dE|=0.0).",
+    "interpretation": "Memory thrashing / oversubscription: FP64 working set no longer fits comfortably in dedicated GPU HBM, so CUDA/WSL pages or migrates tensors through host CPU RAM.",
+    "recommendation": "Use precision mixed for Si 4x4x4 (and larger) on 12GB GPUs."
+  }
 }

@@ -20,7 +20,7 @@ fi
 TORCH_LIB="$(python -c 'import torch, os; print(os.path.join(os.path.dirname(torch.__file__), "lib"))')"
 export LD_LIBRARY_PATH="${TORCH_LIB}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 
-ARTIFACT="${UMA_ARTIFACT:-$ROOT/uma-engine/artifacts/uma-s-1p2-omat}"
+ARTIFACT="${UMA_ARTIFACT:-$ROOT/lammps/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat}"
 if [[ ! -f "$ARTIFACT/model_traced.pt" ]]; then
   echo "ERROR: missing artifact at $ARTIFACT (run export_omat.py first)" >&2
   exit 1

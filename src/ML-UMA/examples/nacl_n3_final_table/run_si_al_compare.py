@@ -25,15 +25,16 @@ from ase.data import atomic_masses, chemical_symbols
 
 _EXAMPLES = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_lmp_root  # noqa: E402
+from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
 
 ROOT = find_uma_lmp_root()
-sys.path.insert(0, str(ROOT / "uma-engine" / "python"))
+ENGINE = find_uma_engine_root()
+sys.path.insert(0, str(ENGINE / "python"))
 from common import inference_settings_with_dtype  # noqa: E402
 
 CKPT = "/mnt/d/workdir/uma-cache/uma-s-1p2.pt"
-ART_F64 = ROOT / "uma-engine" / "artifacts" / "uma-s-1p2-omat-f64"
-ART_MIX = ROOT / "uma-engine" / "artifacts" / "uma-s-1p2-omat"
+ART_F64 = ENGINE / "artifacts" / "uma-s-1p2-omat-f64"
+ART_MIX = ENGINE / "artifacts" / "uma-s-1p2-omat"
 OUT_DIR = Path(__file__).resolve().parent
 
 
@@ -97,7 +98,7 @@ def force_stats(f_ref: np.ndarray, f: np.ndarray) -> dict:
 
 def setup_ld_path() -> dict:
     env = os.environ.copy()
-    vesin = ROOT / "uma-engine" / "third_party" / "vesin" / "lib"
+    vesin = ENGINE / "third_party" / "vesin" / "lib"
     torch_lib = Path(torch.__path__[0]) / "lib"
     parts = [
         "/usr/lib/wsl/lib",
@@ -508,7 +509,7 @@ def main() -> int:
             "Post-fix: denorm_energy preserves compute dtype. "
             "Si from LAMMPS ELASTIC diamond lattice; Al fcc metal."
         ),
-        "denorm_fix": "uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype",
+        "denorm_fix": "lammps/src/ML-UMA/uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype",
         "systems": systems,
     }
     # Keep flat NaCl top-level fields for backward compat with older readers

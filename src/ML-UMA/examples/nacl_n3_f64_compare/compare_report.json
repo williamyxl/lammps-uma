@@ -5,7 +5,7 @@
   "device": "cuda",
   "gpu": "NVIDIA TITAN V",
   "checkpoint": "/mnt/d/workdir/uma-cache/uma-s-1p2.pt",
-  "artifact_uma": "/home/xyan11/workdir/uma-lmp/uma-engine/artifacts/uma-s-1p2-omat-f64",
+  "artifact_uma": "/home/xyan11/workdir/uma-lmp/lammps/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64",
   "note": "Single-point energy+forces only. FairChem LAMMPS = fix external + Predictor (not Kokkos). uma/kk = pair_style uma/kk precision double. Post denorm_energy dtype fix: preserves FP64 (was always FP32 \u2192 ~1 meV spurious gap).",
   "ase": {
     "label": "ASE FAIRChemCalculator FP64 (CUDA)",
@@ -71,5 +71,5 @@
     "fairchem_lammps_steady": 191.35422301769722,
     "uma_kk_double": 170.13400000000001
   },
-  "denorm_fix": "uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype"
+  "denorm_fix": "lammps/src/ML-UMA/uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype"
 }

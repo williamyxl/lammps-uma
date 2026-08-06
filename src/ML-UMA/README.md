@@ -1,7 +1,8 @@
 # ML-UMA — LibTorch UMA pair style for LAMMPS
 
-Provides `pair_style uma` and `pair_style uma/kk` backed by `uma-engine`
-(GPU-persistent LibTorch, task **omat**, forces via autograd).
+Provides `pair_style uma` and `pair_style uma/kk` backed by vendored
+[`uma-engine/`](uma-engine/) (GPU-persistent LibTorch, task **omat**, forces via
+autograd).
 
 ## Precision (runtime, like GPU/INTEL packages)
 
@@ -35,7 +36,7 @@ is selected solely via the `pair_style` keyword above.
 
 ```lammps
 pair_style uma/kk precision mixed
-pair_coeff * * /path/to/uma-engine/artifacts/uma-s-1p2-omat Na Cl
+pair_coeff * * /path/to/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat Na Cl
 newton off
 ```
 

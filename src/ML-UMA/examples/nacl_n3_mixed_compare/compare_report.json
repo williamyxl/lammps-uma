@@ -3,7 +3,7 @@
   "natoms": 216,
   "precision": "mixed (pos/energy FP32, forces FP64)",
   "gpu": "NVIDIA TITAN V",
-  "artifact": "/home/xyan11/workdir/uma-lmp/uma-engine/artifacts/uma-s-1p2-omat",
+  "artifact": "/home/xyan11/workdir/uma-lmp/lammps/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat",
   "ase": {
     "label": "ASE FAIRChemCalculator float32 (CUDA)",
     "energy": -731.4637441328044,
@@ -34,5 +34,5 @@
     "uma_kk_mixed": 89.48
   },
   "note": "Ideal rocksalt a=5.64. ASE float32 vs uma/kk mixed. Residual ~0.91 meV vs ASE float32 is path/accumulation difference; vs ASE FP64 see nacl_n3_final_table (expected FP32 energy). Post denorm_energy dtype fix.",
-  "denorm_fix": "uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype"
+  "denorm_fix": "lammps/src/ML-UMA/uma-engine/src/postprocess.cpp preserves FP32/FP64 dtype"
 }

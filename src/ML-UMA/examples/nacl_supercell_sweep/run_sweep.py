@@ -25,9 +25,10 @@ from ase.data import atomic_masses
 
 _EXAMPLES = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_lmp_root  # noqa: E402
+from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
 
 ROOT = find_uma_lmp_root()
+ENGINE = find_uma_engine_root()
 
 
 def write_data(atoms, path: Path) -> None:
@@ -221,7 +222,7 @@ def main() -> None:
     ap.add_argument(
         "--artifact",
         type=Path,
-        default=ROOT / "uma-engine" / "artifacts" / "uma-s-1p2-omat",
+        default=ENGINE / "artifacts" / "uma-s-1p2-omat",
     )
     ap.add_argument(
         "--work",
@@ -230,7 +231,7 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    vesin = ROOT / "uma-engine" / "third_party" / "vesin" / "lib"
+    vesin = ENGINE / "third_party" / "vesin" / "lib"
     torch_lib = subprocess.check_output(
         ["python", "-c", "import torch,os; print(os.path.join(os.path.dirname(torch.__file__),'lib'))"],
         text=True,

@@ -12,7 +12,7 @@ Geometries match the final compare table (lattice × 1.01 + rattle).
 ```bash
 source /home/xyan11/miniforge3/etc/profile.d/conda.sh && conda activate uma312
 ROOT=/home/xyan11/workdir/uma-lmp
-VESIN=$ROOT/uma-engine/third_party/vesin/lib
+VESIN=$ROOT/lammps/src/ML-UMA/uma-engine/third_party/vesin/lib
 TORCH_LIB=$(python -c 'import torch,os; print(os.path.join(os.path.dirname(torch.__file__),"lib"))')
 export LD_LIBRARY_PATH="/usr/lib/wsl/lib:/usr/local/cuda/lib64:${VESIN}:${TORCH_LIB}:${LD_LIBRARY_PATH:-}"
 LMP=$ROOT/lammps/build-uma/lmp

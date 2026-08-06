@@ -3,7 +3,7 @@ units           metal
 atom_style      atomic
 boundary        p p p
 read_data       data.nacl
-variable        uma_art string ../../../../../uma-engine/artifacts/uma-s-1p2-omat-f64
+variable        uma_art string ../../uma-engine/artifacts/uma-s-1p2-omat-f64
 pair_style      uma/kk precision double
 pair_coeff      * * ${uma_art} Na Cl
 newton          off

@@ -19,9 +19,10 @@ from ase.build import bulk
 
 _EXAMPLES = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_lmp_root  # noqa: E402
+from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
 
 ROOT = find_uma_lmp_root()
+ENGINE = find_uma_engine_root()
 
 
 def make_nacl(n: int = 4, a: float = 5.64):
@@ -151,7 +152,7 @@ def main():
     ap.add_argument(
         "--artifact",
         type=Path,
-        default=ROOT / "uma-engine" / "artifacts" / "uma-s-1p2-omat-f64",
+        default=ENGINE / "artifacts" / "uma-s-1p2-omat-f64",
     )
     ap.add_argument(
         "--out",

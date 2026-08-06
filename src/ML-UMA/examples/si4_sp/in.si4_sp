@@ -8,7 +8,7 @@ boundary        p p p
 
 read_data       data.lmp
 
-variable        uma_art string ../../../../../uma-engine/artifacts/uma-s-1p2-omat
+variable        uma_art string ../../uma-engine/artifacts/uma-s-1p2-omat
 
 pair_style      uma/kk precision mixed
 pair_coeff      * * ${uma_art} Si

@@ -16,17 +16,18 @@ from fairchem.core.units.mlip_unit import load_predict_unit
 
 _EXAMPLES = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_lmp_root  # noqa: E402
+from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
 
 ROOT = find_uma_lmp_root()
-sys.path.insert(0, str(ROOT / "uma-engine" / "python"))
+ENGINE = find_uma_engine_root()
+sys.path.insert(0, str(ENGINE / "python"))
 
 from common import inference_settings_with_dtype, resolve_device  # noqa: E402
 
 
 def main() -> int:
     device = resolve_device("cuda")
-    artifact = ROOT / "uma-engine" / "artifacts" / "uma-s-1p2-omat-f64"
+    artifact = ENGINE / "artifacts" / "uma-s-1p2-omat-f64"
     npz = ROOT / "lammps" / "src" / "ML-UMA" / "examples" / "nacl_minim" / "nacl_init.npz"
     ckpt = "/mnt/d/workdir/uma-cache/uma-s-1p2.pt"
     settings = inference_settings_with_dtype("float64")
@@ -47,11 +48,11 @@ def main() -> int:
 
     # --- Python export path (parity_nacl) ---
     env = os.environ.copy()
-    env["PYTHONPATH"] = f"{ROOT / 'uma-engine' / 'python'}:{env.get('PYTHONPATH', '')}"
+    env["PYTHONPATH"] = f"{ENGINE / 'python'}:{env.get('PYTHONPATH', '')}"
     py = subprocess.run(
         [
             sys.executable,
-            str(ROOT / "uma-engine" / "python" / "parity_nacl.py"),
+            str(ENGINE / "python" / "parity_nacl.py"),
             "--dtype",
             "float64",
             "--artifact",
@@ -73,7 +74,7 @@ def main() -> int:
     torch_lib = __import__("torch").__path__[0] + "/lib"
     env["LD_LIBRARY_PATH"] = torch_lib + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
     struct = ROOT / "lammps" / "src" / "ML-UMA" / "examples" / "nacl_minim" / "structure_f64.txt"
-    cli = ROOT / "uma-engine" / "build" / "uma_parity_cli"
+    cli = ENGINE / "build" / "uma_parity_cli"
     cpp = subprocess.run(
         [str(cli), str(artifact), str(struct)],
         env=env,

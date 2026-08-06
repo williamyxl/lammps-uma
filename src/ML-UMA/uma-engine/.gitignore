@@ -1,0 +1,5 @@
+# Local CMake builds (engine is also built via lammps/build-uma)
+/build/
+
+# Large TorchScript weights (regenerate with python/export_omat.py)
+/artifacts/**/model_traced.pt
