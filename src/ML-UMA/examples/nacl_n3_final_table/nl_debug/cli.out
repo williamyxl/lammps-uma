@@ -1,3 +1,0 @@
-compute_dtype=float64 device=cuda
-[W805 17:57:06.021600795 Indexing.cu:1432] Warning: index_reduce() is in beta and the API may change at any time. (function operator())
-n=216 energy=-731.781555175781 eV  fmax=3.6060370258e-15

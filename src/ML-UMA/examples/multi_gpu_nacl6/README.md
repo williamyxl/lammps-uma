@@ -1,9 +1,10 @@
 # Multi-GPU NaCl 6×6×6 parity (Delta A100)
 
-Four-path energy/force parity on the **frozen** NaCl 6×6×6 rattled crystal
+Three-path energy/force parity on the **frozen** NaCl 6×6×6 rattled crystal
 (1728 atoms), varying `NGPUS` ∈ {1, 2, 4}.
 
-Paths: ASE FairChem FP64 · FairChem LAMMPS fix-external · `uma/kk` double · `uma/kk` mixed.
+Paths: ASE FairChem FP64 · FairChem LAMMPS fix-external · `uma/kk` **double**
+(FP64). **`uma/kk` mixed is disabled** (do not submit / do not report as active).
 
 ## Latest results
 
@@ -15,10 +16,10 @@ Also: `results/SUMMARY.md`, `results/MULTIGPU_REPORT.md`, `results/COORD_ANALYSI
 Always load:
 
 ```
-../delta_parity/structures/nacl6_rattle_fixed.extxyz
+structures/nacl6_rattle_fixed.extxyz
 ```
 
-Manifest: `nacl6_rattle_fixed.manifest.json`. Same as prior
+Manifest: `structures/nacl6_rattle_fixed.manifest.json`. Same as prior
 `structure_nacl6_rattle.npz` (rocksalt a=5.64 Å, Unif[-0.1,0.1] Å, seed=0).
 Coordinates written with 12 significant digits (`.12g`). **Never re-rattle.**
 
@@ -28,7 +29,8 @@ Coordinates written with 12 significant digits (`.12g`). **Never re-rattle.**
 
 - **ASE** and **uma/kk double**: FP64 only (`inference_settings_with_dtype("float64")`
   / `uma-s-1p2-omat-f64`). Do **not** use turbo settings for this campaign.
-- **uma/kk mixed**: explicit separate path (`uma-s-1p2-omat`).
+- **`uma/kk` mixed: DISABLED** — FP32 energy graph with upcast forces; not an
+  active path. Historical mixed rows in `results/` are HTML-commented.
 - FairChem FC may build the cell in FP32 inside `lammps_fc` (documented in results).
 
 ## Multi-GPU recipes
@@ -140,11 +142,12 @@ leaves Ray/NCCL/Kokkos/LibTorch state on the GPUs and skews later timings.
 |----|-------|
 | `sbatch run_ngpu2_ase.slurm` | `ONLY_PATHS=ase,fc,uma_double` in one job |
 | `./submit_path_jobs.sh` | deprecated `run_ngpu{1,2,4}.slurm` multi-path |
-| `./submit_path_jobs.sh --gp` | `ONLY_PATHS=uma_double,uma_mixed` |
+| `./submit_path_jobs.sh --gp` | `ONLY_PATHS=uma_mixed` or any mixed path |
 
-Scripts: `run_ngpu{N}_{ase,fc,uma_double,uma_mixed}.slurm` and
-`gp_round/run_ngpu{N}_{uma_double,uma_mixed}.slurm` (regenerate with
-`./generate_path_jobs.sh`). Escape hatch: `ALLOW_MULTI_PATH=1` (login debug only).
+Scripts: `run_ngpu{N}_{ase,fc,uma_double}.slurm` and
+`gp_round/run_ngpu{N}_uma_double.slurm` (regenerate with
+`./generate_path_jobs.sh`). **`uma_mixed` scripts may still exist on disk but
+must not be submitted.** Escape hatch: `ALLOW_MULTI_PATH=1` (login debug only).
 
 ## How to run
 
@@ -153,10 +156,10 @@ Scripts: `run_ngpu{N}_{ase,fc,uma_double,uma_mixed}.slurm` and
 ```bash
 cd /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6
 
-# All suite paths × 1/2/4 GPUs (chained afterok)
+# ASE / FC / uma_double × 1/2/4 GPUs (chained afterok)
 ./submit_path_jobs.sh
 
-# gp_round uma only
+# gp_round uma double only
 RECOMPILE=1 ./submit_path_jobs.sh --gp
 
 # ASE+FC @4 only
@@ -167,11 +170,11 @@ RECOMPILE=1 ./submit_path_jobs.sh --gp
 
 ```bash
 ./gp_round/rebuild_and_submit.sh            # dry-run
-./gp_round/rebuild_and_submit.sh --submit   # rebuild + isolated double/mixed jobs
+./gp_round/rebuild_and_submit.sh --submit   # rebuild + uma_double jobs
 ./gp_round/rebuild_and_submit.sh --submit --ngpu4
 ```
 
-Defaults: **one** of `uma_double` / `uma_mixed` per job, `RECOMPILE=1` on rebuild
+Defaults: **`uma_double` only** (mixed disabled), `RECOMPILE=1` on rebuild
 step, results under `results/gp_round/ngpu{N}/`. See
 [`gp_round/DRY_RUN_CHECKLIST.md`](gp_round/DRY_RUN_CHECKLIST.md).
 
@@ -218,8 +221,10 @@ before `sbatch`.
 | Item | Default |
 |------|---------|
 | Checkpoint | `/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt` |
-| Artifact FP64 | `uma-engine/artifacts/uma-s-1p2-omat-f64` |
-| Artifact mixed | `uma-engine/artifacts/uma-s-1p2-omat` |
+| Artifact FP64 (omat) | `uma-engine/artifacts/uma-s-1p2-omat-f64` |
+| Other task FP64 | `uma-engine/artifacts/uma-s-1p2-<task>-f64` (via `export_artifact.py --all-tasks`) |
+| Artifact mixed | ~~`uma-s-1p2-omat`~~ **disabled** |
+| Export script | `uma-engine/python/export_artifact.py` |
 | LMP_UMA | `build-uma/lmp` |
 | LMP_FC | `.../envs/uma312/bin/lmp` |
 

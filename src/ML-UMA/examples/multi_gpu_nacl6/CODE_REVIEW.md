@@ -120,7 +120,7 @@ Write agent correctly keeps single-rank guard and documents that `-k on g N` doe
 
 ## What looks good
 
-- **Geometry:** `load_geometry.py` loads `delta_parity/structures/nacl6_rattle_fixed.extxyz` (npz fallback), asserts 1728 atoms, never rattles.
+- **Geometry:** `load_geometry.py` loads `structures/nacl6_rattle_fixed.extxyz` (npz fallback), asserts 1728 atoms, never rattles.
 - **ASE/FC FP64:** `inference_settings_with_dtype("float64")` via engine `common.py` (export/default lineage, **not** turbo string); FC notes cell FP32.
 - **uma/kk launch:** `lmp -k on g N -sf kk`, SLURM `--ntasks=1`, explicit “no mpirun” in README / API notes / slurm comments. Matches user clarification.
 - **Outputs:** `results/ngpu{N}/parity.json` + `forces.npz` (energies + per-atom forces) + `run.log`; collectors merge path × ngpu.

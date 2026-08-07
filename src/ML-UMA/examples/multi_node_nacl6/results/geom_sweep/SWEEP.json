@@ -1,0 +1,86 @@
+{
+  "rows": [
+    {
+      "n": 8,
+      "natoms": 4096,
+      "path": "ase",
+      "ngpus": 4,
+      "status": "PASS",
+      "returncode": 0,
+      "slurm_wall_s": 81.748151,
+      "slurm_job_id": "20911082",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N08/ase"
+    },
+    {
+      "n": 8,
+      "natoms": 4096,
+      "path": "fc",
+      "ngpus": 4,
+      "status": "PASS",
+      "returncode": 0,
+      "slurm_wall_s": 48.473841,
+      "slurm_job_id": "20911083",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N08/fc"
+    },
+    {
+      "n": 8,
+      "natoms": 4096,
+      "path": "uma_double",
+      "ngpus": 4,
+      "status": "PASS",
+      "returncode": 0,
+      "slurm_wall_s": 149.892696,
+      "slurm_job_id": "20911084",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N08/uma_double"
+    },
+    {
+      "n": 10,
+      "natoms": 8000,
+      "path": "ase",
+      "ngpus": 4,
+      "status": "PASS",
+      "returncode": 0,
+      "slurm_wall_s": 57.058644,
+      "slurm_job_id": "20911086",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N10/ase"
+    },
+    {
+      "n": 10,
+      "natoms": 8000,
+      "path": "fc",
+      "ngpus": 4,
+      "status": "PASS",
+      "returncode": 0,
+      "slurm_wall_s": 49.788325,
+      "slurm_job_id": "20911087",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N10/fc"
+    },
+    {
+      "n": 10,
+      "natoms": 8000,
+      "path": "uma_double",
+      "ngpus": 4,
+      "status": "PASS",
+      "returncode": 0,
+      "slurm_wall_s": 124.418112,
+      "slurm_job_id": "20911088",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N10/uma_double"
+    },
+    {
+      "n": 12,
+      "natoms": 13824,
+      "path": "ase",
+      "ngpus": 4,
+      "status": "OOM",
+      "returncode": 1,
+      "slurm_wall_s": 52.894633,
+      "slurm_job_id": "20911090",
+      "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_node_nacl6/results/geom_sweep/N12/ase"
+    }
+  ],
+  "n_star": 10,
+  "safe_N": [
+    8,
+    10
+  ]
+}

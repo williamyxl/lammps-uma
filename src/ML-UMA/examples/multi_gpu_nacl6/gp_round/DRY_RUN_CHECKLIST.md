@@ -3,6 +3,8 @@
 Do **not** submit heavy jobs until WRITE lands `pair_style uma/kk ... devices N` and
 `build-uma/lmp` is rebuilt.
 
+**Precision:** `uma_double` / FP64 only. **`uma_mixed` disabled.**
+
 ## Pre-submit (login node)
 
 ```bash
@@ -17,10 +19,10 @@ cd /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6
 
 ## Submit order (path-isolated — one path per job)
 
-VRAM isolation: **never** `ONLY_PATHS=uma_double,uma_mixed` in one allocation.
+VRAM isolation: **one** `ONLY_PATHS=uma_double` per allocation. Do not submit mixed.
 
-1. **ngpu1 uma_double** then **ngpu1 uma_mixed** — devices=1 baselines
-2. **ngpu2** double then mixed — parity vs ngpu1 / ASE FP64
+1. **ngpu1 uma_double** — devices=1 baseline
+2. **ngpu2 uma_double** — parity vs ngpu1 / ASE FP64
 3. **ngpu4** — only after ngpu2 green
 
 ```bash
@@ -30,20 +32,12 @@ VRAM isolation: **never** `ONLY_PATHS=uma_double,uma_mixed` in one allocation.
 # or directly:
 RECOMPILE=1 ./submit_path_jobs.sh --gp --ngpus 1,2,4
 ```
-## Parity gates (vs devices=1, same precision)
+
+## Parity gates (vs devices=1, double only)
 
 | Mode   | \|ΔE\| max | max \|ΔF\| | cosine min |
 |--------|------------|------------|------------|
 | double | 1e-8       | 1e-6       | 1 − 1e-12  |
-| mixed  | 1e-4       | 1e-5       | 1 − 1e-10  |
 
 Results: `results/gp_round/ngpu{N}/parity.json`  
-Merge: `results/gp_round/SUMMARY.json`, `MULTIGPU_REPORT.md`
-
-## SLURM contract
-
-- `--account=bbpl-delta-gpu --partition=gpuA100x4`
-- `--ntasks=1 --gpus-per-node=N`
-- `module unload cudatoolkit`; `module load cuda/12.8`
-- `conda activate uma312`
-- `RECOMPILE=1` default in gp_round
+Reports: `results/gp_round/{SUMMARY,MULTIGPU_REPORT,RESULTS}.md`

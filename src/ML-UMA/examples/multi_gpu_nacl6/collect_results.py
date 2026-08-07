@@ -179,7 +179,7 @@ def main() -> int:
         "title": "NaCl 6×6×6 multi-GPU parity summary",
         "natoms": 1728,
         "structure": (
-            "src/ML-UMA/examples/delta_parity/structures/nacl6_rattle_fixed.extxyz"
+            "src/ML-UMA/examples/multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz"
         ),
         "reference": "ASE FairChem FP64 @ ngpu=1",
         "uma_d1_reference": "uma/kk devices=1 @ ngpu=1 (same precision)",

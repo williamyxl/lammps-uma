@@ -46,17 +46,17 @@ Match FairChem `eSCNMD` / `gp_utils` / `filter_edges_by_node_partition`:
 Checkpoint: `metadata.json` `checkpoint_path`, else `UMA_CHECKPOINT`, else
 `/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt`.
 
-Artifacts:
+Artifacts (export with `python/export_artifact.py --dtype float64`):
 
-- double: `artifacts/uma-s-1p2-omat-f64/` (FP64 — never silent turbo/FP32)
-- mixed: `artifacts/uma-s-1p2-omat/`
+- double / active: `artifacts/uma-s-1p2-omat-f64/` (and `uma-s-1p2-<task>-f64/` for other heads)
+- mixed: `artifacts/uma-s-1p2-omat/` — **disabled** for campaigns
 
 Long-term: native LibTorch / c10d multi-process GP preferred for in-process
 latency; this round prioritizes parity with ASE `workers=N`.
 
 ## Parity thresholds (`devices=N` vs oracle)
 
-Frozen geometry: `examples/delta_parity/structures/nacl6_rattle_fixed.extxyz`.
+Frozen geometry: `examples/multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz`.
 
 **Permanent ground truth (record once):** ASE FairChem **FP64**, `workers=1`, no
 ParallelMLIPPredictUnit — energy + forces cached at

@@ -93,7 +93,7 @@ test -x "${ROOT}/build-uma/lmp" || { echo "ERROR: build-uma/lmp missing" >&2; ex
 mkdir -p "${GP}"
 
 cd "${EX}"
-# Path-isolated submit (one ONLY_PATHS per job). Chain: d1 double → d1 mixed → d2 …
+# Path-isolated submit (one ONLY_PATHS per job). Mixed disabled — uma_double only.
 export RECOMPILE=0  # already rebuilt above
 if [[ "${SUBMIT_NGPU4}" == "1" ]]; then
   "${EX}/submit_path_jobs.sh" --gp --ngpus 1,2,4

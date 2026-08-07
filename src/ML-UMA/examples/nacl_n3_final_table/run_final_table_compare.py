@@ -38,12 +38,16 @@ from ase import Atoms
 from ase.build import bulk
 from ase.data import atomic_masses, chemical_symbols
 
-_EXAMPLES = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
+def _ml_uma_root() -> Path:
+    here = Path(__file__).resolve()
+    for p in [here, *here.parents]:
+        if (p / "pair_uma.cpp").is_file() and (p / "uma-engine").is_dir():
+            return p
+    raise RuntimeError("cannot find ML-UMA (pair_uma.cpp + uma-engine/)")
 
-ROOT = find_uma_lmp_root()
-ENGINE = find_uma_engine_root()
+_ML = _ml_uma_root()
+ENGINE = _ML / "uma-engine"
+ROOT = _ML.parent.parent.parent  # workdir parent of lammps tree (legacy layout)
 sys.path.insert(0, str(ENGINE / "python"))
 from common import inference_settings_with_dtype  # noqa: E402
 

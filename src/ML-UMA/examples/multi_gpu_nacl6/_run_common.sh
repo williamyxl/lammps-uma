@@ -41,7 +41,7 @@ ENG=${ROOT}/src/ML-UMA/uma-engine
 CKPT=${UMA_CHECKPOINT:-/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt}
 CONDA_SH=/u/xyan11/miniforge3-x86_64/etc/profile.d/conda.sh
 LMP_FC=${LMP_FC:-/u/xyan11/miniforge3-x86_64/envs/uma312/bin/lmp}
-FIXED_XYZ=${ROOT}/src/ML-UMA/examples/delta_parity/structures/nacl6_rattle_fixed.extxyz
+FIXED_XYZ=${ROOT}/src/ML-UMA/examples/multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz
 
 module unload cudatoolkit 2>/dev/null || true
 module unload cuda 2>/dev/null || true

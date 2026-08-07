@@ -9,8 +9,8 @@
 #SBATCH --output=%x-%j.out
 #SBATCH --error=%x-%j.out
 
-# Template shell. Full 4-path parity (export+build+run):
-#   sbatch src/ML-UMA/examples/delta_parity/run_parity.slurm
+# Template shell. Multi-GPU NaCl6 parity:
+#   cd src/ML-UMA/examples/multi_gpu_nacl6 && ./submit_path_jobs.sh
 
 module unload cudatoolkit 2>/dev/null || true
 module unload cuda 2>/dev/null || true

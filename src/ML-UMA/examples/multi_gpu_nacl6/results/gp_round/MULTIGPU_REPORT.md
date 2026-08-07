@@ -1,5 +1,8 @@
 # UMA multi-GPU NaCl 6×6×6 parity report (`gp_round`)
 
+> **Note (2026-08-07):** Mixed precision (`uma/kk mixed`) is **disabled**. Mixed rows below are commented out (historical only).
+
+
 **Stamp:** 2026-08-07 · Delta A100-SXM4-40GB · uma GP **DONE** · ASE FP64@1 **cached**
 
 ## Ground truth
@@ -31,7 +34,7 @@ ASE FairChem FP64 `workers=1` (no ParallelMLIP): **E = −5830.9237201666 eV**, 
 |------|--------------------------|
 | **All paths** | ASE FairChem FP64 `workers=1` (`oracle_ase_fp64_w1.*`) |
 
-Historical campaign also gated double vs traced `devices=1` and mixed vs ASE
+<!-- DISABLED mixed: Historical campaign also gated double vs traced `devices=1` and mixed vs ASE -->
 float32@1; **do not use those for reported |ΔE| / max|ΔF|** going forward.
 
 ## Timing (ms/eval) — final
@@ -39,7 +42,7 @@ float32@1; **do not use those for reported |ΔE| / max|ΔF|** going forward.
 | Path | ngpu1 | ngpu2 | ngpu4 | Speedup 1→2 | Speedup 1→4 |
 |------|------:|------:|------:|------------:|------------:|
 | uma double | 322.2 | 192.4 | 112.6 | **1.67×** | **2.86×** |
-| uma mixed | 246.4 | 148.7 | 91.2 | **1.66×** | **2.70×** |
+<!-- DISABLED mixed: | uma mixed | 246.4 | 148.7 | 91.2 | **1.66×** | **2.70×** | -->
 
 ## Energy / force parity (vs ASE FP64@1)
 
@@ -48,9 +51,9 @@ float32@1; **do not use those for reported |ΔE| / max|ΔF|** going forward.
 | uma double | 1 | −5830.9237201667 | 322.2 | 1.3×10⁻¹⁰ | 5.0×10⁻⁷ | PASS |
 | uma double | 2 | −5830.9237201666 | 192.4 | ~10⁻¹² | 5.0×10⁻⁷ | PASS |
 | uma double | 4 | −5830.9237201666 | 112.6 | ~10⁻¹² | 5.0×10⁻⁷ | PASS |
-| uma mixed | 1 | −5830.9819335938 | 246.4 | **5.82×10⁻²** | 7.2×10⁻⁶ | FAIL |
-| uma mixed | 2 | −5830.9234143138 | 148.7 | 3.06×10⁻⁴ | 7.0×10⁻⁶ | PASS |
-| uma mixed | 4 | −5830.9235703731 | 91.2 | 1.50×10⁻⁴ | 7.0×10⁻⁶ | PASS |
+<!-- DISABLED mixed: | uma mixed | 1 | −5830.9819335938 | 246.4 | **5.82×10⁻²** | 7.2×10⁻⁶ | FAIL | -->
+<!-- DISABLED mixed: | uma mixed | 2 | −5830.9234143138 | 148.7 | 3.06×10⁻⁴ | 7.0×10⁻⁶ | PASS | -->
+<!-- DISABLED mixed: | uma mixed | 4 | −5830.9235703731 | 91.2 | 1.50×10⁻⁴ | 7.0×10⁻⁶ | PASS | -->
 
 ## Jobs
 
@@ -58,8 +61,8 @@ float32@1; **do not use those for reported |ΔE| / max|ΔF|** going forward.
 |--------|--------|---------|
 | devices=1 | `20901312` | COMPLETED |
 | devices=2 double | `20903160` | PASS |
-| devices=2 mixed | `20903538` | PASS |
-| devices=4 (hung) | `20904146` | TIMEOUT mid mixed NVE |
+<!-- DISABLED mixed: | devices=2 mixed | `20903538` | PASS | -->
+<!-- DISABLED mixed: | devices=4 (hung) | `20904146` | TIMEOUT mid mixed NVE | -->
 | devices=4 | `20907648` | PASS (~4.4 min) |
 
 ## Notes

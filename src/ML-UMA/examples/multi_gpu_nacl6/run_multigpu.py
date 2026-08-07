@@ -12,11 +12,11 @@ MERGE_RESULTS=1          merge into existing parity.json (default for path jobs)
 USE_SLURM_TIMING=1       set by _run_common.sh — ms_per_eval comes from SLURM wall
                          (stamp_slurm_timing.py); Python/Pair timers are debug only
 N_TIMING=5               eval repeats inside run_multigpu; SLURM ms/eval = wall/N_TIMING
-UMA_CHECKPOINT / LMP_UMA / LMP_FC        path overrides (see _repo.py)
+UMA_CHECKPOINT / LMP_UMA / LMP_FC        path overrides (env)
 
 Geometry
 --------
-Always loads frozen ``delta_parity/structures/nacl6_rattle_fixed.extxyz``
+Always loads frozen ``structures/nacl6_rattle_fixed.extxyz``
 (1728 atoms). Never re-rattles.
 
 Multi-GPU recipes
@@ -48,22 +48,78 @@ os.environ.setdefault("PYTHONUNBUFFERED", "1")
 from ase import Atoms
 from ase.data import atomic_masses, chemical_symbols
 
-_EXAMPLES = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_EXAMPLES))
-from _repo import (  # noqa: E402
-    find_checkpoint,
-    find_fairchem_lmp_binary,
-    find_lammps_root,
-    find_uma_engine_root,
-    find_uma_lmp_binary,
-)
-
 from load_geometry import geometry_meta, load_nacl6_fixed  # noqa: E402
 from parity_gates import (  # noqa: E402
     PRECISION_BY_KEY,
     check_gate,
     summarize_gates,
 )
+
+
+def _find_ml_uma_root(start: Path | None = None) -> Path:
+    here = (start or Path(__file__)).resolve()
+    for p in [here, *here.parents]:
+        if (p / "pair_uma.cpp").is_file() and (p / "uma-engine").is_dir():
+            return p
+    raise RuntimeError(
+        "cannot find ML-UMA package root (expected pair_uma.cpp + uma-engine/)"
+    )
+
+
+def find_uma_engine_root(start: Path | None = None) -> Path:
+    return _find_ml_uma_root(start) / "uma-engine"
+
+
+def find_lammps_root(start: Path | None = None) -> Path:
+    return _find_ml_uma_root(start).parent.parent
+
+
+def find_checkpoint() -> Path:
+    env = os.environ.get("UMA_CHECKPOINT")
+    if env:
+        return Path(env).expanduser().resolve()
+    candidates = [
+        find_lammps_root().parent / "uma-cache" / "uma-s-1p2.pt",
+        Path("/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt"),
+    ]
+    for c in candidates:
+        if c.is_file():
+            return c.resolve()
+    raise FileNotFoundError(
+        "uma-s-1p2.pt not found; set UMA_CHECKPOINT=/path/to/uma-s-1p2.pt"
+    )
+
+
+def find_uma_lmp_binary() -> Path:
+    env = os.environ.get("LMP_UMA")
+    if env:
+        return Path(env).expanduser().resolve()
+    root = find_lammps_root()
+    for c in (root / "build-uma" / "lmp", root / "build-uma" / "lmp_kokkos_cuda"):
+        if c.is_file():
+            return c.resolve()
+    raise FileNotFoundError(
+        "local uma/kk LAMMPS binary not found; build build-uma/lmp or set LMP_UMA="
+    )
+
+
+def find_fairchem_lmp_binary() -> Path:
+    env = os.environ.get("LMP_FC")
+    if env:
+        return Path(env).expanduser().resolve()
+    candidates = [
+        Path("/u/xyan11/miniforge3-x86_64/envs/uma312/bin/lmp"),
+        Path(os.environ["CONDA_PREFIX"]) / "bin" / "lmp"
+        if os.environ.get("CONDA_PREFIX")
+        else None,
+    ]
+    for c in candidates:
+        if c is not None and c.is_file():
+            return c.resolve()
+    raise FileNotFoundError(
+        "FairChem LAMMPS binary not found; set LMP_FC=/path/to/conda/bin/lmp"
+    )
+
 
 ENGINE = find_uma_engine_root()
 LAMMPS_ROOT = find_lammps_root()
@@ -683,7 +739,7 @@ def run_uma_kk(
 ) -> dict:
     if not (artifact / "model_traced.pt").is_file():
         raise FileNotFoundError(
-            f"missing {artifact / 'model_traced.pt'} — export with export_omat.py first"
+            f"missing {artifact / 'model_traced.pt'} — export with export_artifact.py first"
         )
     data = work / "data.lmp"
     write_data(atoms, data, title)

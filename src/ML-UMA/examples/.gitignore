@@ -1,9 +1,48 @@
 **/__pycache__/
 *.pyc
 **/log.lammps
+**/log.fix
+**/log.sp
+**/log.nve
+**/log.vesin
 **/*.log
 **/out.*
 **/forces.dump
 **/work/
-delta_parity/results/
 **/build-uma/
+
+# Entire delta_parity suite is local-only (untracked). Geometry for multi-GPU
+# lives under multi_gpu_nacl6/structures/.
+delta_parity/
+
+# Campaign / run artifacts (not source).
+**/results/
+**/*.npz
+**/*.lammpstrj
+**/*.out
+**/*.err
+**/compare_report.json
+**/parity_*report*.json
+**/parity_run.out
+**/sweep_report.json
+**/final_table.json
+**/*_block.json
+**/forces*.npz
+**/CAMPAIGN_STATE.json
+**/f32_diag.json
+**/.coord_agent_done.json
+**/.jobids*
+**/.loop_*
+**/.current_jobid*
+**/.write_agent_done.json
+**/.test_prep_done.json
+**/.review_agent_done.json
+**/traj.lammpstrj
+**/nacl_init.npz
+**/structure*.npz
+**/structure*.txt
+**/*.manifest.json
+
+# Exception: immutable multi-GPU geometry (under multi_gpu_nacl6)
+!multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz
+!multi_gpu_nacl6/structures/nacl6_rattle_fixed.manifest.json

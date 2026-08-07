@@ -1,8 +1,0 @@
-units metal
-atom_style atomic
-boundary p p p
-read_data data.nacl
-neighbor 2.0 bin
-neigh_modify delay 0 every 1 check yes
-thermo 0
-run 0

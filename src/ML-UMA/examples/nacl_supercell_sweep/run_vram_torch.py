@@ -16,12 +16,16 @@ import numpy as np
 import torch
 from ase.build import bulk
 
-_EXAMPLES = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_EXAMPLES))
-from _repo import find_uma_engine_root, find_uma_lmp_root  # noqa: E402
+def _ml_uma_root() -> Path:
+    here = Path(__file__).resolve()
+    for p in [here, *here.parents]:
+        if (p / "pair_uma.cpp").is_file() and (p / "uma-engine").is_dir():
+            return p
+    raise RuntimeError("cannot find ML-UMA (pair_uma.cpp + uma-engine/)")
 
-ROOT = find_uma_lmp_root()
-ENGINE = find_uma_engine_root()
+_ML = _ml_uma_root()
+ENGINE = _ML / "uma-engine"
+ROOT = _ML.parent.parent.parent  # workdir parent of lammps tree (legacy layout)
 
 
 def make_nacl(n: int, a: float = 5.64):

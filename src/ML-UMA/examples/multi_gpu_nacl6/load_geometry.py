@@ -10,8 +10,7 @@ from ase.io import read
 
 EXPECTED_NATOMS = 1728
 FIXED_EXTXYZ = (
-    Path(__file__).resolve().parents[1]
-    / "delta_parity"
+    Path(__file__).resolve().parent
     / "structures"
     / "nacl6_rattle_fixed.extxyz"
 )
@@ -74,10 +73,11 @@ def load_nacl6_fixed(path: Path | None = None) -> Atoms:
             raise TypeError(f"expected a single Atoms frame from {src}")
         atoms.info["source"] = str(src.resolve())
 
-    if len(atoms) != EXPECTED_NATOMS:
+    expected = int(os.environ.get("EXPECTED_NATOMS", str(EXPECTED_NATOMS)))
+    if len(atoms) != expected:
         raise AssertionError(
             f"geometry contract violated: natoms={len(atoms)} "
-            f"(expected {EXPECTED_NATOMS}) from {atoms.info.get('source')}"
+            f"(expected {expected}) from {atoms.info.get('source')}"
         )
     atoms.set_pbc(True)
     return atoms
