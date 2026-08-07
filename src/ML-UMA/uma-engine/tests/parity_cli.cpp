@@ -1,4 +1,5 @@
 // Minimal CLI: load artifact, predict structure (FP32 or FP64 host positions).
+// Optional --devices N selects traced (1) vs FairChem eager GP (>1).
 #include "uma/predictor.h"
 
 #include <cmath>
@@ -27,25 +28,69 @@ static bool load_structure(const std::string& path, std::vector<double>& pos,
   return static_cast<bool>(in) || in.eof();
 }
 
+static void usage(const char* argv0) {
+  std::cerr << "Usage: " << argv0
+            << " <artifact_dir> [structure.txt] [--devices N]\n"
+            << "  devices=1 (default): TorchScript traced Predictor\n"
+            << "  devices>1: FairChem eager graph-parallel (uma_gp_worker.py)\n"
+            << "  Env: UMA_CHECKPOINT, UMA_PYTHON, UMA_GP_WORKER\n";
+}
+
 int main(int argc, char** argv) {
   if (argc < 2) {
-    std::cerr << "Usage: " << argv[0] << " <artifact_dir> [structure.txt]\n";
+    usage(argv[0]);
     return 1;
   }
-  const std::string artifact = argv[1];
+
+  std::string artifact;
+  std::string structure;
+  int num_devices = 1;
+
+  for (int i = 1; i < argc; ++i) {
+    const std::string a = argv[i];
+    if (a == "--devices") {
+      if (i + 1 >= argc) {
+        usage(argv[0]);
+        return 1;
+      }
+      num_devices = std::stoi(argv[++i]);
+    } else if (a == "--help" || a == "-h") {
+      usage(argv[0]);
+      return 0;
+    } else if (artifact.empty()) {
+      artifact = a;
+    } else if (structure.empty()) {
+      structure = a;
+    } else {
+      std::cerr << "Unexpected argument: " << a << "\n";
+      usage(argv[0]);
+      return 1;
+    }
+  }
+
+  if (artifact.empty()) {
+    usage(argv[0]);
+    return 1;
+  }
+  if (num_devices < 1) {
+    std::cerr << "--devices must be >= 1\n";
+    return 1;
+  }
+
   torch::Device device =
       torch::cuda::is_available() ? torch::Device(torch::kCUDA) : torch::Device(torch::kCPU);
-  auto pred = uma::Predictor::from_artifact(artifact, device);
+  auto pred = uma::Predictor::from_artifact(artifact, device, num_devices);
   const bool f64 = pred.compute_dtype() == torch::kFloat64;
-  std::printf("compute_dtype=%s device=%s\n", f64 ? "float64" : "float32",
-              device.is_cuda() ? "cuda" : "cpu");
+  std::printf("compute_dtype=%s device=%s devices=%d gp=%s\n",
+              f64 ? "float64" : "float32", device.is_cuda() ? "cuda" : "cpu",
+              pred.num_devices(), pred.uses_graph_parallel() ? "yes" : "no");
 
   std::vector<double> pos;
   std::vector<int> z;
   std::vector<double> cell;
-  if (argc >= 3) {
-    if (!load_structure(argv[2], pos, z, cell)) {
-      std::cerr << "Failed to read structure " << argv[2] << "\n";
+  if (!structure.empty()) {
+    if (!load_structure(structure, pos, z, cell)) {
+      std::cerr << "Failed to read structure " << structure << "\n";
       return 1;
     }
   } else {

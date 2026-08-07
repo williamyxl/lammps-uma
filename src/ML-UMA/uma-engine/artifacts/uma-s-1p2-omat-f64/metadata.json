@@ -20,6 +20,7 @@
     "predict_untrained_hessian": [],
     "hessian_vmap": true,
     "auto_add_default_untrained_tasks": true,
+    "max_atoms": null,
     "_target_": "fairchem.core.units.mlip_unit.api.inference.InferenceSettings"
   },
   "cutoff": 6.0,
@@ -134,10 +135,10 @@
     ]
   },
   "atom_refs": null,
-  "checkpoint_path": "/mnt/d/workdir/uma-cache/uma-s-1p2.pt",
+  "checkpoint_path": "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt",
   "checkpoint_revision": null,
   "export_notes": [
-    "torch.jit.trace succeeded -> uma-engine/artifacts/uma-s-1p2-omat-f64/model_traced.pt",
+    "torch.jit.trace succeeded -> /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64/model_traced.pt",
     "forces via C++ torch::autograd::grad on differentiable energy module",
     "positions float64; energy float64; forces float64"
   ],

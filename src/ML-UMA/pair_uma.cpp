@@ -29,6 +29,10 @@
 
 #include "uma/predictor.h"
 
+#ifdef LMP_KOKKOS
+#include "kokkos.h"
+#endif
+
 #include <cstring>
 
 using namespace LAMMPS_NS;
@@ -62,6 +66,8 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   predictor = nullptr;
   cutoff = 6.0;
   precision = PRECISION_MIXED;
+  num_devices = 1;
+  devices_explicit = false;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -154,9 +160,13 @@ void PairUMA::compute(int eflag, int vflag)
 
 void PairUMA::settings(int narg, char **arg)
 {
-  // pair_style uma/kk [precision mixed|double]
+  // pair_style uma/kk [precision mixed|double] [devices N]
   // Default: mixed (FP32 positions/energy, FP64 forces) — same naming as GPU/INTEL.
+  // Default devices=1 (traced LibTorch). If devices omitted and Kokkos ngpus>1,
+  // load_predictor() auto-sets devices=ngpus.
   precision = PRECISION_MIXED;
+  num_devices = 1;
+  devices_explicit = false;
 
   int iarg = 0;
   while (iarg < narg) {
@@ -169,6 +179,13 @@ void PairUMA::settings(int narg, char **arg)
       else
         error->all(FLERR, "Illegal pair_style uma precision {}; expected mixed or double",
                    arg[iarg + 1]);
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "devices") == 0) {
+      if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
+      num_devices = utils::inumeric(FLERR, arg[iarg + 1], false, lmp);
+      if (num_devices < 1)
+        error->all(FLERR, "Illegal pair_style uma devices {}; must be >= 1", num_devices);
+      devices_explicit = true;
       iarg += 2;
     } else if (strcmp(arg[iarg], "mixed") == 0) {
       // bare token alias (optional)
@@ -214,9 +231,29 @@ void PairUMA::load_predictor()
   delete predictor;
   predictor = nullptr;
   try {
-    auto device =
-        torch::cuda::is_available() ? torch::Device(torch::kCUDA) : torch::Device(torch::kCPU);
-    predictor = new uma::Predictor(uma::Predictor::from_artifact(artifact_dir, device));
+    if (!devices_explicit) {
+#ifdef LMP_KOKKOS
+      if (lmp->kokkos && lmp->kokkos->ngpus > 1) {
+        num_devices = lmp->kokkos->ngpus;
+        utils::logmesg(lmp,
+                       "Pair uma: devices auto-set to Kokkos ngpus={} "
+                       "(omit devices N to keep this; pass devices 1 to force traced)\n",
+                       num_devices);
+      }
+#endif
+    }
+
+    // For devices>1 fork the GP worker before any parent CUDA init.
+    torch::Device device = torch::Device(torch::kCPU);
+    if (num_devices <= 1) {
+      device = torch::cuda::is_available() ? torch::Device(torch::kCUDA)
+                                           : torch::Device(torch::kCPU);
+    }
+    predictor =
+        new uma::Predictor(uma::Predictor::from_artifact(artifact_dir, device, num_devices));
+    if (num_devices <= 1 && predictor->device().is_cuda()) {
+      device = predictor->device();
+    }
     cutoff = predictor->metadata().cutoff;
 
     // Align engine compute dtype with pair_style precision (must match artifact export).
@@ -226,9 +263,10 @@ void PairUMA::load_predictor()
 
     utils::logmesg(lmp,
                    "Pair uma: loaded artifact '{}' cutoff={:.3f} device={} precision={} "
-                   "(pos/energy {}, forces float64)\n",
+                   "devices={} gp={} (pos/energy {}, forces float64)\n",
                    artifact_dir, cutoff, device.str(),
-                   (precision == PRECISION_DOUBLE) ? "double" : "mixed",
+                   (precision == PRECISION_DOUBLE) ? "double" : "mixed", num_devices,
+                   predictor->uses_graph_parallel() ? "fairchem_eager_python" : "traced",
                    (precision == PRECISION_DOUBLE) ? "float64" : "float32");
   } catch (const std::exception &e) {
     error->all(FLERR, "Failed to load UMA artifact '{}': {}", artifact_dir, e.what());

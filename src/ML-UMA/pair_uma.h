@@ -54,6 +54,8 @@ class PairUMA : public Pair {
   int *map;    // map type -> atomic number (0 unused)
   double cutoff;
   int precision;    // PRECISION_MIXED or PRECISION_DOUBLE
+  int num_devices;  // graph-parallel GPU count (1 = traced Predictor)
+  bool devices_explicit;  // true if pair_style set devices N
 
   uma::Predictor *predictor;
   std::vector<float> pos_buf;

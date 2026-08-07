@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
+#include "uma/graph_parallel.h"
 #include "uma/neighbor_list.h"
 #include "uma/postprocess.h"
 #include "uma/vesin_nl.h"
@@ -37,11 +38,13 @@ void disable_torchscript_texpr_once() {
 namespace uma {
 
 Predictor::Predictor(torch::jit::script::Module module, torch::Device device,
-                     ArtifactMetadata metadata)
+                     ArtifactMetadata metadata, int num_devices)
     : module_(std::move(module)),
+      has_traced_module_(true),
       device_(device),
       metadata_(std::move(metadata)),
-      compute_dtype_(metadata_.compute_dtype) {
+      compute_dtype_(metadata_.compute_dtype),
+      num_devices_(num_devices) {
   disable_torchscript_texpr_once();
   module_.eval();
   module_.to(device_);
@@ -53,15 +56,46 @@ Predictor::Predictor(torch::jit::script::Module module, torch::Device device,
   spin_ = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(device_));
 }
 
+Predictor::Predictor(std::unique_ptr<GraphParallelRuntime> gp, torch::Device device,
+                     ArtifactMetadata metadata, int num_devices)
+    : has_traced_module_(false),
+      gp_(std::move(gp)),
+      device_(device),
+      metadata_(std::move(metadata)),
+      compute_dtype_(metadata_.compute_dtype),
+      num_devices_(num_devices) {
+  disable_torchscript_texpr_once();
+  if (metadata_.element_references.defined()) {
+    // Denorm/refs happen inside FairChem for the GP path; keep refs for API symmetry.
+    element_refs_ =
+        metadata_.element_references.to(torch::kCPU, compute_dtype_).contiguous();
+  }
+}
+
+Predictor::~Predictor() = default;
+Predictor::Predictor(Predictor&&) noexcept = default;
+Predictor& Predictor::operator=(Predictor&&) noexcept = default;
+
 Predictor Predictor::from_artifact(const std::string& artifact_dir,
-                                   torch::Device device) {
+                                   torch::Device device, int num_devices) {
+  if (num_devices < 1) {
+    throw std::runtime_error("from_artifact: num_devices must be >= 1");
+  }
+  const std::string metadata_path = artifact_dir + "/metadata.json";
+  auto metadata = load_artifact_metadata(metadata_path);
+
+  if (num_devices > 1) {
+    // Fork GP worker BEFORE parent touches CUDA (avoid CUDA-before-fork hazards).
+    auto gp = GraphParallelRuntime::create(artifact_dir, metadata, num_devices,
+                                           metadata.compute_dtype);
+    return Predictor(std::move(gp), torch::Device(torch::kCPU), std::move(metadata),
+                     num_devices);
+  }
+
   device = resolve_device(device);
   const std::string traced_path = artifact_dir + "/model_traced.pt";
-  const std::string metadata_path = artifact_dir + "/metadata.json";
-
   auto module = torch::jit::load(traced_path, device);
-  auto metadata = load_artifact_metadata(metadata_path);
-  return Predictor(std::move(module), device, std::move(metadata));
+  return Predictor(std::move(module), device, std::move(metadata), /*num_devices=*/1);
 }
 
 void Predictor::set_compute_dtype(torch::ScalarType dtype) {
@@ -75,6 +109,10 @@ void Predictor::set_compute_dtype(torch::ScalarType dtype) {
   }
   compute_dtype_ = dtype;
   n_cached_ = -1;
+  if (gp_) {
+    // Worker already initialized with artifact dtype at create(); dtype must match.
+    return;
+  }
   if (metadata_.element_references.defined()) {
     element_refs_ =
         metadata_.element_references.to(device_, compute_dtype_).contiguous();
@@ -130,6 +168,12 @@ Prediction Predictor::predict(const torch::Tensor& pos,
                               const torch::Tensor& cell,
                               const torch::Tensor& pbc, int64_t charge,
                               int64_t spin) {
+  if (gp_) {
+    return gp_->predict(pos, atomic_numbers, cell, pbc, charge, spin);
+  }
+  if (!has_traced_module_) {
+    throw std::runtime_error("Predictor: no traced module and no GP runtime");
+  }
   if (!pos.defined() || pos.dim() != 2 || pos.size(1) != 3) {
     throw std::runtime_error("pos must be [N,3]");
   }
@@ -202,6 +246,13 @@ Prediction Predictor::predict_host(int n, const float* pos_xyz,
                                    const int* atomic_numbers,
                                    const double* cell_3x3, const int* pbc_3,
                                    double* forces_out_optional) {
+  if (gp_) {
+    // Promote host FP32 positions to FP64 for the GP worker protocol.
+    std::vector<double> pos_d(static_cast<size_t>(n) * 3);
+    for (int i = 0; i < n * 3; ++i) pos_d[static_cast<size_t>(i)] = pos_xyz[i];
+    return gp_->predict_host(n, pos_d.data(), atomic_numbers, cell_3x3, pbc_3,
+                             forces_out_optional);
+  }
   auto pos = torch::from_blob(const_cast<float*>(pos_xyz), {n, 3},
                               torch::kFloat32)
                  .clone();
@@ -233,6 +284,10 @@ Prediction Predictor::predict_host(int n, const double* pos_xyz,
                                    const int* atomic_numbers,
                                    const double* cell_3x3, const int* pbc_3,
                                    double* forces_out_optional) {
+  if (gp_) {
+    return gp_->predict_host(n, pos_xyz, atomic_numbers, cell_3x3, pbc_3,
+                             forces_out_optional);
+  }
   auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3},
                               torch::kFloat64)
                  .clone();

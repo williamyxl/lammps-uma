@@ -1,0 +1,33 @@
+{
+  "path": "src/ML-UMA/examples/delta_parity/structures/nacl6_rattle_fixed.extxyz",
+  "natoms": 1728,
+  "cell": [
+    [
+      33.839999999999996,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      33.839999999999996,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      33.839999999999996
+    ]
+  ],
+  "perturbation": {
+    "mode": "uniform_box",
+    "delta_A": 0.1,
+    "seed": 0,
+    "source_npz": "src/ML-UMA/examples/delta_parity/structures/structure_nacl6_rattle.npz"
+  },
+  "coordinate_format": "12 significant digits (.12g)",
+  "pbc": [
+    true,
+    true,
+    true
+  ]
+}

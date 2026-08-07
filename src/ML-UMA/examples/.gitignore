@@ -5,3 +5,5 @@
 **/out.*
 **/forces.dump
 **/work/
+delta_parity/results/
+**/build-uma/

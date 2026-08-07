@@ -17,6 +17,8 @@ struct ArtifactMetadata {
   double normalizer_rmsd = 1.0;
   torch::ScalarType compute_dtype = torch::kFloat32;
   torch::Tensor element_references;  // [num_elements] or empty
+  /// Optional path to scientific UMA checkpoint (eager GP for devices>1).
+  std::string checkpoint_path;
 };
 
 ArtifactMetadata load_artifact_metadata(const std::string& metadata_path);

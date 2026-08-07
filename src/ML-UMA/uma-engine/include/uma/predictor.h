@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,9 +12,11 @@
 
 namespace uma {
 
+class GraphParallelRuntime;
+
 struct Prediction {
   double energy = 0.0;   // physical energy (FP32 or FP64 model → host double)
-  /// Forces [N,3] float64; typically on the engine device.
+  /// Forces [N,3] float64; typically on the engine device (traced) or CPU (GP).
   torch::Tensor forces;
 };
 
@@ -22,10 +25,21 @@ struct Prediction {
 /// Compute dtype (positions, cell, energy) is set from artifact metadata and
 /// may be overridden via set_compute_dtype() for LAMMPS `precision mixed|double`.
 /// Forces are always FP64.
+///
+/// ``num_devices == 1``: TorchScript ``model_traced.pt`` on a single device.
+/// ``num_devices > 1``: FairChem eager graph-parallel via ``GraphParallelRuntime``
+/// (``uma_gp_worker.py`` / ``load_predict_unit(..., workers=N)``).
 class Predictor {
  public:
   static Predictor from_artifact(const std::string& artifact_dir,
-                                 torch::Device device = torch::kCUDA);
+                                 torch::Device device = torch::kCUDA,
+                                 int num_devices = 1);
+
+  ~Predictor();
+  Predictor(Predictor&&) noexcept;
+  Predictor& operator=(Predictor&&) noexcept;
+  Predictor(const Predictor&) = delete;
+  Predictor& operator=(const Predictor&) = delete;
 
   Prediction predict(const torch::Tensor& pos,             // [N,3]
                      const torch::Tensor& atomic_numbers,  // [N] int64
@@ -49,20 +63,27 @@ class Predictor {
   const ArtifactMetadata& metadata() const { return metadata_; }
   torch::Device device() const { return device_; }
   torch::ScalarType compute_dtype() const { return compute_dtype_; }
+  int num_devices() const { return num_devices_; }
+  bool uses_graph_parallel() const { return static_cast<bool>(gp_); }
 
  private:
   Predictor(torch::jit::script::Module module, torch::Device device,
-            ArtifactMetadata metadata);
+            ArtifactMetadata metadata, int num_devices);
+  Predictor(std::unique_ptr<GraphParallelRuntime> gp, torch::Device device,
+            ArtifactMetadata metadata, int num_devices);
 
   void ensure_buffers(int64_t n);
   void rebuild_neighbors();
 
   torch::jit::script::Module module_;
+  bool has_traced_module_ = false;
+  std::unique_ptr<GraphParallelRuntime> gp_;
   torch::Device device_;
   ArtifactMetadata metadata_;
   torch::ScalarType compute_dtype_ = torch::kFloat32;
+  int num_devices_ = 1;
 
-  // Persistent device tensors (reused when N unchanged).
+  // Persistent device tensors (reused when N unchanged). Traced path only.
   int64_t n_cached_ = -1;
   torch::Tensor pos_;              // compute_dtype [N,3]
   torch::Tensor atomic_numbers_;   // int64 [N]

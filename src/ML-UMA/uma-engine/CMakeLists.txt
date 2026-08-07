@@ -18,6 +18,7 @@ add_library(uma_engine
   src/neighbor_list.cpp
   src/postprocess.cpp
   src/predictor.cpp
+  src/graph_parallel.cpp
 )
 target_include_directories(uma_engine
   PUBLIC
@@ -25,6 +26,9 @@ target_include_directories(uma_engine
     $<INSTALL_INTERFACE:include>
 )
 target_link_libraries(uma_engine PUBLIC ${TORCH_LIBRARIES})
+# Locate uma_gp_worker.py for devices>1 FairChem eager GP backend.
+target_compile_definitions(uma_engine PRIVATE
+  "UMA_ENGINE_PYTHON_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/python\"")
 if(UMA_ENGINE_USE_CUDA)
   target_compile_definitions(uma_engine PUBLIC UMA_ENGINE_USE_CUDA)
 endif()

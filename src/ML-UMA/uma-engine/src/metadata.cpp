@@ -131,6 +131,12 @@ ArtifactMetadata load_artifact_metadata(const std::string& metadata_path) {
   meta.compute_dtype = parse_compute_dtype(json);
   meta.element_references =
       parse_json_double_array(energy_task, "element_references");
+  // Optional: used by GraphParallelRuntime (devices>1) eager FairChem path.
+  try {
+    meta.checkpoint_path = parse_json_string(json, "checkpoint_path");
+  } catch (const std::exception&) {
+    meta.checkpoint_path.clear();
+  }
   return meta;
 }
 
