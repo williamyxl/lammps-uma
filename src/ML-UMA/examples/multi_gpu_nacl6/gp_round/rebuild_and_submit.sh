@@ -4,8 +4,8 @@
 #
 # Usage:
 #   ./gp_round/rebuild_and_submit.sh           # dry-run checklist only
-#   ./gp_round/rebuild_and_submit.sh --submit # rebuild + sbatch ngpu1, ngpu2
-#   ./gp_round/rebuild_and_submit.sh --submit --ngpu4  # also submit 4-GPU
+#   ./gp_round/rebuild_and_submit.sh --submit # rebuild + path-isolated gp jobs
+#   ./gp_round/rebuild_and_submit.sh --submit --ngpu4  # also 4-GPU path jobs
 
 set -euo pipefail
 
@@ -91,20 +91,16 @@ bash "${ROOT}/scripts/build_lammps_uma.sh"
 test -x "${ROOT}/build-uma/lmp" || { echo "ERROR: build-uma/lmp missing" >&2; exit 1; }
 
 mkdir -p "${GP}"
-JOBIDS="${GP}/.jobids"
-: > "${JOBIDS}"
 
 cd "${EX}"
-jid1=$(sbatch --parsable "${GP}/run_ngpu1.slurm")
-echo "run_ngpu1.slurm ${jid1}" | tee -a "${JOBIDS}"
-
-jid2=$(sbatch --parsable --dependency=afterok:${jid1} "${GP}/run_ngpu2.slurm")
-echo "run_ngpu2.slurm ${jid2} (afterok:${jid1})" | tee -a "${JOBIDS}"
-
+# Path-isolated submit (one ONLY_PATHS per job). Chain: d1 double → d1 mixed → d2 …
+export RECOMPILE=0  # already rebuilt above
 if [[ "${SUBMIT_NGPU4}" == "1" ]]; then
-  jid4=$(sbatch --parsable --dependency=afterok:${jid2} "${GP}/run_ngpu4.slurm")
-  echo "run_ngpu4.slurm ${jid4} (afterok:${jid2})" | tee -a "${JOBIDS}"
+  "${EX}/submit_path_jobs.sh" --gp --ngpus 1,2,4
+else
+  "${EX}/submit_path_jobs.sh" --gp --ngpus 1,2
 fi
-
-echo "Wrote ${JOBIDS}"
+JOBIDS="${GP}/.jobids_isolated"
+cp -f "${JOBIDS}" "${GP}/.jobids"
+echo "Wrote ${JOBIDS} (and ${GP}/.jobids)"
 cat "${JOBIDS}"

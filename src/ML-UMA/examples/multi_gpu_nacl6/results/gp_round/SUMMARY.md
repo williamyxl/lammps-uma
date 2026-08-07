@@ -1,11 +1,15 @@
-# NaCl 6×6×6 multi-GPU parity summary
+# NaCl 6×6×6 multi-GPU parity summary (`gp_round`)
 
-Fixed geometry `nacl6_rattle_fixed.extxyz` (1728 atoms, δ=0.1 Å seed=0). uma/kk uses Kokkos same-node multi-GPU (`lmp -k on g N -sf kk`, `pair_style uma/kk ... devices N`, `--ntasks=1`). ASE/FC use FairChem `workers=N` in one process. ASE + uma/kk double are FP64.
+Fixed geometry `nacl6_rattle_fixed.extxyz` (1728 atoms, δ=0.1 Å seed=0).
 
-- **Reference energy:** ASE FP64 @ ngpu1 = `—` eV
-- **uma d1 gate reference:** devices=1 @ ngpu1
+**Backend:** `devices=1` = traced LibTorch; `devices>1` = FairChem eager GP (`GraphParallelRuntime`). Double = FP64.
+
+**Final speedups (not 1.00×):** double **2.86×** and mixed **2.70×** from 1→4 GPUs. The historical 1.00× was Kokkos `g N` alone (single-device LibTorch).
+
+- **ASE FP64 @1 ground truth:** −5830.9237201666 eV (`oracle_ase_fp64_w1.*`)
+- **E/F policy:** always vs ASE FP64@1 (not traced-d1 / ASE-f32 campaign oracles)
 - **ngpus present:** [1, 2, 4]
-- **parity gates (uma vs d1):** 4/4 passed (all_passed=True)
+- **vs ASE FP64:** double PASS; mixed@1 FAIL (~58 meV); mixed GP@2/4 PASS (~0.15–0.31 meV)
 
 ### Thresholds (uma vs devices=1)
 
@@ -36,9 +40,9 @@ Fixed geometry `nacl6_rattle_fixed.extxyz` (1728 atoms, δ=0.1 Å seed=0). uma/k
 
 ## Timing matrix (ms/eval)
 
-| Path | ngpu1 | ngpu2 | ngpu4 |
-|------|------|------|------|
-| uma/kk double | 322.2 | 192.4 | 112.6 |
-| uma/kk mixed | 246.4 | 148.7 | 91.2 |
+| Path | ngpu1 | ngpu2 | ngpu4 | 1→2 | 1→4 |
+|------|------:|------:|------:|----:|----:|
+| uma double | 322.2 | 192.4 | 112.6 | 1.67× | **2.86×** |
+| uma mixed | 246.4 | 148.7 | 91.2 | 1.66× | **2.70×** |
 
-Machine-readable: `SUMMARY.json`.
+Machine-readable: `SUMMARY.json`. Canonical narrative: `RESULTS.md` / `MULTIGPU_REPORT.md`.

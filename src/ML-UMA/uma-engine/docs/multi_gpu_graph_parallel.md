@@ -54,22 +54,26 @@ Artifacts:
 Long-term: native LibTorch / c10d multi-process GP preferred for in-process
 latency; this round prioritizes parity with ASE `workers=N`.
 
-## Parity thresholds (`devices=N` vs same-precision oracle)
+## Parity thresholds (`devices=N` vs oracle)
 
 Frozen geometry: `examples/delta_parity/structures/nacl6_rattle_fixed.extxyz`.
 
-| Mode | Oracle | \|ΔE\| | max \|ΔF\| | force cosine |
-|------|--------|--------|------------|--------------|
-| double | uma traced `devices=1` | ≲ 1e-8 eV (prefer ~1e-10) | ≲ 1e-6 eV/Å | ≥ 1 − 1e-12 |
-| mixed | ASE FairChem `float32` `workers=1` | ≲ 5e-4 eV | ≲ 1e-5 eV/Å | ≥ 1 − 1e-10 |
+**Permanent ground truth (record once):** ASE FairChem **FP64**, `workers=1`, no
+ParallelMLIPPredictUnit — energy + forces cached at
+`examples/multi_gpu_nacl6/results/gp_round/oracle_ase_fp64_w1.{json,npz}`
+(E = −5830.9237201666 eV on NaCl6). Recompute only if geometry or checkpoint changes.
+
+| Mode | Oracle (gp_round as run) | \|ΔE\| | max \|ΔF\| | force cosine |
+|------|--------------------------|--------|------------|--------------|
+| double | uma traced `devices=1` (future: ASE FP64@1 cache) | ≲ 1e-8 eV (prefer ~1e-10) | ≲ 1e-6 eV/Å | ≥ 1 − 1e-12 |
+| mixed | ASE FairChem `float32` `workers=1` (future: ASE FP64@1 with looser band) | ≲ 5e-4 eV | ≲ 1e-5 eV/Å | ≥ 1 − 1e-10 |
 
 **Why mixed ≠ traced `devices=1`:** FairChem eager `base_precision_dtype=float32`
 (including `workers=1` and GP `workers=N`) stays within ~1e-4 of FP64 on NaCl6
 (`E≈−5830.9237`), while traced mixed artifact energy is `E≈−5830.9819`
-(`|ΔE|≈0.058`). GP mixed therefore gates against ASE FairChem float32@1 (same
-eager path family). Evidence: `examples/multi_gpu_nacl6/gp_round/f32_diag.json`.
+(`|ΔE|≈0.058`). Evidence: `examples/multi_gpu_nacl6/gp_round/f32_diag.json`.
 
-Secondary oracle: uma double vs ASE FP64@1 (~1e-10 class energy).
+Secondary: uma double vs ASE FP64@1 cache (~1e-10 class energy).
 
 ## Engine / CLI
 

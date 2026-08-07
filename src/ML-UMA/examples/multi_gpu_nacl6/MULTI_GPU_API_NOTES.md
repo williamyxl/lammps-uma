@@ -2,6 +2,15 @@
 
 Short reference for the three stacks used by `run_multigpu.py`.
 
+**VRAM isolation:** submit **one** `ONLY_PATHS` value per SLURM job
+(`./submit_path_jobs.sh`). Multi-path in one allocation is refused unless
+`ALLOW_MULTI_PATH=1`.
+
+**Timing:** `_run_common.sh` measures wall time of `run_multigpu.py` and
+`stamp_slurm_timing.py` writes that as the sole `ms_per_eval`
+(`1000 * wall_s / N_TIMING`). Python/Pair internal timers are not the
+reported result.
+
 ## FairChem ASE — `workers=`
 
 Installed signature (`fairchem.core.units.mlip_unit.load_predict_unit` in `uma312`):

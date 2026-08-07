@@ -15,18 +15,21 @@ cd /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6
 - [ ] `python -m py_compile run_multigpu.py parity_gates.py collect_results.py`
 - [ ] `pair_style uma/kk precision double devices 2` accepted by `lmp -h` or smoke `run 0`
 
-## Submit order
+## Submit order (path-isolated — one path per job)
 
-1. **ngpu1** — establishes `devices=1` baseline (`ONLY_PATHS=uma_double,uma_mixed`)
-2. **ngpu2** — parity gate vs ngpu1 (`devices=2`)
-3. **ngpu4** — only after ngpu2 gates green
+VRAM isolation: **never** `ONLY_PATHS=uma_double,uma_mixed` in one allocation.
+
+1. **ngpu1 uma_double** then **ngpu1 uma_mixed** — devices=1 baselines
+2. **ngpu2** double then mixed — parity vs ngpu1 / ASE FP64
+3. **ngpu4** — only after ngpu2 green
 
 ```bash
 ./gp_round/rebuild_and_submit.sh --submit
 # optional 4-GPU after 2-GPU green:
 ./gp_round/rebuild_and_submit.sh --submit --ngpu4
+# or directly:
+RECOMPILE=1 ./submit_path_jobs.sh --gp --ngpus 1,2,4
 ```
-
 ## Parity gates (vs devices=1, same precision)
 
 | Mode   | \|ΔE\| max | max \|ΔF\| | cosine min |

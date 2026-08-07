@@ -11,6 +11,30 @@ set -euo pipefail
 
 : "${NGPUS:?NGPUS must be set (1|2|4)}"
 
+# ---------------------------------------------------------------------------
+# VRAM isolation policy: exactly ONE path per SLURM job.
+# Multi-path ONLY_PATHS in one allocation contaminates GPU memory across
+# ASE / FairChem Ray / uma Kokkos / LibTorch. Use run_ngpuN_<path>.slurm or
+# ALLOW_MULTI_PATH=1 for rare login-node debugging only.
+# ---------------------------------------------------------------------------
+_only="${ONLY_PATHS:-}"
+if [[ -z "${_only}" ]]; then
+  echo "ERROR: ONLY_PATHS must be set to exactly one of: ase|fc|uma_double|uma_mixed" >&2
+  echo "  (VRAM isolation — see README; ./submit_path_jobs.sh)" >&2
+  exit 2
+fi
+# strip spaces; count comma-separated entries
+_only_compact="${_only// /}"
+if [[ "${_only_compact}" == *","* ]] && [[ "${ALLOW_MULTI_PATH:-0}" != "1" ]]; then
+  echo "ERROR: ONLY_PATHS='${_only}' has multiple paths — refuse (VRAM isolation)." >&2
+  echo "  Submit separate jobs (run_ngpu${NGPUS}_<path>.slurm) or ALLOW_MULTI_PATH=1." >&2
+  exit 2
+fi
+if [[ "${ALLOW_MULTI_PATH:-0}" == "1" ]]; then
+  echo "WARNING: ALLOW_MULTI_PATH=1 — multi-path in one job (VRAM contamination risk)"
+fi
+export MERGE_RESULTS="${MERGE_RESULTS:-1}"
+
 ROOT=/work/nvme/bfzx/xyan11/workdir/lammps-uma
 EX=${ROOT}/src/ML-UMA/examples/multi_gpu_nacl6
 ENG=${ROOT}/src/ML-UMA/uma-engine
@@ -78,9 +102,29 @@ if [[ ! -f "${EX}/run_multigpu.py" ]]; then
   exit 2
 fi
 
+# ---------------------------------------------------------------------------
+# Sole timing source: SLURM wall of run_multigpu.py (not Python/Pair timers).
+# Rebuild / collect_results / report writers stay outside the timed region.
+# ---------------------------------------------------------------------------
+export USE_SLURM_TIMING=1
+echo "=== SLURM timing start (USE_SLURM_TIMING=1, N_TIMING=${N_TIMING}) ==="
+_t0=$(date +%s.%N)
 python "${EX}/run_multigpu.py"
+_rc=$?
+_t1=$(date +%s.%N)
+if [[ "${_rc}" -ne 0 ]]; then
+  echo "ERROR: run_multigpu.py failed rc=${_rc}" >&2
+  exit "${_rc}"
+fi
+_wall=$(awk -v a="${_t0}" -v b="${_t1}" 'BEGIN { printf "%.9f", b - a }')
+echo "=== SLURM timing end: wall_s=${_wall} ==="
+python "${EX}/stamp_slurm_timing.py" \
+  --results-dir "${RESULTS_DIR}" \
+  --wall-s "${_wall}" \
+  --n-timing "${N_TIMING}" \
+  --paths "${ONLY_PATHS}"
 
-# Optional post-job merge if all ngpu results exist (idempotent)
+# Optional post-job merge if all ngpu results exist (idempotent) — untimed
 export RESULTS_PARENT="${RESULTS_PARENT:-${EX}/results}"
 if [[ -f "${EX}/collect_results.py" ]]; then
   python "${EX}/collect_results.py" || true
@@ -89,5 +133,5 @@ if [[ -f "${EX}/write_multigpu_reports.py" ]]; then
   python "${EX}/write_multigpu_reports.py" || true
 fi
 
-echo "DONE ngpu=${NGPUS}"
+echo "DONE ngpu=${NGPUS} ONLY_PATHS=${ONLY_PATHS} slurm_wall_s=${_wall}"
 nvidia-smi --query-gpu=memory.used,memory.total --format=csv || true

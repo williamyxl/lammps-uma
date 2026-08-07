@@ -116,22 +116,64 @@ SLURM sets `CUDA_VISIBLE_DEVICES` to the allocated GPUs. Do not remap unless
 debugging. Kokkos `g N` counts devices in the visible set (so request
 `--gpus-per-node=NGPUS`).
 
+## Timing policy (SLURM wall only)
+
+Reported `ms_per_eval` is **only** from the SLURM script wall clock around
+`python run_multigpu.py`:
+
+```text
+ms_per_eval = 1000 * slurm_wall_s / N_TIMING
+```
+
+- Timed region: `run_multigpu.py` alone (load + evals + path teardown).
+- Not timed: module load, rebuild, `collect_results`, report writers.
+- Python CUDA-loop / LAMMPS Pair timers are kept as `ms_per_eval_python` for
+  debug only and are **not** used in reports/canvas.
+- Artifact: `results/.../timing_slurm.json` + `parity.json` → `timing_policy`.
+
+## VRAM isolation (required)
+
+**One path per SLURM job.** Running ASE + FC + uma in the same allocation
+leaves Ray/NCCL/Kokkos/LibTorch state on the GPUs and skews later timings.
+
+| Do | Don't |
+|----|-------|
+| `sbatch run_ngpu2_ase.slurm` | `ONLY_PATHS=ase,fc,uma_double` in one job |
+| `./submit_path_jobs.sh` | deprecated `run_ngpu{1,2,4}.slurm` multi-path |
+| `./submit_path_jobs.sh --gp` | `ONLY_PATHS=uma_double,uma_mixed` |
+
+Scripts: `run_ngpu{N}_{ase,fc,uma_double,uma_mixed}.slurm` and
+`gp_round/run_ngpu{N}_{uma_double,uma_mixed}.slurm` (regenerate with
+`./generate_path_jobs.sh`). Escape hatch: `ALLOW_MULTI_PATH=1` (login debug only).
+
 ## How to run
 
-### gp_round (graph-parallel `devices N` campaign)
+### Preferred — path-isolated submit
 
 ```bash
 cd /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6
 
-# Dry-run checklist (no sbatch)
-./gp_round/rebuild_and_submit.sh
+# All suite paths × 1/2/4 GPUs (chained afterok)
+./submit_path_jobs.sh
 
-# After WRITE lands devices N + rebuild:
-./gp_round/rebuild_and_submit.sh --submit
+# gp_round uma only
+RECOMPILE=1 ./submit_path_jobs.sh --gp
+
+# ASE+FC @4 only
+./submit_path_jobs.sh --paths ase,fc --ngpus 4
 ```
 
-Defaults: `ONLY_PATHS=uma_double,uma_mixed`, `RECOMPILE=1`, results under
-`results/gp_round/ngpu{N}/`. See [`gp_round/DRY_RUN_CHECKLIST.md`](gp_round/DRY_RUN_CHECKLIST.md).
+### gp_round (graph-parallel `devices N` campaign)
+
+```bash
+./gp_round/rebuild_and_submit.sh            # dry-run
+./gp_round/rebuild_and_submit.sh --submit   # rebuild + isolated double/mixed jobs
+./gp_round/rebuild_and_submit.sh --submit --ngpu4
+```
+
+Defaults: **one** of `uma_double` / `uma_mixed` per job, `RECOMPILE=1` on rebuild
+step, results under `results/gp_round/ngpu{N}/`. See
+[`gp_round/DRY_RUN_CHECKLIST.md`](gp_round/DRY_RUN_CHECKLIST.md).
 
 ### Manual / dev (login or interactive GPU)
 
@@ -145,17 +187,18 @@ module load cuda/12.8
 export NGPUS=2
 export UMA_DEVICES=2
 export N_TIMING=5
-export ONLY_PATHS=uma_double,uma_mixed
+export ONLY_PATHS=uma_double          # ONE path
+export MERGE_RESULTS=1
 export RESULTS_DIR=src/ML-UMA/examples/multi_gpu_nacl6/results/gp_round/ngpu2
 
 python src/ML-UMA/examples/multi_gpu_nacl6/run_multigpu.py
 ```
 
-Outputs under `results/ngpu${NGPUS}/`:
+Outputs under `results/ngpu${NGPUS}/` (suite) or `results/gp_round/ngpu${NGPUS}/`:
 
 | File | Content |
 |------|---------|
-| `parity.json` | Energies, ms/eval, force errors vs ASE, multi-GPU notes |
+| `parity.json` | Energies, ms/eval, force errors vs ASE (merged across path jobs) |
 | `forces.npz` | Per-atom forces + energies for each path |
 | `run.log` | Human-readable log |
 

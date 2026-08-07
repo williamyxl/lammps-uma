@@ -2,7 +2,11 @@
 
 **Stamp:** 2026-08-07 (Delta A100-SXM4-40GB, `gpuA100x4`)  
 **Suite:** `src/ML-UMA/examples/multi_gpu_nacl6/gp_round/`  
-**Status:** **DONE** — ngpu1 / ngpu2 / ngpu4 double+mixed gates all **PASS**
+**Status:** **DONE** — ngpu1/2/4 complete · E/F reported **vs ASE FP64@1**
+
+**ASE FP64@1 ground truth (sole E/F oracle):** `oracle_ase_fp64_w1.{json,npz}` —  
+E = **−5830.9237201666 eV**, forces `(1728, 3)` float64, `workers=1`, no ParallelMLIP  
+(source: promoted from `results/ngpu1/`).
 
 ---
 
@@ -36,15 +40,9 @@
 | 1 | Traced LibTorch `Predictor` (`pair_style uma/kk`) |
 | N>1 | FairChem eager GP via `GraphParallelRuntime` → `uma_gp_worker.py` (`pair_style uma`, no Kokkos; Ray owns GPUs) |
 
-**Oracles**
-
-| Mode | Gate reference |
-|------|----------------|
-| double | uma traced `devices=1` |
-| mixed | ASE FairChem `float32` `workers=1` (traced mixed disagrees ~0.058 eV on NaCl6) |
-
-Mixed `|ΔE|` threshold: **5×10⁻⁴** eV (FairChem float32 w1↔w2 ~1.4×10⁻⁴).
-
+**Oracle (policy):** all |ΔE| / max|ΔF| vs ASE FairChem FP64 `workers=1`
+(`oracle_ase_fp64_w1.*`). Historical harness also checked double vs traced
+`devices=1` and mixed vs ASE float32@1 — superseded for reported E/F.
 ---
 
 ## Timing (ms / eval) — uma GP
@@ -54,25 +52,40 @@ Mixed `|ΔE|` threshold: **5×10⁻⁴** eV (FairChem float32 w1↔w2 ~1.4×10�
 | double | 322.2 | 192.4 | 112.6 | **2.86×** |
 | mixed | 246.4 | 148.7 | 91.2 | **2.70×** |
 
+### Strong scaling
+
+Fixed problem size (1728 atoms). \(S(N)=t_1/t_N\), \(\eta=S/N\).
+
+| N | Ideal | double S (η) | mixed S (η) |
+|--:|------:|-------------:|------------:|
+| 1 | 1× | 1.00× (100%) | 1.00× (100%) |
+| 2 | 2× | 1.67× (84%) | 1.66× (83%) |
+| 4 | 4× | 2.86× (71%) | 2.70× (68%) |
+
+Canvas plot: `canvases/uma-multigpu-nacl6-results.canvas.tsx`.
+
 ---
 
-## Parity gates (vs oracle)
+## Parity (vs ASE FP64@1)
 
 | Path | ngpu | \|ΔE\| | max \|ΔF\| | gate |
 |------|------|--------|------------|------|
-| double | 2 | 1.3×10⁻¹⁰ | 0 | PASS |
-| double | 4 | 1.3×10⁻¹⁰ | 0 | PASS |
-| mixed | 2 | 1.9×10⁻⁴ | 7.0×10⁻⁷ | PASS |
-| mixed | 4 | 7.7×10⁻⁵ | 7.3×10⁻⁷ | PASS |
+| double | 1 | 1.3×10⁻¹⁰ | 5.0×10⁻⁷ | PASS |
+| double | 2 | ~10⁻¹² | 5.0×10⁻⁷ | PASS |
+| double | 4 | ~10⁻¹² | 5.0×10⁻⁷ | PASS |
+| mixed | 1 | **5.82×10⁻²** | 7.2×10⁻⁶ | FAIL |
+| mixed | 2 | 3.06×10⁻⁴ | 7.0×10⁻⁶ | PASS |
+| mixed | 4 | 1.50×10⁻⁴ | 7.0×10⁻⁶ | PASS |
 
 ---
 
 ## Findings
 
-1. **Graph-parallel uma scales** on same-node 2/4 A100s for this 1728-atom cell (unlike prior Kokkos-only `g N` SP).
-2. **Double** matches traced `devices=1` at ~1e-10 energy / zero force max.
-3. **Mixed GP** matches ASE FairChem float32@1 within 5e-4; do not gate vs traced mixed artifact energy.
+1. **Graph-parallel uma scales** on same-node 2/4 A100s: double **2.86×** / mixed **2.70×** (1→4) for this 1728-atom cell — **final answer, not the legacy 1.00×**.
+2. **Double** matches ASE FP64@1 at ~1e-10–1e-12 energy / ~5e-7 force max.
+3. **Mixed GP** @2/4 agrees with ASE FP64 within ~0.3 meV; **traced mixed @1 FAIL**s (~58 meV).
 4. **devices=4 mixed NVE** can hang (job `20904146`); successful rerun `20907648` completed cleanly.
+5. Kokkos `-k on g N` alone (pre-GP) stayed ~1.00× — historical contrast only.
 
 ---
 

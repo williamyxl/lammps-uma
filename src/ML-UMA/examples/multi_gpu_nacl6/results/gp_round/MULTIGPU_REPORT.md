@@ -1,66 +1,69 @@
-# UMA multi-GPU NaCl 6×6×6 parity report
+# UMA multi-GPU NaCl 6×6×6 parity report (`gp_round`)
+
+**Stamp:** 2026-08-07 · Delta A100-SXM4-40GB · uma GP **DONE** · ASE FP64@1 **cached**
+
+## Ground truth
+
+ASE FairChem FP64 `workers=1` (no ParallelMLIP): **E = −5830.9237201666 eV**, forces `(1728,3)` in  
+`oracle_ase_fp64_w1.{json,npz}` (promoted from `results/ngpu1/`).
 
 ## Setup
 
 - **System:** NaCl 6×6×6 rocksalt, 1728 atoms
 - **Structure (immutable):** `src/ML-UMA/examples/delta_parity/structures/nacl6_rattle_fixed.extxyz`
-- **Perturbation:** uniform_box δ=0.1 Å seed=0 (fixed extxyz — never re-rattle)
-- **Reference:** ASE FairChem FP64 @ ngpu=1
-- **ASE@ngpu1 energy:** `—` eV
-- **uma/kk launch:** `lmp -k on g ${NGPUS} -sf kk (ntasks=1, no MPI multi-GPU)`
-- **uma pair_style:** `pair_style uma/kk precision <mode> devices ${UMA_DEVICES}`
-- **ASE/FC:** `workers=${NGPUS} in one process`
-- **Precision:** ASE + uma/kk double = FP64
-- **Parity gates (uma vs devices=1):** 4/4 passed (all_passed=True)
+- **Perturbation:** uniform_box δ=0.1 Å seed=0 (fixed — never re-rattle)
+- **ASE@1 energy (legacy ASE path):** −5830.9237201666 eV
+- **Precision:** uma double = FP64; mixed = explicit lower-precision path
+- **Parity gates:** 4/4 passed (`all_passed=True`)
 
-Force metrics vs ASE are secondary oracle. **Primary GP gate:** uma/kk `devices=N` vs `devices=1` at same precision.
+### Backend
 
-### Parity thresholds (vs devices=1)
+| `devices` | Mechanism |
+|-----------|-----------|
+| 1 | Traced LibTorch `Predictor` (`pair_style uma/kk`) |
+| N>1 | FairChem eager GP via `GraphParallelRuntime` → `uma_gp_worker.py` (`pair_style uma`; Ray owns GPUs) |
 
-| Mode | |ΔE| max | max |ΔF| | cosine min |
-|------|----------|------------|------------|
-| double | 1.000e-08 | 1.000e-06 | 1.00e+00 |
-| mixed | 5.000e-04 | 1.000e-05 | 1.00e+00 |
+**Final speedup is not 1.00×.** The flat ~1× figure applied only to the earlier Kokkos `-k on g N` recipe where LibTorch stayed single-device. Graph-parallel `devices=N` scales.
 
-## uma vs devices=1 (graph-parallel gate)
+### Oracles / comparison policy
 
-| Path | ngpu | devices | |dE| vs d1 | max |ΔF| vs d1 | cosine vs d1 | gate |
-|------|------|---------|------------|----------------|--------------|------|
-| uma/kk double | 1 | 1 | — | 0 | 1.000000 | PASS |
-| uma/kk double | 2 | 2 | 1.282e-10 | 0 | 1.000000 | PASS |
-| uma/kk double | 4 | 4 | 1.282e-10 | 0 | 1.000000 | PASS |
-| uma/kk mixed | 1 | 1 | — | 0 | 1.000000 | PASS |
-| uma/kk mixed | 2 | 2 | 1.925e-04 | 6.958e-07 | 1.000000 | PASS |
-| uma/kk mixed | 4 | 4 | 7.663e-05 | 7.309e-07 | 1.000000 | PASS |
+| Mode | E/F comparison reference |
+|------|--------------------------|
+| **All paths** | ASE FairChem FP64 `workers=1` (`oracle_ase_fp64_w1.*`) |
 
-## Path × ngpu table (vs ASE)
+Historical campaign also gated double vs traced `devices=1` and mixed vs ASE
+float32@1; **do not use those for reported |ΔE| / max|ΔF|** going forward.
 
-| Path | ngpu | Energy (eV) | ms/eval | |dE| vs ASE@ngpu1 | Force MAE | Force RMSE | max abs dF_i | Cosine |
-|------|------|-------------|---------|------------------|----------|-----------|--------------|--------|
-| uma/kk double | 1 | -5830.9237201667 | 322.2 | — | — | — | — | — |
-| uma/kk double | 2 | -5830.9237201666 | 192.4 | — | — | — | — | — |
-| uma/kk double | 4 | -5830.9237201666 | 112.6 | — | — | — | — | — |
-| uma/kk mixed | 1 | -5830.9819335938 | 246.4 | — | — | — | — | — |
-| uma/kk mixed | 2 | -5830.9234143138 | 148.7 | — | — | — | — | — |
-| uma/kk mixed | 4 | -5830.9235703731 | 91.2 | — | — | — | — | — |
+## Timing (ms/eval) — final
 
-## Timing (ms/eval)
+| Path | ngpu1 | ngpu2 | ngpu4 | Speedup 1→2 | Speedup 1→4 |
+|------|------:|------:|------:|------------:|------------:|
+| uma double | 322.2 | 192.4 | 112.6 | **1.67×** | **2.86×** |
+| uma mixed | 246.4 | 148.7 | 91.2 | **1.66×** | **2.70×** |
 
-| Path | ngpu1 | ngpu2 | ngpu4 |
-|------|------|------|------|
-| uma/kk double | 322.2 | 192.4 | 112.6 |
-| uma/kk mixed | 246.4 | 148.7 | 91.2 |
+## Energy / force parity (vs ASE FP64@1)
 
-## Energy |dE| vs ASE@ngpu1 (eV)
+| Path | ngpu | Energy (eV) | ms/eval | \|ΔE\| vs ASE FP64 | max \|ΔF\| | gate |
+|------|------|-------------|---------|--------------------|------------|------|
+| uma double | 1 | −5830.9237201667 | 322.2 | 1.3×10⁻¹⁰ | 5.0×10⁻⁷ | PASS |
+| uma double | 2 | −5830.9237201666 | 192.4 | ~10⁻¹² | 5.0×10⁻⁷ | PASS |
+| uma double | 4 | −5830.9237201666 | 112.6 | ~10⁻¹² | 5.0×10⁻⁷ | PASS |
+| uma mixed | 1 | −5830.9819335938 | 246.4 | **5.82×10⁻²** | 7.2×10⁻⁶ | FAIL |
+| uma mixed | 2 | −5830.9234143138 | 148.7 | 3.06×10⁻⁴ | 7.0×10⁻⁶ | PASS |
+| uma mixed | 4 | −5830.9235703731 | 91.2 | 1.50×10⁻⁴ | 7.0×10⁻⁶ | PASS |
 
-| Path | ngpu1 | ngpu2 | ngpu4 |
-|------|------|------|------|
-| uma/kk double | — | — | — |
-| uma/kk mixed | — | — | — |
+## Jobs
+
+| Config | Job ID | Outcome |
+|--------|--------|---------|
+| devices=1 | `20901312` | COMPLETED |
+| devices=2 double | `20903160` | PASS |
+| devices=2 mixed | `20903538` | PASS |
+| devices=4 (hung) | `20904146` | TIMEOUT mid mixed NVE |
+| devices=4 | `20907648` | PASS (~4.4 min) |
 
 ## Notes
 
-- Kokkos multi-GPU is **same-node** via `-k on g N`; SLURM uses `--ntasks=1` (no `srun -n N` / mpirun across GPUs).
-- uma/kk graph-parallel: `pair_style uma/kk precision <mode> devices N` shards UMA inference across GPUs (engine GP runtime).
-- ASE and FairChem FC use FairChem `workers=N` in a single process.
-- Machine-readable merge: `gp_round/SUMMARY.json`.
+- Machine-readable: `gp_round/SUMMARY.json`, `ngpu{1,2,4}/parity.json`, `forces.npz`.
+- Narrative summary: `gp_round/RESULTS.md`.
+- Next policy: **done** — gate / report E+F vs cached ASE FairChem FP64 `workers=1`.

@@ -6,7 +6,12 @@ Environment
 NGPUS=1|2|4              number of GPUs (default 1)
 UMA_DEVICES=NGPUS        uma/kk ``devices`` in pair_style (default NGPUS)
 N_TIMING=5               timed evals / NVE steps
-ONLY_PATHS=uma_double,uma_mixed,...   optional subset (gp_round defaults uma only)
+ONLY_PATHS=<one path>    required under SLURM: ase|fc|uma_double|uma_mixed
+                         (multi-path needs ALLOW_MULTI_PATH=1; prefer separate jobs)
+MERGE_RESULTS=1          merge into existing parity.json (default for path jobs)
+USE_SLURM_TIMING=1       set by _run_common.sh — ms_per_eval comes from SLURM wall
+                         (stamp_slurm_timing.py); Python/Pair timers are debug only
+N_TIMING=5               eval repeats inside run_multigpu; SLURM ms/eval = wall/N_TIMING
 UMA_CHECKPOINT / LMP_UMA / LMP_FC        path overrides (see _repo.py)
 
 Geometry
