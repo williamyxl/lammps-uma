@@ -1,20 +1,19 @@
 # COORD ANALYSIS — NaCl6 multi-GPU
 
-> **Note (2026-08-07):** Mixed precision disabled. See [`RESULTS.md`](RESULTS.md) for the canonical stamp.
+> Prefer [`RESULTS.md`](RESULTS.md). Mixed disabled.
 
-**Geometry:** `structures/nacl6_rattle_fixed.extxyz` (1728 atoms)
+**Stamp:** 2026-08-07 ~17:50 CDT · Geometry: `structures/nacl6_rattle_fixed.extxyz`
 
-## Timing (canonical GP / FairChem workers)
+## Timing (today path-isolated ASE/FC + gp_round uma)
 
-| path | 1×GPU ms | 2×GPU ms | 4×GPU ms | 1→4 |
-|------|--------:|--------:|--------:|----:|
-| ASE FP64 | 396.1 | 191.9 | **117.7** | **3.37×** |
-| FC fix-ext | 345.0 | 194.8 | PENDING | — |
-| uma/kk double (GP) | 322.2 | 192.4 | 112.6 | 2.86× |
+| path | 1× ms | 2× ms | 4× ms | 1→2 | 1→4 | jobs |
+|------|------:|------:|------:|----:|----:|------|
+| ASE FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× | `20910344`/`48`/`52` |
+| FC | 345.5 | 193.2 | PENDING | 1.79× | — | `20910345`/`49`/`53` |
+| uma double GP | 322.2 | 192.4 | 112.6 | 1.67× | 2.86× | gp_round |
 
 ## Findings
 
-1. ASE Ray workers scale ~2.1× @2 and **~3.4× @4**.
-2. uma GraphParallelRuntime double: **~2.9× @4** (not flat Kokkos-only).
-3. FC @4 still pending to close the prior-art table.
-4. OOM / max-N for larger cells: **N\*=10** (see `multi_node_nacl6` SWEEP).
+1. ASE `workers=N` still ~**2× @2** and ~**3.4× @4** on re-measure.
+2. FC ~**1.8× @2**; @4 still pending.
+3. uma GP double ~**2.9× @4**.
