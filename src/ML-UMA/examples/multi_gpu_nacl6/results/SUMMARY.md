@@ -1,64 +1,39 @@
 # NaCl 6×6×6 multi-GPU parity summary
 
-Fixed geometry `nacl6_rattle_fixed.extxyz` (1728 atoms, δ=0.1 Å seed=0). uma/kk uses Kokkos same-node multi-GPU (`lmp -k on g N -sf kk`, `pair_style uma/kk ... devices N`, `--ntasks=1`). ASE/FC use FairChem `workers=N` in one process. ASE + uma/kk double are FP64.
+**Stamp:** 2026-08-07 ~18:00 CDT · Canonical detail: [`RESULTS.md`](RESULTS.md)
 
-- **Reference energy:** ASE FP64 @ ngpu1 = `-5830.9237201666` eV
-- **uma d1 gate reference:** devices=1 @ ngpu1
-- **ngpus present:** [1, 2, 4]
-- **parity gates (uma vs d1):** 2/2 passed (all_passed=True)
+Fixed geometry `structures/nacl6_rattle_fixed.extxyz` (1728 atoms). ASE/FC: FairChem `workers=N`. uma/kk: `lmp -k on g N -sf kk`, `pair_style uma/kk precision double devices N`. Mixed disabled.
 
-## Honest path-isolated timing (prefer over SLURM wall/`N_TIMING` below)
+- **Oracle:** ASE FP64 @1 = `−5830.9237201666` eV
+- **uma vs devices=1 gates:** **3/3 PASS**
+- **Jobs:** ASE `20910344/48/52` · FC `20910345/49/53` · uma_double `20910346/50/54`
+
+## Honest timing (ms/eval)
 
 | Path | 1 GPU | 2 GPU | 4 GPU | 1→2 | 1→4 |
 |------|------:|------:|------:|----:|----:|
-| ASE FairChem FP64 | 396.5 ms | 193.9 ms | 115.2 ms | 2.04× | 3.44× |
-| FairChem FC | 345.5 ms | 193.2 ms | 118.0 ms | 1.79× | 2.93× |
-| uma double (GP) | 322.2 ms | 192.4 ms | 112.6 ms | 1.67× | 2.86× |
+| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× |
+| FairChem FC | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× |
+| uma/kk double | 320.4 | 192.0 | 112.6 | 1.67× | 2.85× |
 
-Source: ASE log lines / `fc_result_early.json` / gp_round. Canonical write-up: [`RESULTS.md`](RESULTS.md).
+## Energy + forces vs ASE FP64@1
 
-### Thresholds (uma vs devices=1)
+| Path | ngpu | Energy (eV) | \|ΔE\| | Force MAE | Force RMSE | max \|ΔFᵢ\| | Cosine |
+|------|-----:|-------------:|-------:|----------:|-----------:|------------:|-------:|
+| ASE FP64 | 1/2/4 | −5830.9237201666 | ~0 | 0 | 0 | 0 | 1.0 |
+| FairChem FC | 1/2/4 | −5830.9237152511 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 1.0 |
+| uma/kk double | 1 | −5830.9237201667 | 1.23×10⁻¹⁰ | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 1.0 |
+| uma/kk double | 2 | −5830.9237201666 | 1.82×10⁻¹² | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 1.0 |
+| uma/kk double | 4 | −5830.9237201666 | 9.09×10⁻¹³ | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 1.0 |
 
-| Mode | |ΔE| max | max |ΔF| | cosine min |
-|------|----------|------------|------------|
-| double | 1.000e-08 | 1.000e-06 | 1.00e+00 |
-| mixed | 5.000e-04 | 1.000e-05 | 1.00e+00 |
+## uma/kk double vs devices=1
 
-| Path | ngpu | devices | Energy (eV) | ms/eval | |dE| vs ASE@ngpu1 | |dE| vs uma@d1 | max |ΔF| vs d1 | cosine vs d1 | gate |
-|------|------|---------|-------------|---------|-----------------------|---------------|----------------|--------------|------|
-| ASE FP64 | 1 | 4 | -5830.9237201666 | 8.71 s | — | — | — | — | — |
-| ASE FP64 | 2 | 4 | -5830.9237201666 | 17.55 s | 2.728e-12 | — | — | — | — |
-| ASE FP64 | 4 | 4 | -5830.9237201666 | 11.26 s | 3.638e-12 | — | — | — | — |
-| FairChem FC | 1 | 4 | -5830.9237152511 | 4.65 s | 4.915e-06 | — | — | — | — |
-| FairChem FC | 2 | 4 | -5830.9237152511 | 10.36 s | 4.915e-06 | — | — | — | — |
-| FairChem FC | 4 | 4 | -5830.9237152511 | 9.86 s | 4.915e-06 | — | — | — | — |
-| uma/kk double | 1 | 1 | -5830.9237201667 | 6.15 s | 1.228e-10 | — | 0 | 1.000000 | PASS |
-| uma/kk double | 2 | 2 | -5830.9237201666 | 24.00 s | 4.547e-12 | 1.273e-10 | 0 | 1.000000 | PASS |
-| uma/kk mixed | 1 | 1 | -5830.9824218750 | 5.84 s | 5.870e-02 | — | 0 | 1.000000 | PASS |
-| uma/kk mixed | 2 | 2 | -5830.9234688666 | 24.28 s | 2.513e-04 | 2.968e-04 | 7.010e-07 | 1.000000 | PASS |
+| ngpu | \|ΔE\| vs d1 | max \|ΔF\| vs d1 | cosine | gate |
+|-----:|-------------:|-----------------:|-------:|:----:|
+| 1 | — | 0 | 1.0 | PASS |
+| 2 | 1.27×10⁻¹⁰ | 0 | 1.0 | PASS |
+| 4 | 1.27×10⁻¹⁰ | 0 | 1.0 | PASS |
 
-## Legacy force table (vs ASE)
+Thresholds (double): \|ΔE\| ≤ 1×10⁻⁸ · max\|ΔF\| ≤ 1×10⁻⁶.
 
-| Path | ngpu | Energy (eV) | ms/eval | |dE| vs ASE@ngpu1 (eV) | Force MAE | Force RMSE | max abs dF_i | max norm dF_atom | Cosine |
-|------|------|-------------|---------|-----------------------|----------|-----------|--------------|------------------|--------|
-| ASE FP64 | 1 | -5830.9237201666 | 8.71 s | — | — | — | — | — | — |
-| ASE FP64 | 2 | -5830.9237201666 | 17.55 s | 2.728e-12 | 0 | 0 | 0 | 0 | 1.000000 |
-| ASE FP64 | 4 | -5830.9237201666 | 11.26 s | 3.638e-12 | 0 | 0 | 0 | 0 | 1.000000 |
-| FairChem FC | 1 | -5830.9237152511 | 4.65 s | 4.915e-06 | — | — | — | — | — |
-| FairChem FC | 2 | -5830.9237152511 | 10.36 s | 4.915e-06 | — | — | — | — | — |
-| FairChem FC | 4 | -5830.9237152511 | 9.86 s | 4.915e-06 | — | — | — | — | — |
-| uma/kk double | 1 | -5830.9237201667 | 6.15 s | 1.228e-10 | 1.516e-07 | 2.179e-07 | 5.000e-07 | 7.673e-07 | 1.000000 |
-| uma/kk double | 2 | -5830.9237201666 | 24.00 s | 4.547e-12 | 1.516e-07 | 2.179e-07 | 5.000e-07 | 7.673e-07 | 1.000000 |
-| uma/kk mixed | 1 | -5830.9824218750 | 5.84 s | 5.870e-02 | 1.055e-06 | 1.397e-06 | 7.243e-06 | 7.479e-06 | 1.000000 |
-| uma/kk mixed | 2 | -5830.9234688666 | 24.28 s | 2.513e-04 | 1.061e-06 | 1.404e-06 | 7.243e-06 | 7.479e-06 | 1.000000 |
-
-## Timing matrix (ms/eval)
-
-| Path | ngpu1 | ngpu2 | ngpu4 |
-|------|------|------|------|
-| ASE FP64 | 8.71 s | 17.55 s | 11.26 s |
-| FairChem FC | 4.65 s | 10.36 s | 9.86 s |
-| uma/kk double | 6.15 s | 24.00 s | — |
-| uma/kk mixed | 5.84 s | 24.28 s | — |
-
-Machine-readable: `SUMMARY.json`.
+> Auto-merged `SUMMARY.json` / SLURM wall `ms_per_eval` values are contaminated — ignore them for scaling.

@@ -1,0 +1,172 @@
+{
+  "stamp": "2026-08-07T18:00:00-05:00",
+  "natoms": 1728,
+  "geometry": "structures/nacl6_rattle_fixed.extxyz",
+  "oracle_energy_eV": -5830.9237201666,
+  "precision": "double/FP64 only (mixed disabled)",
+  "note": "Honest ms from path-isolated job logs / fc_result_early.json; not SLURM wall/N_TIMING.",
+  "jobs": {
+    "ase": [
+      "20910344",
+      "20910348",
+      "20910352"
+    ],
+    "fc": [
+      "20910345",
+      "20910349",
+      "20910353"
+    ],
+    "uma_double": [
+      "20910346",
+      "20910350",
+      "20910354"
+    ]
+  },
+  "timing_ms": {
+    "ASE FairChem FP64": [
+      396.5,
+      193.9,
+      115.2
+    ],
+    "FairChem FC": [
+      345.5,
+      193.2,
+      118.0
+    ],
+    "uma/kk double": [
+      320.4,
+      192.0,
+      112.6
+    ]
+  },
+  "speedup": {
+    "ASE FairChem FP64": {
+      "1to2": 2.04,
+      "1to4": 3.44
+    },
+    "FairChem FC": {
+      "1to2": 1.79,
+      "1to4": 2.93
+    },
+    "uma/kk double": {
+      "1to2": 1.67,
+      "1to4": 2.85
+    }
+  },
+  "vs_ase_fp64": [
+    {
+      "path": "ASE FP64",
+      "ngpu": 1,
+      "energy_eV": -5830.9237201666,
+      "abs_dE": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "cosine": 1.0
+    },
+    {
+      "path": "ASE FP64",
+      "ngpu": 2,
+      "energy_eV": -5830.9237201666,
+      "abs_dE": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "cosine": 1.0
+    },
+    {
+      "path": "ASE FP64",
+      "ngpu": 4,
+      "energy_eV": -5830.9237201666,
+      "abs_dE": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "cosine": 1.0
+    },
+    {
+      "path": "FairChem FC",
+      "ngpu": 1,
+      "energy_eV": -5830.9237152511,
+      "abs_dE": 4.915e-06,
+      "force_mae": 1.002e-06,
+      "force_rmse": 1.343e-06,
+      "force_max_abs": 7.123e-06,
+      "cosine": 1.0
+    },
+    {
+      "path": "FairChem FC",
+      "ngpu": 2,
+      "energy_eV": -5830.9237152511,
+      "abs_dE": 4.915e-06,
+      "force_mae": 1.002e-06,
+      "force_rmse": 1.343e-06,
+      "force_max_abs": 7.123e-06,
+      "cosine": 1.0
+    },
+    {
+      "path": "FairChem FC",
+      "ngpu": 4,
+      "energy_eV": -5830.9237152511,
+      "abs_dE": 4.915e-06,
+      "force_mae": 1.002e-06,
+      "force_rmse": 1.343e-06,
+      "force_max_abs": 7.123e-06,
+      "cosine": 1.0
+    },
+    {
+      "path": "uma/kk double",
+      "ngpu": 1,
+      "energy_eV": -5830.9237201667,
+      "abs_dE": 1.23e-10,
+      "force_mae": 1.516e-07,
+      "force_rmse": 2.179e-07,
+      "force_max_abs": 5e-07,
+      "cosine": 1.0
+    },
+    {
+      "path": "uma/kk double",
+      "ngpu": 2,
+      "energy_eV": -5830.9237201666,
+      "abs_dE": 1.82e-12,
+      "force_mae": 1.516e-07,
+      "force_rmse": 2.179e-07,
+      "force_max_abs": 5e-07,
+      "cosine": 1.0
+    },
+    {
+      "path": "uma/kk double",
+      "ngpu": 4,
+      "energy_eV": -5830.9237201666,
+      "abs_dE": 9.09e-13,
+      "force_mae": 1.516e-07,
+      "force_rmse": 2.179e-07,
+      "force_max_abs": 5e-07,
+      "cosine": 1.0
+    }
+  ],
+  "uma_vs_d1": [
+    {
+      "ngpu": 1,
+      "abs_dE": null,
+      "force_max_abs": 0.0,
+      "cosine": 1.0,
+      "gate": "PASS"
+    },
+    {
+      "ngpu": 2,
+      "abs_dE": 1.273e-10,
+      "force_max_abs": 0.0,
+      "cosine": 1.0,
+      "gate": "PASS"
+    },
+    {
+      "ngpu": 4,
+      "abs_dE": 1.273e-10,
+      "force_max_abs": 0.0,
+      "cosine": 1.0,
+      "gate": "PASS"
+    }
+  ],
+  "parity_gates_passed": "3/3"
+}
