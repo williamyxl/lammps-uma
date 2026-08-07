@@ -1,0 +1,9 @@
+{
+  "role": "COORD",
+  "utc": "2026-08-07T14:22:00+00:00",
+  "tick": "hourly_10",
+  "status": "DONE",
+  "ngpu4_job": 20907648,
+  "all_passed": true,
+  "loop": "stopped"
+}

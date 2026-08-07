@@ -1,0 +1,194 @@
+{
+  "ngpus": 2,
+  "uma_devices": 2,
+  "n_timing": 5,
+  "gpu_name": "NVIDIA A100-SXM4-40GB",
+  "torch_cuda_device_count": 2,
+  "CUDA_VISIBLE_DEVICES": "0,1",
+  "checkpoint": "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt",
+  "reference": "ASE FAIRChemCalculator FP64",
+  "uma_d1_reference": "uma/kk devices=1 @ ngpu1 (same precision)",
+  "lmp_uma": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/build-uma/lmp",
+  "lmp_fc": "/u/xyan11/miniforge3-x86_64/envs/uma312/bin/lmp",
+  "artifacts": {
+    "double": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64",
+    "mixed": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat"
+  },
+  "geometry": {
+    "source": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/delta_parity/structures/nacl6_rattle_fixed.extxyz",
+    "manifest": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/delta_parity/structures/nacl6_rattle_fixed.manifest.json",
+    "natoms": 1728,
+    "cell": [
+      [
+        33.84,
+        0.0,
+        0.0
+      ],
+      [
+        0.0,
+        33.84,
+        0.0
+      ],
+      [
+        0.0,
+        0.0,
+        33.84
+      ]
+    ],
+    "perturbation": {
+      "mode": "uniform_box",
+      "delta_A": 0.1,
+      "seed": 0,
+      "note": "Frozen; do not regenerate. Coordinates .12g in extxyz."
+    }
+  },
+  "fp64_policy": "ASE and uma/kk double use FP64. FairChem FC may build cell in FP32. uma/kk mixed is an explicit separate path.",
+  "multi_gpu": {
+    "ase_fc": "load_predict_unit(..., workers=NGPUS) \u2192 Ray ParallelMLIPPredictUnit",
+    "uma_kk": "single MPI rank: lmp -k on g 2 -sf kk; pair_style uma/kk ... devices 2; no mpirun domain decomp"
+  },
+  "parity_gates_summary": {
+    "all_passed": true,
+    "n_checked": 2,
+    "n_passed": 2,
+    "gates": [
+      {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 1.2823875294998288e-10,
+          "force_max_abs_vs_uma_d1": 0.0,
+          "cosine_vs_uma_d1": 1.0
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true
+      },
+      {
+        "applicable": true,
+        "precision": "mixed",
+        "thresholds": {
+          "abs_dE_max": 0.0005,
+          "force_max_abs_max": 1e-05,
+          "cosine_min": 0.9999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 0.00019253456775913946,
+          "force_max_abs_vs_uma_d1": 6.957569122501006e-07,
+          "cosine_vs_uma_d1": 0.999999999998967
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true,
+        "oracle": "ase_fairchem_float32_workers1"
+      }
+    ]
+  },
+  "paths_run": [
+    "uma_mixed"
+  ],
+  "paths_merged": true,
+  "rows": [
+    {
+      "path": "uma/kk precision double",
+      "key": "uma_double",
+      "energy_eV": -5830.923720166595,
+      "ms_per_eval": 192.436,
+      "lmp_uma": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/build-uma/lmp",
+      "artifact": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64",
+      "pair_section_s": 0.96218,
+      "kokkos_gpus": 2,
+      "uma_devices": 2,
+      "pair_style": "pair_style uma precision double devices 2",
+      "multi_gpu_note": "argv: lmp (no -k/-sf kk; devices>1 Ray GP). pair_style: pair_style uma precision double devices 2. Avoids parent CUDA/Kokkos holding GPU 0 during FairChem workers.",
+      "abs_dE_vs_ase_f64": null,
+      "force_mae": null,
+      "force_rmse": null,
+      "force_max_abs": null,
+      "force_max_norm_per_atom": null,
+      "cosine": null,
+      "abs_dE_vs_uma_d1": 1.2823875294998288e-10,
+      "force_mae_vs_uma_d1": 0.0,
+      "force_rmse_vs_uma_d1": 0.0,
+      "force_max_abs_vs_uma_d1": 0.0,
+      "cosine_vs_uma_d1": 1.0,
+      "parity_gate": {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 1.2823875294998288e-10,
+          "force_max_abs_vs_uma_d1": 0.0,
+          "cosine_vs_uma_d1": 1.0
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true
+      }
+    },
+    {
+      "path": "uma/kk precision mixed",
+      "key": "uma_mixed",
+      "energy_eV": -5830.923414313762,
+      "ms_per_eval": 148.686,
+      "lmp_uma": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/build-uma/lmp",
+      "artifact": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat",
+      "pair_section_s": 0.74343,
+      "kokkos_gpus": 2,
+      "uma_devices": 2,
+      "pair_style": "pair_style uma precision mixed devices 2",
+      "multi_gpu_note": "argv: lmp (no -k/-sf kk; devices>1 Ray GP). pair_style: pair_style uma precision mixed devices 2. Avoids parent CUDA/Kokkos holding GPU 0 during FairChem workers.",
+      "abs_dE_vs_ase_f64": null,
+      "force_mae": null,
+      "force_rmse": null,
+      "force_max_abs": null,
+      "force_max_norm_per_atom": null,
+      "cosine": null,
+      "abs_dE_vs_uma_d1": 0.00019253456775913946,
+      "force_mae_vs_uma_d1": 1.7161068566898518e-07,
+      "force_rmse_vs_uma_d1": 2.2857112496580297e-07,
+      "force_max_abs_vs_uma_d1": 6.957569122501006e-07,
+      "cosine_vs_uma_d1": 0.999999999998967,
+      "d1_oracle": "ase_fairchem_float32_workers1",
+      "parity_gate": {
+        "applicable": true,
+        "precision": "mixed",
+        "thresholds": {
+          "abs_dE_max": 0.0005,
+          "force_max_abs_max": 1e-05,
+          "cosine_min": 0.9999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 0.00019253456775913946,
+          "force_max_abs_vs_uma_d1": 6.957569122501006e-07,
+          "cosine_vs_uma_d1": 0.999999999998967
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true,
+        "oracle": "ase_fairchem_float32_workers1"
+      }
+    }
+  ]
+}
