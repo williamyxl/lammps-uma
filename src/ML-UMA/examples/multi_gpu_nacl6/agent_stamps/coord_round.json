@@ -1,0 +1,15 @@
+{
+  "role": "COORD",
+  "stamp": "2026-08-07T18:22:00-05:00",
+  "plan": "libtorch_multi-gpu_kokkos_20de0136",
+  "active_phase": "0b_blocked_escalate",
+  "queue": "gpuA100x4",
+  "cadence": "devices=2 then devices=4",
+  "tick_interval_min": 5,
+  "tick_log": "agent_stamps/coord_tick.log",
+  "notes": [
+    "Phase 0 docs + graph_shard.h + UMA_FORBID_RAY_GP landed",
+    "Phase 0b BLOCKED: C++ cannot load Hydra ckpt; traced opaque to MP GP",
+    "Do not authorize Ray pivot; need export/AOT or C++ MP+state_dict decision"
+  ]
+}

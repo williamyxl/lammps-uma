@@ -55,7 +55,10 @@ endif()
 add_executable(uma_parity_cli tests/parity_cli.cpp)
 target_link_libraries(uma_parity_cli PRIVATE uma_engine)
 
-install(TARGETS uma_engine uma_parity_cli
+add_executable(graph_shard_smoke tests/graph_shard_smoke.cpp)
+target_link_libraries(graph_shard_smoke PRIVATE uma_engine)
+
+install(TARGETS uma_engine uma_parity_cli graph_shard_smoke
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin

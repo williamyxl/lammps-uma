@@ -1,0 +1,18 @@
+{
+  "role": "WRITE",
+  "stamp": "2026-08-07T18:22:00-05:00",
+  "phase": "0_and_0c_partial",
+  "backend_claimed": "Kokkos+LibTorch+vesin (target; not yet wired for devices>1)",
+  "files": [
+    "uma-engine/docs/native_kokkos_libtorch_gp.md",
+    "uma-engine/docs/multi_gpu_graph_parallel.md",
+    "uma-engine/include/uma/graph_shard.h",
+    "uma-engine/tests/graph_shard_smoke.cpp",
+    "uma-engine/src/predictor.cpp",
+    "uma-engine/CMakeLists.txt",
+    "examples/multi_gpu_nacl6/MULTI_GPU_API_NOTES.md"
+  ],
+  "ray_used": false,
+  "cutoff_unchanged": true,
+  "max_neighbors_unchanged": true
+}

@@ -36,23 +36,24 @@ Match FairChem `eSCNMD` / `gp_utils` / `filter_edges_by_node_partition`:
 2. Keep edges where **target** `edge_index[1] ∈ node_partition`.
 3. Message-passing gathers full node states as needed; energy/forces all-reduce / gather.
 
-## Load path decision (shipped)
+## Load path decision
 
-| `devices` | Backend |
-|-----------|---------|
-| `1` | Existing TorchScript `model_traced.pt` `Predictor` (single CUDA device). |
-| `N>1` | **FairChem eager Python GP** via `GraphParallelRuntime` → persistent `uma-engine/python/uma_gp_worker.py` → `load_predict_unit(checkpoint, workers=N, inference_settings=fp64\|mixed)`. Opaque traced modules cannot do GP. |
+| `devices` | Legacy (still default code path) | **Target** ([`native_kokkos_libtorch_gp.md`](native_kokkos_libtorch_gp.md)) |
+|-----------|----------------------------------|-----------------------------------------------------------------------------|
+| `1` | TorchScript `model_traced.pt` + vesin CUDA NL | unchanged |
+| `N>1` | FairChem Ray via `GraphParallelRuntime` / `uma_gp_worker.py` (launch often drops Kokkos) | **Vesin full graph → shard** (`graph_shard.h`) + LibTorch shards + **Kokkos** peer reduce; keep `uma/kk` + `-k on g N`. **No Ray.** |
 
-Checkpoint: `metadata.json` `checkpoint_path`, else `UMA_CHECKPOINT`, else
+Set `UMA_FORBID_RAY_GP=1` to error on `devices>1` instead of forking Ray (native path WIP).
+
+Checkpoint (Ray legacy only): `metadata.json` `checkpoint_path`, else `UMA_CHECKPOINT`, else
 `/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt`.
 
 Artifacts (export with `python/export_artifact.py --dtype float64`):
 
-- double / active: `artifacts/uma-s-1p2-omat-f64/` (and `uma-s-1p2-<task>-f64/` for other heads)
+- double / active: `artifacts/uma-s-1p2-omat-f64/`
 - mixed: `artifacts/uma-s-1p2-omat/` — **disabled** for campaigns
 
-Long-term: native LibTorch / c10d multi-process GP preferred for in-process
-latency; this round prioritizes parity with ASE `workers=N`.
+**Phase 0b blocker:** C++ cannot load Hydra multihead `.pt`; traced modules cannot host MP collectives. Do not “fix” multi-GPU by calling Ray again — see native doc.
 
 ## Parity thresholds (`devices=N` vs oracle)
 

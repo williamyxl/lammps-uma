@@ -19,6 +19,8 @@ Also: `results/SUMMARY.md`, `results/MULTIGPU_REPORT.md`, `results/COORD_ANALYSI
 
 uma vs devices=1: **3/3 PASS**. Jobs ASE `20910344/48/52` · FC `20910345/49/53` · uma `20910346/50/54`.
 
+> **Note:** `devices>1` timings above used **legacy FairChem Ray GP** (not native LibTorch+Kokkos). Active plan: [`uma-engine/docs/native_kokkos_libtorch_gp.md`](../../uma-engine/docs/native_kokkos_libtorch_gp.md) — vesin → shard → Kokkos peer; Phase 0b blocked on non-opaque export.
+
 ## Geometry contract (DO NOT regenerate)
 
 Always load:

@@ -1,5 +1,6 @@
 #include "uma/predictor.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -85,6 +86,15 @@ Predictor Predictor::from_artifact(const std::string& artifact_dir,
   auto metadata = load_artifact_metadata(metadata_path);
 
   if (num_devices > 1) {
+    // Legacy FairChem Ray GP. Native Kokkos+LibTorch path is in progress —
+    // see docs/native_kokkos_libtorch_gp.md. Set UMA_FORBID_RAY_GP=1 to refuse.
+    const char* forbid = std::getenv("UMA_FORBID_RAY_GP");
+    if (forbid != nullptr && forbid[0] == '1' && forbid[1] == '\0') {
+      throw std::runtime_error(
+          "from_artifact: devices>1 FairChem Ray GP forbidden "
+          "(UMA_FORBID_RAY_GP=1). Native Kokkos+LibTorch+vesin GP is not ready; "
+          "see uma-engine/docs/native_kokkos_libtorch_gp.md");
+    }
     // Fork GP worker BEFORE parent touches CUDA (avoid CUDA-before-fork hazards).
     auto gp = GraphParallelRuntime::create(artifact_dir, metadata, num_devices,
                                            metadata.compute_dtype);
