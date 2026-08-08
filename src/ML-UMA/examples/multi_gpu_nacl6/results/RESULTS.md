@@ -1,24 +1,21 @@
 # Multi-GPU NaCl 6×6×6 — results (canonical)
 
-> **Note (2026-08-07):** Mixed precision (`uma/kk mixed`) is **disabled**. Tables below are ASE / FC / uma double (FP64) only.
-
-**Stamp:** 2026-08-07 ~18:00 CDT (Delta A100-SXM4-40GB, `gpuA100x4`)  
+**Phase 4 report** · Stamp: 2026-08-08 ~01:50 CDT · Branch `uma-kokkos-mlip` @ `5513482e9b`  
 **Suite:** `src/ML-UMA/examples/multi_gpu_nacl6/`  
-**Status:** path-isolated ASE / FC / uma_double @ 1/2/4 **ALL COMPLETED**
+**Status:** same-node graph-parallel **scientifically GREEN** through Phase 3 (engine CLI + LAMMPS)
 
-Canvas: [`uma-multigpu-nacl6-results`](/u/xyan11/.cursor/projects/work-nvme-bfzx-xyan11-workdir-lammps-uma/canvases/uma-multigpu-nacl6-results.canvas.tsx)
-
----
-
-## Ground truth — ASE FairChem FP64 (`workers=1`)
+## Product backend (uma/kk)
 
 | Field | Value |
 |-------|--------|
-| Artifact | [`gp_round/oracle_ase_fp64_w1.json`](gp_round/oracle_ase_fp64_w1.json) + [`.npz`](gp_round/oracle_ase_fp64_w1.npz) |
-| Energy | **−5830.9237201666 eV** |
-| Forces | `(1728, 3)` float64 · RMS 0.159 · max\|F\| 0.493 eV/Å |
-| Timing @1 GPU | **396.5 ms/eval** (job `20910344`) |
-| API | ASE FairChem FP64, `workers=1`, **no** ParallelMLIPPredictUnit |
+| Backend | **Kokkos + LibTorch** (`gp=kokkos_libtorch_vesin`) |
+| Runtime | C++ `LibtorchMpRuntime` — process-per-rank workers + `/dev/shm` `uma_peer` collectives + vesin NL |
+| Launch | `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · **1 MPI rank** |
+| Precision | **FP64 only** |
+| Artifacts | `model_mp_w{N}_n{NATOMS}_r{R}.pt` (+ legacy `model_mp_w{N}_r*` for n=64) |
+| **Not** product | Ray · FairChem `ParallelMLIPPredictUnit` · Python GP worker (env opt-in only) |
+
+ASE FairChem / FC rows below are **reference baselines only** (historical path-isolated batch). They are not the uma/kk product path.
 
 ---
 
@@ -31,80 +28,83 @@ Canvas: [`uma-multigpu-nacl6-results`](/u/xyan11/.cursor/projects/work-nvme-bfzx
 
 ---
 
-## Timing (ms/eval) — path-isolated batch
+## Ground truth — ASE FairChem FP64 (`workers=1`)
 
-Prefer log / `fc_result_early.json` lines. Do **not** use `parity.json` `ms_per_eval` when it equals SLURM wall/`N_TIMING`.
-
-| Path | 1 GPU | 2 GPU | 4 GPU | 1→2 | 1→4 | η@4 |
-|------|------:|------:|------:|----:|----:|----:|
-| ASE FairChem FP64 | **396.5** | **193.9** | **115.2** | **2.04×** | **3.44×** | 86% |
-| FairChem FC LAMMPS | **345.5** | **193.2** | **118.0** | **1.79×** | **2.93×** | 73% |
-| uma/kk double (GP) | **320.4** | **192.0** | **112.6** | **1.67×** | **2.85×** | 71% |
-
-| Path | Jobs |
-|------|------|
-| ASE | `20910344` / `20910348` / `20910352` |
-| FC | `20910345` / `20910349` / `20910353` |
-| uma_double | `20910346` / `20910350` / `20910354` |
-
-Sources: `ASE E=… XXX ms` in job outs · `ngpu*/work/fc/fc_result_early.json` · `uma64 E=… XXX ms` in job outs.
+| Field | Value |
+|-------|--------|
+| Artifact | [`gp_round/oracle_ase_fp64_w1.json`](gp_round/oracle_ase_fp64_w1.json) |
+| Energy | **−5830.9237201666 eV** |
+| Timing @1 GPU | **396.5 ms/eval** (job `20910344`) — FairChem ASE, not uma/kk |
 
 ---
 
-## Energy + force accuracy vs ASE FP64@1
+## Phase 2b — engine / CLI E+F gate (`uma_parity_cli`)
 
-Forces from `ngpu{1,2,4}/forces.npz` vs `forces_ase` at the same ngpu (ASE self = 0). Energies vs oracle −5830.9237201666 eV.
+FP64. Forces vs devices=1; energies vs d1 (and ASE where noted).
 
-| Path | ngpu | Energy (eV) | \|ΔE\| (eV) | Force MAE | Force RMSE | max \|ΔFᵢ\| | max ‖ΔF‖_atom | Cosine |
-|------|-----:|-------------:|------------:|----------:|-----------:|------------:|--------------:|-------:|
-| ASE FP64 | 1 | −5830.9237201666 | ~0 | 0 | 0 | 0 | 0 | 1.0 |
-| ASE FP64 | 2 | −5830.9237201666 | ~0 | 0 | 0 | 0 | 0 | 1.0 |
-| ASE FP64 | 4 | −5830.9237201666 | ~0 | 0 | 0 | 0 | 0 | 1.0 |
-| FairChem FC | 1 | −5830.9237152511 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 7.127×10⁻⁶ | 1.0 |
-| FairChem FC | 2 | −5830.9237152511 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 7.127×10⁻⁶ | 1.0 |
-| FairChem FC | 4 | −5830.9237152511 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 7.127×10⁻⁶ | 1.0 |
-| uma/kk double | 1 | −5830.9237201667 | 1.23×10⁻¹⁰ | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 7.673×10⁻⁷ | 1.0 |
-| uma/kk double | 2 | −5830.9237201666 | 1.82×10⁻¹² | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 7.673×10⁻⁷ | 1.0 |
-| uma/kk double | 4 | −5830.9237201666 | 9.09×10⁻¹³ | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 7.673×10⁻⁷ | 1.0 |
-
-FC \|ΔE\| ≈ 4.9×10⁻⁶ is expected (LAMMPS FC cell built in FP32). uma double stays within ~10⁻¹⁰ of ASE.
-
-### uma/kk double vs devices=1 (graph-parallel gate)
-
-Thresholds: \|ΔE\| ≤ 1×10⁻⁸ · max\|ΔF\| ≤ 1×10⁻⁶ · cosine ≥ 1−ε → **3/3 PASS**
-
-| ngpu | devices | \|ΔE\| vs d1 | max \|ΔF\| vs d1 | cosine vs d1 | gate |
-|-----:|--------:|-------------:|-----------------:|-------------:|:----:|
-| 1 | 1 | — (self) | 0 | 1.0 | PASS |
-| 2 | 2 | 1.27×10⁻¹⁰ | 0 | 1.0 | PASS |
-| 4 | 4 | 1.27×10⁻¹⁰ | 0 | 1.0 | PASS |
+| Structure | devices | Job | dE_d1 | max\|ΔF\| | dE_ase |
+|-----------|--------:|-----|------:|----------:|-------:|
+| nacl64 | 2 | `20925398` | 0 | ~5.3×10⁻¹⁶ | — |
+| NaCl6 1728 | 2 | `20925457` | 1.8×10⁻¹² | ~5.3×10⁻¹⁶ | ≈1.2×10⁻¹⁰ |
+| nacl64 | 4 | `20925504` | **0** | **6.7×10⁻¹⁶** | — |
+| NaCl6 1728 | 4 | `20925506` | **1.8×10⁻¹²** | **5.8×10⁻¹⁶** | **1.2×10⁻¹⁰** |
 
 ---
 
-## Jobs
+## Phase 3 — LAMMPS `uma/kk` E+F gate (product path)
 
-| Config | Job | Outcome | Honest ms |
-|--------|-----|---------|----------:|
-| ASE @1/@2/@4 | `20910344` / `48` / `52` | COMPLETED | 396.5 / 193.9 / 115.2 |
-| FC @1/@2/@4 | `20910345` / `49` / `53` | COMPLETED | 345.5 / 193.2 / 118.0 |
-| uma_double @1/@2/@4 | `20910346` / `50` / `54` | COMPLETED | 320.4 / 192.0 / 112.6 |
+NaCl6 1728 · FP64 · `gp=kokkos_libtorch_vesin` · single MPI rank.  
+Gates vs `results/ngpu1` uma_double (devices=1) and ASE oracle.
+
+| devices | Job | Energy (eV) | dE_d1 | max\|ΔF\| vs d1 | dE_ase | pair ms/eval\* |
+|--------:|-----|-------------:|------:|-----------------:|-------:|---------------:|
+| 1 | (baseline `ngpu1`) | −5830.9237201667 | — | 0 | 1.2×10⁻¹⁰ | **≈320** |
+| 2 | `20925747` | −5830.9237201667 | **9.1×10⁻¹³** | **0** | 1.2×10⁻¹⁰ | **≈361** |
+| 4 | `20925801` | −5830.9237201667 | **2.7×10⁻¹²** | **0** | 1.2×10⁻¹⁰ | **≈473** |
+
+\*Honest pair-path timer from `run_multigpu` (`uma64 E=… XXX ms`). Do **not** use SLURM `wall/N_TIMING` (inflates with setup).
+
+Thresholds: \|ΔE\| ≤ 1×10⁻⁸ · max\|ΔF\| ≤ 1×10⁻⁶ → **PASS** (devices 2 and 4).
+
+Stamp gates:  
+`agent_stamps/cpp_libtorch/lammps_gate_w2_20925747/gate.json` ·  
+`agent_stamps/cpp_libtorch/lammps_gate_w4_20925801/gate.json`
+
+### Timing note (honest)
+
+Same-node Kokkos+LibTorch MP is **correctness-first**. Pair ms/eval at devices=2/4 (~361 / ~473) is **not** strong speedup vs devices=1 (~320); process-per-rank + host-staged peer gather adds overhead. Do not quote older Ray/Python GP ms (~192 / ~113 @2/@4) as the product backend.
+
+---
+
+## Reference — ASE / FC path-isolated batch (not product)
+
+Historical FairChem timings (jobs `20910344`–`20910354`). Useful for ASE/FC scaling context only.
+
+| Path | 1 GPU | 2 GPU | 4 GPU | Notes |
+|------|------:|------:|------:|-------|
+| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | `workers=N` → Ray ParallelMLIP |
+| FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell FP32 → \|ΔE\|≈4.9×10⁻⁶ vs ASE |
+| uma/kk (pre-C++ MP era) | 320.4 | *(obsolete)* | *(obsolete)* | Superseded by Phase 3 Kokkos+LibTorch numbers above |
 
 ---
 
 ## Findings
 
-1. ASE `workers=N`: **2.04× @2**, **3.44× @4** (η@4 ≈ 86%).
-2. FC: **1.79× @2**, **2.93× @4** (η@4 ≈ 73%); E offset ~5×10⁻⁶ vs ASE from FP32 cell.
-3. uma/kk double GP: **1.67× @2**, **2.85× @4** (η@4 ≈ 71%); forces vs ASE max\|ΔF\| = 5×10⁻⁷; GP gate vs d1 **PASS** with bitwise-identical forces across devices.
-4. OOM / max-N: **N\*=10** ([`../multi_node_nacl6/results/geom_sweep/SWEEP.md`](../multi_node_nacl6/results/geom_sweep/SWEEP.md)).
+1. **Product path is Kokkos+LibTorch** (`kokkos_libtorch_vesin`), not Ray / FairChem eager GP / Python workers.
+2. Engine CLI and LAMMPS agree: devices=2 and devices=4 E+F match devices=1 to numerical noise; forces vs d1 are exact (max\|ΔF\|=0) on the LAMMPS path.
+3. Energy vs ASE FP64@1 stays ~10⁻¹⁰ eV on NaCl6.
+4. Honest multi-GPU pair timing does **not** claim Ray-like speedups; correctness gate is the Phase 3 deliverable.
+5. **Phase 5 (multi-node MPI-GP)** is out of scope for this report.
+
+---
 
 ## File index
 
 | Path | Role |
 |------|------|
-| `RESULTS.md` | This document (canonical) |
+| `RESULTS.md` | This document (canonical Phase 4) |
+| `SUMMARY.md` | Compact Phase 4 summary |
 | `ngpu{1,2,4}/parity.json` | Merged energies (wall ms often contaminated) |
-| `ngpu{1,2,4}/forces.npz` | ASE / FC / uma_double forces |
-| `ngpu{1,2,4}/work/fc/fc_result_early.json` | Honest FC ms |
-| `SUMMARY.md` / `MULTIGPU_REPORT.md` | Compact copies of this report |
-| `NEXT_ROUND_PLAN.md` | Close-out checklist |
+| `ngpu{1,2,4}/forces.npz` | Forces for parity |
+| `gp_round/oracle_ase_fp64_w1.json` | ASE FP64 oracle |
+| `../agent_stamps/cpp_libtorch/` | Campaign stamps + LAMMPS gate JSON |

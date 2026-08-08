@@ -164,3 +164,17 @@ Log: `gp=kokkos_libtorch_vesin`. No Ray / no Python GP.
 
 ### Timing note
 Report pair-path `ms_per_eval` from `run_multigpu` for honesty. SLURM `wall/N_TIMING` inflates (setup + SP dump + NVE).
+
+## Burst 10 — 2026-08-08 ~01:50 CDT (Phase 4 report)
+
+Same-node GP scientifically GREEN through Phase 3. **No new GPU jobs.**
+
+### Landed
+| Doc | Role |
+|-----|------|
+| `results/RESULTS.md` | Canonical Phase 4 — product = Kokkos+LibTorch / `kokkos_libtorch_vesin` |
+| `results/SUMMARY.md` + `SUMMARY.json` | Compact + machine-readable |
+| Stamps | Phase 3 DONE · Phase 4 report landed · Phase 5 multi-node out of scope |
+
+### Not in this burst
+Multi-node · Ray · offset unbake.
