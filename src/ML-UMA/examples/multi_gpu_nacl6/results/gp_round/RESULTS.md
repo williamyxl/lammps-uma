@@ -1,6 +1,6 @@
 # Multi-GPU NaCl 6×6×6 — graph-parallel uma campaign (`gp_round`)
 
-> **Canonical product timings:** [`../RESULTS.md`](../RESULTS.md) Phase 3 — uma/kk Kokkos+LibTorch **≈320 / ≈361 / ≈473** ms @ devices=1/2/4. Numbers in this folder (including ~192 / ~113 @2/@4) are historical Ray/Python-GP era; keep for ASE oracle artifacts only.
+> **Canonical product timings:** [`../RESULTS.md`](../RESULTS.md) — uma/kk Kokkos+LibTorch + CUDA IPC **≈320 / ≈265 / ≈193** ms @ devices=1/2/4 (job `20932975`). Numbers in this folder (including ~192 / ~113 @2/@4 Ray era, and pre-IPC ~361 / ~473) are historical; keep for ASE oracle artifacts only.
 
 > **Note (2026-08-07):** Mixed precision (`uma/kk mixed`) is **disabled**. Mixed rows below are commented out (historical only).
 

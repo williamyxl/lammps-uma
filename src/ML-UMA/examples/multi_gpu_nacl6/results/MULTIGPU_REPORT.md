@@ -1,53 +1,44 @@
 # UMA multi-GPU NaCl 6×6×6 parity report
 
-**Stamp:** 2026-08-07 ~18:00 CDT · Full write-up: [`RESULTS.md`](RESULTS.md)
+> **Canonical (current):** [`RESULTS.md`](RESULTS.md) · [`SUMMARY.md`](SUMMARY.md).  
+> This file is a short product-facing mirror. Do **not** use the obsolete FAIL/wall-time tables that previously lived here.
 
 ## Setup
 
-- **System:** NaCl 6×6×6 rocksalt, 1728 atoms
-- **Structure:** `structures/nacl6_rattle_fixed.extxyz` (δ=0.1 Å seed=0, immutable)
-- **Reference:** ASE FairChem FP64 @ ngpu=1 → `−5830.9237201666` eV
-- **ASE/FC:** `workers=N` in one process
-- **uma/kk:** `lmp -k on g N -sf kk`, `pair_style uma/kk precision double devices N`
-- **Precision:** FP64 / double only (mixed disabled)
-- **Parity gates (uma vs devices=1):** **3/3 PASS**
+- **System:** NaCl 6×6×6 rocksalt, 1728 atoms (`structures/nacl6_rattle_fixed.extxyz`)
+- **ASE oracle:** −5830.9237201666 eV (`gp_round/oracle_ase_fp64_w1.json`)
+- **Product launch:** `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · `--ntasks=1`
+- **Backend:** Kokkos+LibTorch (`gp=kokkos_libtorch_vesin`) · peer **CUDA IPC** (`UMA_PEER_TRANSPORT=cuda_ipc`)
+- **Precision:** FP64 only · mixed disabled
+- **Primary gate:** uma/kk `devices=N` vs `devices=1` (E + per-atom F)
 
-## Honest timing (ms/eval)
+### Parity thresholds (vs devices=1)
 
-| Path | 1 GPU | 2 GPU | 4 GPU | 1→2 | 1→4 |
-|------|------:|------:|------:|----:|----:|
-| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× |
-| FairChem FC | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× |
-| uma/kk double | 320.4 | 192.0 | 112.6 | 1.67× | 2.85× |
+| Mode | \|ΔE\| max | max\|ΔF\| |
+|------|----------:|----------:|
+| double | 1×10⁻⁸ | 1×10⁻⁶ |
 
-Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma_double `20910346/50/54`.
+## Product results (Perf P1, job `20932975`)
 
-## uma vs devices=1 (graph-parallel gate)
+| Path | devices | Energy (eV) | pair ms\* | \|dE\| vs d1 | max\|ΔF\| vs d1 | gate |
+|------|--------:|-------------:|----------:|-------------:|----------------:|:----:|
+| uma/kk double | 1 | −5830.9237201667 | **320.34** | — | 0 | PASS |
+| uma/kk double | 2 | −5830.9237201667 | **264.96** | 0 | **0** | **PASS** |
+| uma/kk double | 4 | −5830.9237201667 | **193.32** | 1.8×10⁻¹² | **0** | **PASS** |
 
-| Path | ngpu | devices | \|ΔE\| vs d1 | max \|ΔF\| vs d1 | cosine vs d1 | gate |
-|------|-----:|--------:|-------------:|-----------------:|-------------:|:----:|
-| uma/kk double | 1 | 1 | — | 0 | 1.000000 | PASS |
-| uma/kk double | 2 | 2 | 1.273×10⁻¹⁰ | 0 | 1.000000 | PASS |
-| uma/kk double | 4 | 4 | 1.273×10⁻¹⁰ | 0 | 1.000000 | PASS |
+\*Honest `uma64 E=… ms` from `run_multigpu` — not SLURM wall.
 
-Thresholds (double): \|ΔE\| ≤ 1×10⁻⁸ · max\|ΔF\| ≤ 1×10⁻⁶ · cosine ≥ 1−ε.
+**Self-scale:** PASS (`ms(2)<ms(1)`, `ms(4)<ms(2)`).
 
-## Path × ngpu vs ASE FP64@1
+## Reference timings (not product)
 
-| Path | ngpu | Energy (eV) | ms/eval | \|ΔE\| | Force MAE | Force RMSE | max \|ΔFᵢ\| | Cosine |
-|------|-----:|-------------:|--------:|-------:|----------:|-----------:|------------:|-------:|
-| ASE FP64 | 1 | −5830.9237201666 | 396.5 | — | 0 | 0 | 0 | 1.0 |
-| ASE FP64 | 2 | −5830.9237201666 | 193.9 | ~0 | 0 | 0 | 0 | 1.0 |
-| ASE FP64 | 4 | −5830.9237201666 | 115.2 | ~0 | 0 | 0 | 0 | 1.0 |
-| FairChem FC | 1 | −5830.9237152511 | 345.5 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 1.0 |
-| FairChem FC | 2 | −5830.9237152511 | 193.2 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 1.0 |
-| FairChem FC | 4 | −5830.9237152511 | 118.0 | 4.915×10⁻⁶ | 1.002×10⁻⁶ | 1.343×10⁻⁶ | 7.123×10⁻⁶ | 1.0 |
-| uma/kk double | 1 | −5830.9237201667 | 320.4 | 1.23×10⁻¹⁰ | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 1.0 |
-| uma/kk double | 2 | −5830.9237201666 | 192.0 | 1.82×10⁻¹² | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 1.0 |
-| uma/kk double | 4 | −5830.9237201666 | 112.6 | 9.09×10⁻¹³ | 1.516×10⁻⁷ | 2.179×10⁻⁷ | 5.000×10⁻⁷ | 1.0 |
+| Path | 1 GPU | 2 GPU | 4 GPU | Notes |
+|------|------:|------:|------:|-------|
+| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | Ray ParallelMLIP |
+| FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell may be FP32 |
+| uma/kk (pre-IPC Phase 3) | ≈320 | ≈361 | ≈473 | host `/dev/shm` — superseded |
 
 ## Notes
 
-- Honest ms from ASE/uma64 log lines and `fc_result_early.json` — not SLURM wall/`N_TIMING`.
-- FC \|ΔE\| ~5×10⁻⁶ from FP32 cell construction in the LAMMPS bridge.
-- uma forces vs ASE max\|ΔF\| = 5×10⁻⁷; forces identical across devices=1/2/4 (max\|ΔF\| vs d1 = 0).
+- Same-node only (`gpuA100x4`); Phase 5 multi-node out of scope.
+- Machine-readable: `SUMMARY.json` · stamps `../agent_stamps/cpp_libtorch/perf/summary_20932975.json`.

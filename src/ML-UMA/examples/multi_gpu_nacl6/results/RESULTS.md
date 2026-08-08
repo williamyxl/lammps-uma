@@ -1,18 +1,19 @@
 # Multi-GPU NaCl 6×6×6 — results (canonical)
 
-**Phase 4 report** · Stamp: 2026-08-08 ~01:50 CDT · Branch `uma-kokkos-mlip` @ `5513482e9b`  
+**Phase 4 + Perf P1** · Stamp: 2026-08-08 ~09:00 CDT · Branch `uma-kokkos-mlip` @ `8e7e6a0d27` / report `d2bb98cf6c`  
 **Suite:** `src/ML-UMA/examples/multi_gpu_nacl6/`  
-**Status:** same-node graph-parallel **scientifically GREEN** through Phase 3 (engine CLI + LAMMPS)
+**Status:** same-node graph-parallel **scientifically GREEN** (E+F) · **self-scale GREEN** (CUDA IPC)
 
 ## Product backend (uma/kk)
 
 | Field | Value |
 |-------|--------|
 | Backend | **Kokkos + LibTorch** (`gp=kokkos_libtorch_vesin`) |
-| Runtime | C++ `LibtorchMpRuntime` — process-per-rank workers + `/dev/shm` `uma_peer` collectives + vesin NL |
+| Runtime | C++ `LibtorchMpRuntime` — process-per-rank workers + **CUDA IPC** `uma_peer` collectives (`UMA_PEER_TRANSPORT=cuda_ipc`) + vesin NL |
 | Launch | `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · **1 MPI rank** |
 | Precision | **FP64 only** |
 | Artifacts | `model_mp_w{N}_n{NATOMS}_r{R}.pt` (+ legacy `model_mp_w{N}_r*` for n=64) |
+| Current pair ms | **≈320 / ≈265 / ≈193** @ devices=1/2/4 (job `20932975`) |
 | **Not** product | Ray · FairChem `ParallelMLIPPredictUnit` · Python GP worker (env opt-in only) |
 
 ASE FairChem / FC rows below are **reference baselines only** (historical path-isolated batch). They are not the uma/kk product path.

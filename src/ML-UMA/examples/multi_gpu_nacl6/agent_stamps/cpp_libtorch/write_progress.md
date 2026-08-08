@@ -205,3 +205,8 @@ Next: P1 CUDA IPC device collectives.
 | `perf_p1.slurm` | devices=1→2→4, `RECOMPILE=1`, `UMA_PEER_TRANSPORT=cuda_ipc` |
 
 Force-green regime unchanged (all_reduce bwd + force SUM + escale 1/world). No Ray.
+
+### P1 result (job `20932975`) — SELF_SCALE_GREEN
+
+Honest pair ms: **320.34 / 264.96 / 193.32** @1/2/4. E+F green (max|ΔF|=0).
+vs P0 320.6/330.5/382.9 and Phase-3 ~361/~473. Soft gap vs ASE/FC @4 (~115) remains (optional P2).

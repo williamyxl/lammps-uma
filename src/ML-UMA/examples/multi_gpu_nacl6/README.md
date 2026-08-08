@@ -9,17 +9,17 @@ Paths: ASE FairChem FP64 · FairChem LAMMPS fix-external · `uma/kk` **double**
 ## Latest results
 
 Canonical write-up: **[`results/RESULTS.md`](results/RESULTS.md)**  
-Also: `results/SUMMARY.md`, `results/MULTIGPU_REPORT.md`, `results/COORD_ANALYSIS.md`.
+Also: `results/SUMMARY.md`, `results/MULTIGPU_REPORT.md`, `results/SUMMARY.json`.
 
-| Path | 1 / 2 / 4 GPU (ms) | 1→2 / 1→4 |
-|------|-------------------|-----------|
-| ASE FairChem FP64 | 396.5 / 193.9 / 115.2 | 2.04× / 3.44× |
-| FairChem FC | 345.5 / 193.2 / 118.0 | 1.79× / 2.93× |
-| uma/kk double | 320.4 / 192.0 / 112.6 | 1.67× / 2.85× |
+| Path | 1 / 2 / 4 GPU (ms) | 1→2 / 1→4 | Notes |
+|------|-------------------|-----------|-------|
+| **uma/kk double (product)** | **320.3 / 265.0 / 193.3** | **1.21× / 1.66×** | Kokkos+LibTorch + CUDA IPC · job `20932975` · E+F PASS |
+| ASE FairChem FP64 | 396.5 / 193.9 / 115.2 | 2.04× / 3.44× | Ray ParallelMLIP — **reference only** |
+| FairChem FC | 345.5 / 193.2 / 118.0 | 1.79× / 2.93× | **reference only** |
 
-uma vs devices=1: **3/3 PASS**. Jobs ASE `20910344/48/52` · FC `20910345/49/53` · uma `20910346/50/54`.
+uma vs devices=1: **E+F PASS** at devices=2 and 4 (max\|ΔF\|=0). Self-scale **PASS**.
 
-> **Note:** `devices>1` timings above used **legacy FairChem Ray GP** (not native LibTorch+Kokkos). Active plan: [`uma-engine/docs/native_kokkos_libtorch_gp.md`](../../uma-engine/docs/native_kokkos_libtorch_gp.md) — vesin → shard → Kokkos peer; Phase 0b blocked on non-opaque export.
+> Product backend: [`native_kokkos_libtorch_gp.md`](../../uma-engine/docs/native_kokkos_libtorch_gp.md). Do **not** quote legacy Ray uma timings (~192 / ~113) as the product path.
 
 ## Geometry contract (DO NOT regenerate)
 

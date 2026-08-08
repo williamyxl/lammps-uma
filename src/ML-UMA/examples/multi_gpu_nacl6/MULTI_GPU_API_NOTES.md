@@ -2,14 +2,15 @@
 
 Short reference for stacks used by `run_multigpu.py`.
 
-**Native plan (active):** [`uma-engine/docs/native_kokkos_libtorch_gp.md`](../../uma-engine/docs/native_kokkos_libtorch_gp.md)  
-Target: `uma/kk` + Kokkos `-k on g N` + vesin NL + LibTorch shards — **no Ray**.  
-Land **devices=2** on `gpuA100x4` before **devices=4**.
+**Native product (landed):** [`uma-engine/docs/native_kokkos_libtorch_gp.md`](../../uma-engine/docs/native_kokkos_libtorch_gp.md)  
+`uma/kk` + Kokkos `-k on g N` + vesin NL + LibTorch MP shards + **CUDA IPC** peer transport — **no Ray**.  
+Canonical numbers: [`results/RESULTS.md`](results/RESULTS.md) — **≈320 / ≈265 / ≈193 ms** @1/2/4 (job `20932975`), E+F green, self-scale PASS.
 
 **VRAM isolation:** one `ONLY_PATHS` per SLURM job (`./submit_path_jobs.sh`).
 
 **Timing:** Prefer honest `uma64 E=… XXX ms` / pair timers for scaling reports.
-`stamp_slurm_timing.py` wall/`N_TIMING` is provenance only (often contaminated).
+`stamp_slurm_timing.py` wall/`N_TIMING` is provenance only (often contaminated).  
+Peer transport: `UMA_PEER_TRANSPORT=cuda_ipc` (default) or `shm`.
 
 ## FairChem ASE — `workers=` (external oracle / baseline only)
 
@@ -29,7 +30,6 @@ run_lammps_with_fairchem(predictor, inp, "omat")
 ## uma/kk — product path
 
 ```bash
-# Target / devices=1 today:
 pair_style uma/kk precision double devices ${UMA_DEVICES}
 lmp -k on g ${NGPUS} -sf kk -in ...
 ```
@@ -37,10 +37,11 @@ lmp -k on g ${NGPUS} -sf kk -in ...
 | Mode | Behavior |
 |------|----------|
 | `devices=1` | Traced LibTorch + vesin CUDA NL |
-| `devices>1` **legacy** | FairChem Ray worker; `run_multigpu.py` may use plain `uma` without Kokkos |
-| `devices>1` **target** | Vesin full graph → `graph_shard.h` → LibTorch + Kokkos peer; keep `uma/kk` + `-k on g N` |
+| `devices>1` **default** | C++ `LibtorchMpRuntime` + `model_mp_w*_n*_r*.pt` + `uma_peer` **CUDA IPC** (`UMA_PEER_TRANSPORT=cuda_ipc`) |
+| `devices>1` **opt-in** | `UMA_PYTHON_GP_WORKER=1` → Python process-GP (lab only) |
+| `devices>1` **legacy** | `UMA_ALLOW_RAY_GP=1` → FairChem Ray (`uma_gp_worker.py`) — not product |
 
-Development: `UMA_FORBID_RAY_GP=1` refuses legacy Ray fork.
+`UMA_FORBID_RAY_GP=1` rejects Ray. Current pair ms: **≈320 / ≈265 / ≈193** @1/2/4 (job `20932975`).
 
 ## Delta binding
 

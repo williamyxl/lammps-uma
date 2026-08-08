@@ -1,18 +1,24 @@
 {
   "role": "WRITE",
-  "stamp": "2026-08-07T18:22:00-05:00",
-  "phase": "0_and_0c_partial",
-  "backend_claimed": "Kokkos+LibTorch+vesin (target; not yet wired for devices>1)",
+  "stamp": "2026-08-07T20:25:00-05:00",
+  "plan": "libtorch_multi-gpu_kokkos_20de0136",
+  "backend": "Kokkos+peer+thread_gp",
+  "phase": "0b_native_worker",
   "files": [
-    "uma-engine/docs/native_kokkos_libtorch_gp.md",
-    "uma-engine/docs/multi_gpu_graph_parallel.md",
-    "uma-engine/include/uma/graph_shard.h",
-    "uma-engine/tests/graph_shard_smoke.cpp",
+    "uma-engine/python/export_eager_weights.py",
+    "uma-engine/python/kokkos_gp_runtime.py",
+    "uma-engine/python/uma_native_gp_worker.py",
+    "uma-engine/include/uma/kokkos_peer.h",
+    "uma-engine/tests/kokkos_peer_smoke.cpp",
+    "uma-engine/src/graph_parallel.cpp",
     "uma-engine/src/predictor.cpp",
-    "uma-engine/CMakeLists.txt",
-    "examples/multi_gpu_nacl6/MULTI_GPU_API_NOTES.md"
+    "examples/multi_gpu_nacl6/run_multigpu.py",
+    "examples/multi_gpu_nacl6/run_ngpu2_native_kokkos.slurm"
   ],
-  "ray_used": false,
-  "cutoff_unchanged": true,
-  "max_neighbors_unchanged": true
+  "notes": [
+    "devices>1 default = uma_native_gp_worker (no Ray)",
+    "run_multigpu keeps uma/kk + -k on g N for devices>1",
+    "vesin shard injection from C++ still pending",
+    "gate: submit run_ngpu2_native_kokkos.slurm"
+  ]
 }

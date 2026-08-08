@@ -38,22 +38,19 @@ Match FairChem `eSCNMD` / `gp_utils` / `filter_edges_by_node_partition`:
 
 ## Load path decision
 
-| `devices` | Legacy (still default code path) | **Target** ([`native_kokkos_libtorch_gp.md`](native_kokkos_libtorch_gp.md)) |
-|-----------|----------------------------------|-----------------------------------------------------------------------------|
+| `devices` | Legacy (opt-in) | **Product** ([`native_kokkos_libtorch_gp.md`](native_kokkos_libtorch_gp.md)) |
+|-----------|-----------------|-----------------------------------------------------------------------------|
 | `1` | TorchScript `model_traced.pt` + vesin CUDA NL | unchanged |
-| `N>1` | FairChem Ray via `GraphParallelRuntime` / `uma_gp_worker.py` (launch often drops Kokkos) | **Vesin full graph → shard** (`graph_shard.h`) + LibTorch shards + **Kokkos** peer reduce; keep `uma/kk` + `-k on g N`. **No Ray.** |
+| `N>1` | `UMA_ALLOW_RAY_GP=1` → FairChem Ray / `UMA_PYTHON_GP_WORKER=1` → Python GP | **C++** `LibtorchMpRuntime` + `model_mp_w*_n*_r*.pt` + `uma_peer` **CUDA IPC** + vesin shards; keep `uma/kk` + `-k on g N`. **No Ray.** |
 
-Set `UMA_FORBID_RAY_GP=1` to error on `devices>1` instead of forking Ray (native path WIP).
+Set `UMA_FORBID_RAY_GP=1` to reject Ray. Default peer transport: `UMA_PEER_TRANSPORT=cuda_ipc`.
 
-Checkpoint (Ray legacy only): `metadata.json` `checkpoint_path`, else `UMA_CHECKPOINT`, else
-`/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt`.
+Artifacts (export with `python/export_mp_artifact.py` / `export_artifact.py --dtype float64`):
 
-Artifacts (export with `python/export_artifact.py --dtype float64`):
-
-- double / active: `artifacts/uma-s-1p2-omat-f64/`
+- double / active: `artifacts/uma-s-1p2-omat-f64/` (`model_mp_w{N}_n{NATOMS}_r{R}.pt`)
 - mixed: `artifacts/uma-s-1p2-omat/` — **disabled** for campaigns
 
-**Phase 0b blocker:** C++ cannot load Hydra multihead `.pt`; traced modules cannot host MP collectives. Do not “fix” multi-GPU by calling Ray again — see native doc.
+**Landed (2026-08-08):** devices=2/4 E+F green · self-scale **≈320 / ≈265 / ≈193 ms** (job `20932975`). See `examples/multi_gpu_nacl6/results/RESULTS.md`.
 
 ## Parity thresholds (`devices=N` vs oracle)
 
