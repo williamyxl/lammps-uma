@@ -1,0 +1,18 @@
+{
+  "phase": "P2_perf",
+  "devices": 2,
+  "jobid": "20933393",
+  "E": -5830.923720166719,
+  "dE_d1": 2.7284841053187847e-12,
+  "max_dF": 0.0,
+  "E_green": true,
+  "F_green": true,
+  "ms_per_eval": 190.79600000000002,
+  "ms_source": "pair_section_or_uma64_log",
+  "wall_s": 33.963,
+  "ms_fwd": 82.8176,
+  "ms_bwd": 95.8144,
+  "ms_force_ar": 0.168395,
+  "perf_parent": {},
+  "peer_transport": "cuda_ipc"
+}
