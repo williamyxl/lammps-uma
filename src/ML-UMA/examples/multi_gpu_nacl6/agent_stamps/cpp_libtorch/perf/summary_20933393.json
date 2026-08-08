@@ -1,0 +1,50 @@
+{
+  "phase": "P2_perf",
+  "jobid": "20933393",
+  "peer_transport": "cuda_ipc",
+  "ms": {
+    "1": 321.54,
+    "2": 190.79600000000002,
+    "4": 140.898
+  },
+  "dE_d1": {
+    "1": 3.637978807091713e-12,
+    "2": 2.7284841053187847e-12,
+    "4": 2.7284841053187847e-12
+  },
+  "max_dF": {
+    "1": 0.0,
+    "2": 0.0,
+    "4": 0.0
+  },
+  "E_F_green": true,
+  "self_scale_green": true,
+  "beat_p1_green": true,
+  "soft_ase_targets": {
+    "devices2_le_200": true,
+    "devices4_le_150": true
+  },
+  "gap_vs_ase": {
+    "2": -3.103999999999985,
+    "4": 25.697999999999993
+  },
+  "gap_vs_fc": {
+    "2": -2.403999999999968,
+    "4": 22.897999999999996
+  },
+  "p1_baseline_ms": {
+    "1": 320.34,
+    "2": 264.96,
+    "4": 193.32
+  },
+  "ase_ms": {
+    "2": 193.9,
+    "4": 115.2
+  },
+  "fc_ms": {
+    "2": 193.2,
+    "4": 118.0
+  },
+  "hard_gate": "E+F green + ms(2)<ms(1) and ms(4)<ms(2) + beat P1 @2/@4",
+  "note": "P2 = payload shm fan-out + rank0 force return; cuda_ipc collectives"
+}

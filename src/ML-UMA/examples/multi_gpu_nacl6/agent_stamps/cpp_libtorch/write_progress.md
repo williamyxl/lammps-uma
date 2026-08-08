@@ -220,6 +220,12 @@ P1 PASS (20932975): 320.34 / 264.96 / 193.32. Soft gap vs ASE/FC @2/@4 remains.
 
 Goals: keep E+F + self-scale; beat P1 @2/@4; soft-push toward ASE ~194/@2 and ~115–150/@4.
 
+## Burst 13 — P2 result (job 20933393)
+
+Honest pair ms: **321.54 / 190.80 / 140.90**. E+F green (max|ΔF|=0). Self-scale PASS. Beat P1 PASS.
+- Soft ASE@2: **OK** (beats ASE/FC). Soft ASE@4 ≤150: **OK**; gap to ASE ~115 remains ~26 ms.
+- RESULTS/SUMMARY updated to P2 three-path row.
+
 ### P1 result (job `20932975`) — SELF_SCALE_GREEN
 
 Honest pair ms: **320.34 / 264.96 / 193.32** @1/2/4. E+F green (max|ΔF|=0).

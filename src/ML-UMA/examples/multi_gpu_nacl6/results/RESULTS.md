@@ -1,22 +1,22 @@
 # Multi-GPU NaCl 6×6×6 — results (canonical)
 
-**Phase 4 + Perf P1** · Stamp: 2026-08-08 ~09:00 CDT · Branch `uma-kokkos-mlip` @ `8e7e6a0d27` / report `d2bb98cf6c`  
+**Phase 4 + Perf P2** · Stamp: 2026-08-08 ~09:50 CDT · Branch `uma-kokkos-mlip` @ `1a5f8a06c0`  
 **Suite:** `src/ML-UMA/examples/multi_gpu_nacl6/`  
-**Status:** same-node graph-parallel **scientifically GREEN** (E+F) · **self-scale GREEN** (CUDA IPC)
+**Status:** same-node GP **E+F GREEN** · **self-scale GREEN** · P2 pipe-tax cut **PASS**
 
 ## Product backend (uma/kk)
 
 | Field | Value |
 |-------|--------|
 | Backend | **Kokkos + LibTorch** (`gp=kokkos_libtorch_vesin`) |
-| Runtime | C++ `LibtorchMpRuntime` — process-per-rank workers + **CUDA IPC** `uma_peer` collectives (`UMA_PEER_TRANSPORT=cuda_ipc`) + vesin NL |
+| Runtime | C++ `LibtorchMpRuntime` — process-per-rank + **CUDA IPC** peers + **payload shm** fan-out + vesin NL |
 | Launch | `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · **1 MPI rank** |
 | Precision | **FP64 only** |
 | Artifacts | `model_mp_w{N}_n{NATOMS}_r{R}.pt` (+ legacy `model_mp_w{N}_r*` for n=64) |
-| Current pair ms | **≈320 / ≈265 / ≈193** @ devices=1/2/4 (job `20932975`) |
+| Current pair ms | **≈322 / ≈191 / ≈141** @ devices=1/2/4 (job `20933393`) |
 | **Not** product | Ray · FairChem `ParallelMLIPPredictUnit` · Python GP worker (env opt-in only) |
 
-ASE FairChem / FC rows below are **reference baselines**; uma/kk is the product path. Timing for ASE/FC is from the path-isolated batch (jobs `20910344`–`20910354`); uma/kk timing is Perf P1 CUDA IPC (job `20932975`).
+ASE FairChem / FC rows below are **reference baselines**; uma/kk is the product path. ASE/FC timing: path-isolated batch (`20910344`–`20910354`); uma/kk: Perf P2 (`20933393`).
 
 ---
 
@@ -30,9 +30,9 @@ Same frozen geometry. Oracle = ASE FairChem FP64 `workers=1` (−5830.9237201666
 |------|------:|------:|------:|----:|----:|---------|
 | ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× | Ray ParallelMLIP (`workers=N`) |
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× | Ray ParallelMLIP in FC |
-| **uma/kk double (product)** | **320.34** | **264.96** | **193.32** | **1.21×** | **1.66×** | Kokkos+LibTorch + CUDA IPC |
+| **uma/kk double (product)** | **321.54** | **190.80** | **140.90** | **1.69×** | **2.28×** | Kokkos+LibTorch + CUDA IPC + payload shm |
 
-Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma `20932975`.
+Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma P2 `20933393` (P1 was 320.34 / 264.96 / 193.32).
 
 ### Energy vs ASE FP64@1
 
@@ -53,15 +53,15 @@ FC energy offset is consistent with FC cell build in FP32 (documented). uma/kk s
 | FairChem FC LAMMPS | 1 / 2 / 4 | **7.12×10⁻⁶** | **7.13×10⁻⁶** | 1.000000 |
 | **uma/kk double** | 1 / 2 / 4 | **5.00×10⁻⁷** | **7.67×10⁻⁷** | 1.000000 |
 
-uma/kk forces are identical across devices=1/2/4 to numerical noise vs each other (max\|ΔF\| vs uma d1 = **0** on P1); residual vs ASE is ~5×10⁻⁷ eV/Å (well under the 1×10⁻⁶ gate). FC is ~14× larger force error vs ASE than uma/kk.
+uma/kk forces are identical across devices=1/2/4 to numerical noise vs each other (max\|ΔF\| vs uma d1 = **0** on P2); residual vs ASE is ~5×10⁻⁷ eV/Å (well under the 1×10⁻⁶ gate). FC is ~14× larger force error vs ASE than uma/kk.
 
 ### Readout
 
-| Metric | Winner @1 GPU | Winner @4 GPU | Notes |
-|--------|---------------|---------------|-------|
-| Timing | **uma/kk** (320 vs 397/346) | ASE/FC (~115–118) | uma self-scales but trails Ray bandwidth @4 |
-| Energy vs ASE | **uma/kk** (~1e-10) | **uma/kk** | FC stuck at ~5e-6 |
-| Forces vs ASE | **uma/kk** (~5e-7) | **uma/kk** | FC ~7e-6 |
+| Metric | Winner @1 GPU | Winner @2 GPU | Winner @4 GPU | Notes |
+|--------|---------------|---------------|---------------|-------|
+| Timing | **uma/kk** (322 vs 397/346) | **uma/kk** (191 vs 194/193) | ASE/FC (~115–118) | P2 beats ASE/FC @2; ~26 ms behind ASE @4 |
+| Energy vs ASE | **uma/kk** (~1e-10) | **uma/kk** | **uma/kk** | FC stuck at ~5e-6 |
+| Forces vs ASE | **uma/kk** (~5e-7) | **uma/kk** | **uma/kk** | FC ~7e-6 |
 
 ---
 
