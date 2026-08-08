@@ -112,3 +112,23 @@ MP TS bakes `gp_node_offset` → n-specific artifacts (`UMA_MP_NATOMS`). Keep le
 ### Next
 1. Optional: unbake node offset for size-agnostic MP TS.
 2. devices=4.
+
+## Burst 7 — 2026-08-08 ~01:17 CDT (devices=4 E+F green)
+
+### Export
+| Job | Artifacts |
+|-----|-----------|
+| `20925503` | `model_mp_w4_r{0..3}.pt` (n=64) |
+| `20925505` | `model_mp_w4_n1728_r{0..3}.pt` |
+
+### Gates (`smoke_mp_w4.slurm`, RECOMPILE=1, force defaults)
+| Job | Structure | devices | dE_d1 | max\|ΔF\| | dE_ase |
+|-----|-----------|---------|-------|----------|--------|
+| `20925504` | nacl64 | 4 | 0 | 6.7e-16 | — |
+| `20925506` | NaCl6 1728 | 4 | 1.8e-12 | 5.8e-16 | 1.2e-10 |
+
+Same force regime as w=2; escale=1/world (=0.25) works. No offset unbake required.
+
+### Next (optional)
+1. Unbake `gp_node_offset`.
+2. LAMMPS `pair_style uma/kk devices 4` integration smoke.
