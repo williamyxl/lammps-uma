@@ -27,8 +27,9 @@ struct Prediction {
 /// Forces are always FP64.
 ///
 /// ``num_devices == 1``: TorchScript ``model_traced.pt`` on a single device.
-/// ``num_devices > 1``: FairChem eager graph-parallel via ``GraphParallelRuntime``
-/// (``uma_gp_worker.py`` / ``load_predict_unit(..., workers=N)``).
+/// ``num_devices > 1``: ``GraphParallelRuntime`` → default C++ LibTorch MP
+/// (``model_mp_wN_r*.pt`` + ``uma_peer`` + vesin). Opt-in Python with
+/// ``UMA_PYTHON_GP_WORKER=1``; legacy Ray with ``UMA_ALLOW_RAY_GP=1``.
 class Predictor {
  public:
   static Predictor from_artifact(const std::string& artifact_dir,

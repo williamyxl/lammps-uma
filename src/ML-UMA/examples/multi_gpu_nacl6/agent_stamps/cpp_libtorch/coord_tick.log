@@ -1,0 +1,90 @@
+2026-08-07T22:47:53-05:00 event=cpp_libtorch_agent_launched id=93ec878d-7df0-44a9-bd57-f565325f2c08
+2026-08-07T22:52:53-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=16 blockers=yes
+2026-08-07T22:55:20-05:00 COORD_TICK job=20924647 state=SUBMITTED note=export_mp_w2
+2026-08-07T22:57:16-05:00 COORD_TICK job=20924659 state=SUBMITTED note=export_mp_w2_retry_shard_edges
+2026-08-07T22:57:53-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=27 blockers=yes job=20924659 state=RUNNING
+2026-08-07T22:58:10-05:00 COORD_TICK job=20924659 state=RUNNING note=export_poll
+2026-08-07T22:58:56-05:00 COORD_TICK job=20924659 state=FAILED note=export_poll
+2026-08-07T22:59:12-05:00 COORD_TICK job=20924669 state=SUBMITTED note=export_mp_w2_patch_allreduce
+2026-08-07T23:00:19-05:00 COORD_TICK job=20924669 state=PENDING note=export_poll
+2026-08-07T23:02:21-05:00 COORD_TICK job=20924669 state=RUNNING note=export_poll
+2026-08-07T23:02:53-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=27 blockers=yes job=20924669 state=RUNNING
+2026-08-07T23:03:21-05:00 COORD_TICK job=20924669 state=FAILED note=export_poll_final
+2026-08-07T23:03:44-05:00 COORD_TICK job=20924697 state=SUBMITTED note=export_mp_w2_py_rank
+2026-08-07T23:03:53-05:00 COORD_TICK job=20924700 state=SUBMITTED note=export_mp_w2_py_rank_v2
+2026-08-07T23:05:02-05:00 COORD_TICK job=20924700 state=RUNNING note=export_poll
+2026-08-07T23:07:03-05:00 COORD_TICK job=20924700 state=FAILED note=export_poll_final
+2026-08-07T23:07:54-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=27 blockers=yes job=20924700 state=FAILED
+2026-08-07T23:07:54-05:00 COORD_TICK job=20924722 state=SUBMITTED note=smoke_mp_w2_shard_edges
+2026-08-07T23:08:01-05:00 COORD_TICK job=20924723 state=SUBMITTED note=smoke_mp_w2_fixed_inspect
+2026-08-07T23:08:52-05:00 COORD_TICK job=20924723 state=RUNNING note=smoke_poll
+2026-08-07T23:09:37-05:00 COORD_TICK job=20924723 state=FAILED note=smoke_poll_final
+2026-08-07T23:10:03-05:00 COORD_TICK job=20924746 state=SUBMITTED note=smoke_mp_w2_inspect_nonfatal
+2026-08-07T23:10:57-05:00 COORD_TICK job=20924746 state=PENDING note=smoke_poll
+2026-08-07T23:12:27-05:00 COORD_TICK job=20924746 state=PENDING note=smoke_poll
+2026-08-07T23:12:54-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=36 blockers=yes job=20924746 state=RUNNING
+2026-08-07T23:13:57-05:00 COORD_TICK job=20924746 state=RUNNING note=smoke_poll
+2026-08-07T23:15:30-05:00 COORD_TICK job=20924746 state=RUNNING note=smoke_poll
+2026-08-07T23:17:01-05:00 COORD_TICK job=20924746 state=RUNNING note=smoke_poll
+2026-08-07T23:17:54-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=36 blockers=yes job=20924746 state=RUNNING
+2026-08-07T23:18:31-05:00 COORD_TICK job=20924746 state=RUNNING note=smoke_poll
+2026-08-07T23:20:01-05:00 COORD_TICK job=20924746 state=RUNNING note=smoke_poll
+2026-08-07T23:20:43-05:00 COORD_TICK job=20924746 state=CANCELLED note=jit_thread_deadlock_suspected
+2026-08-07T23:21:31-05:00 COORD_TICK job=20924746 state=CANCELLED+ note=smoke_poll_final
+2026-08-07T23:22:54-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=36 blockers=yes job=20924746 state=CANCELLED+
+2026-08-07T23:22:59-05:00 COORD_TICK job=20924899 state=SUBMITTED note=smoke_process_per_rank
+2026-08-07T23:23:51-05:00 COORD_TICK job=20924899 state=FAILED note=smoke_proc_final
+2026-08-07T23:27:03-05:00 COORD_TICK job=20924932 state=SUBMITTED note=smoke_exec_worker
+2026-08-07T23:27:54-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=44 blockers=yes job=20924932 state=PENDING
+2026-08-07T23:27:56-05:00 COORD_TICK job=20924932 state=PENDING note=smoke_exec_poll
+2026-08-07T23:29:26-05:00 COORD_TICK job=20924932 state=PENDING note=smoke_exec_poll
+2026-08-07T23:30:56-05:00 COORD_TICK job=20924932 state=PENDING note=smoke_exec_poll
+2026-08-07T23:32:26-05:00 COORD_TICK job=20924932 state=PENDING note=smoke_exec_poll
+2026-08-07T23:32:54-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=44 blockers=yes job=20924932 state=PENDING
+2026-08-07T23:33:56-05:00 COORD_TICK job=20924932 state=PENDING note=smoke_exec_poll
+2026-08-07T23:35:26-05:00 COORD_TICK job=20924932 state=RUNNING note=smoke_exec_poll
+2026-08-07T23:36:56-05:00 COORD_TICK job=20924932 state=RUNNING note=smoke_exec_poll
+2026-08-07T23:37:55-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=44 blockers=yes job=20924932 state=RUNNING
+2026-08-07T23:38:26-05:00 COORD_TICK job=20924932 state=RUNNING note=smoke_exec_poll
+2026-08-07T23:39:58-05:00 COORD_TICK job=20924932 state=RUNNING note=smoke_exec_poll
+2026-08-07T23:41:28-05:00 COORD_TICK job=20924932 state=RUNNING note=smoke_exec_poll
+2026-08-07T23:42:21-05:00 COORD_TICK job=20924932 state=CANCELLED note=rank1_energy_head_fail
+2026-08-07T23:42:56-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=44 blockers=yes job=20924932 state=CANCELLED+
+2026-08-07T23:42:59-05:00 COORD_TICK job=20924932 state=CANCELLED+ note=smoke_exec_final
+2026-08-07T23:43:00-05:00 COORD_TICK job=20925011 state=SUBMITTED note=reexport_cvd_per_rank
+2026-08-07T23:44:08-05:00 COORD_TICK job=20925011 state=PENDING note=cvd_export_poll
+2026-08-07T23:46:08-05:00 COORD_TICK job=20925011 state=PENDING note=cvd_export_poll
+2026-08-07T23:47:58-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=51 blockers=yes job=20925011 state=PENDING
+2026-08-07T23:48:10-05:00 COORD_TICK job=20925011 state=PENDING note=cvd_export_poll
+2026-08-07T23:50:11-05:00 COORD_TICK job=20925011 state=RUNNING note=cvd_export_poll
+2026-08-07T23:52:11-05:00 COORD_TICK job=20925011 state=COMPLETING note=cvd_export_poll
+2026-08-07T23:52:59-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=51 blockers=yes job=20925011 state=FAILED
+2026-08-07T23:53:11-05:00 COORD_TICK job=20925011 state=FAILED note=cvd_export_final
+2026-08-07T23:56:16-05:00 COORD_TICK job=20925077 state=SUBMITTED note=smoke_b5b_worker_logs
+2026-08-07T23:57:09-05:00 COORD_TICK job=20925077 state=FAILED note=smoke_b5b_final
+2026-08-07T23:57:59-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=66 blockers=yes job=20925077 state=FAILED
+2026-08-08T00:00:58-05:00 COORD_TICK job=20925104 state=SUBMITTED note=smoke_b5c_autograd_ops
+2026-08-08T00:01:47-05:00 COORD_TICK job=20925104 state=PENDING note=smoke_b5c_poll
+2026-08-08T00:02:59-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=66 blockers=yes job=20925104 state=PENDING
+2026-08-08T00:03:10-05:00 COORD_TICK job=20925104 state=PENDING note=smoke_b5c_poll
+2026-08-08T00:04:33-05:00 COORD_TICK job=20925104 state=RUNNING note=smoke_b5c_poll
+2026-08-08T00:05:56-05:00 COORD_TICK job=20925104 state=FAILED note=smoke_b5c_final
+2026-08-08T00:06:31-05:00 COORD_TICK job=20925135 state=SUBMITTED note=smoke_b5d_gather_bwd_arity
+2026-08-08T00:07:19-05:00 COORD_TICK job=20925135 state=PENDING note=smoke_b5d_poll
+2026-08-08T00:08:00-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=66 blockers=yes job=20925135 state=PENDING
+2026-08-08T00:08:41-05:00 COORD_TICK job=20925135 state=PENDING note=smoke_b5d_poll
+2026-08-08T00:10:04-05:00 COORD_TICK job=20925135 state=PENDING note=smoke_b5d_poll
+2026-08-08T00:11:27-05:00 COORD_TICK job=20925135 state=RUNNING note=smoke_b5d_poll
+2026-08-08T00:12:08-05:00 COORD_TICK job=20925135 state=COMPLETED note=smoke_b5d_final
+2026-08-08T00:12:42-05:00 COORD_TICK job=20925283 state=SUBMITTED note=devices1_baseline
+2026-08-08T00:13:00-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=66 blockers=yes job=20925135 state=COMPLETED
+2026-08-08T00:13:45-05:00 COORD_TICK job=20925288 state=SUBMITTED note=smoke_b5e_no_double_ereduce
+2026-08-08T00:14:33-05:00 COORD_TICK job=20925288 state=RUNNING note=smoke_b5e_poll
+2026-08-08T00:15:08-05:00 COORD_TICK job=20925288 state=FAILED note=smoke_b5e_final
+2026-08-08T00:17:25-05:00 COORD_TICK job=20925309 state=SUBMITTED note=smoke_b5f_process_rank_nomt
+2026-08-08T00:18:00-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=66 blockers=yes job=20925309 state=PENDING
+2026-08-08T00:18:09-05:00 COORD_TICK job=20925309 state=PENDING note=smoke_b5f_poll
+2026-08-08T00:19:22-05:00 COORD_TICK job=20925309 state=PENDING note=smoke_b5f_poll
+2026-08-08T00:20:32-05:00 COORD_TICK job=20925309 state=PENDING note=smoke_b5f_poll
+2026-08-08T00:21:42-05:00 COORD_TICK job=20925309 state=COMPLETED note=smoke_b5f_final
+2026-08-08T00:22:09-05:00 COORD_TICK job=20925309 state=COMPLETED note=E_GREEN_dE_d1=0 nacl64

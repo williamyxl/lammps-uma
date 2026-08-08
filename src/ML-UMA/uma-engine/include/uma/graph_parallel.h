@@ -11,13 +11,15 @@
 
 namespace uma {
 
+class LibtorchMpRuntime;
+
 /// Same-node graph-parallel backend for ``devices > 1``.
 ///
-/// Ships FairChem eager GP (``load_predict_unit(..., workers=N)`` / Ray + NCCL)
-/// via a persistent ``uma_gp_worker.py`` subprocess. devices=1 stays on the
-/// traced LibTorch ``Predictor`` path — this class is never used for N=1.
+/// **Default:** C++ LibTorch MP (``LibtorchMpRuntime`` + ``uma_peer`` + vesin)
+/// when ``model_mp_w{N}_r*.pt`` artifacts exist.
 ///
-/// Not a serial DevicePool: workers>1 runs real FairChem ParallelMLIPPredictUnit.
+/// **Opt-in Python:** ``UMA_PYTHON_GP_WORKER=1`` → ``uma_native_gp_worker.py``
+/// (or Ray if ``UMA_ALLOW_RAY_GP=1``). Not the product path.
 class GraphParallelRuntime {
  public:
   static std::unique_ptr<GraphParallelRuntime> create(
@@ -52,17 +54,19 @@ class GraphParallelRuntime {
 
   int num_devices_ = 1;
   std::string checkpoint_;
-  std::string backend_ = "fairchem_eager_python";
+  std::string backend_ = "kokkos_libtorch_vesin";
   pid_t child_pid_ = -1;
   int to_child_fd_ = -1;    // parent writes
   int from_child_fd_ = -1;  // parent reads
+
+  std::unique_ptr<LibtorchMpRuntime> cpp_mp_;
 };
 
 /// Resolve checkpoint for eager GP (metadata → env → lab default).
 std::string resolve_gp_checkpoint(const std::string& artifact_dir,
                                   const ArtifactMetadata& metadata);
 
-/// Locate ``uma_gp_worker.py`` (env UMA_GP_WORKER or engine python dir).
+/// Locate Python GP worker script (legacy opt-in only).
 std::string resolve_gp_worker_script();
 
 }  // namespace uma

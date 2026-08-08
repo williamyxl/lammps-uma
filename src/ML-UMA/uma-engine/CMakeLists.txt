@@ -19,6 +19,8 @@ add_library(uma_engine
   src/postprocess.cpp
   src/predictor.cpp
   src/graph_parallel.cpp
+  src/peer_context.cpp
+  src/libtorch_mp.cpp
 )
 target_include_directories(uma_engine
   PUBLIC
@@ -58,7 +60,17 @@ target_link_libraries(uma_parity_cli PRIVATE uma_engine)
 add_executable(graph_shard_smoke tests/graph_shard_smoke.cpp)
 target_link_libraries(graph_shard_smoke PRIVATE uma_engine)
 
-install(TARGETS uma_engine uma_parity_cli graph_shard_smoke
+add_executable(kokkos_peer_smoke tests/kokkos_peer_smoke.cpp)
+target_link_libraries(kokkos_peer_smoke PRIVATE uma_engine)
+
+add_executable(kokkos_peer_device_smoke tests/kokkos_peer_device_smoke.cpp)
+target_link_libraries(kokkos_peer_device_smoke PRIVATE uma_engine)
+
+add_executable(uma_libtorch_mp_worker tests/uma_libtorch_mp_worker.cpp)
+target_link_libraries(uma_libtorch_mp_worker PRIVATE uma_engine)
+
+install(TARGETS uma_engine uma_parity_cli graph_shard_smoke kokkos_peer_smoke
+                kokkos_peer_device_smoke uma_libtorch_mp_worker
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin

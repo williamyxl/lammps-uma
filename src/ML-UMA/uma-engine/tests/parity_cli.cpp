@@ -32,7 +32,8 @@ static void usage(const char* argv0) {
   std::cerr << "Usage: " << argv0
             << " <artifact_dir> [structure.txt] [--devices N]\n"
             << "  devices=1 (default): TorchScript traced Predictor\n"
-            << "  devices>1: FairChem eager graph-parallel (uma_gp_worker.py)\n"
+            << "  devices>1: C++ LibTorch MP (model_mp_wN_r*.pt); "
+            << "Python only if UMA_PYTHON_GP_WORKER=1\n"
             << "  Env: UMA_CHECKPOINT, UMA_PYTHON, UMA_GP_WORKER\n";
 }
 

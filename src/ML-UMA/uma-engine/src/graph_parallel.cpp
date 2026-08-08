@@ -16,6 +16,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "uma/libtorch_mp.h"
+
 namespace uma {
 namespace {
 
@@ -96,27 +98,65 @@ std::string resolve_gp_checkpoint(const std::string& /*artifact_dir*/,
       "checkpoint_path or UMA_CHECKPOINT)");
 }
 
+bool prefer_python_gp_worker() {
+  // Product default is C++ LibTorch MP. Python workers are opt-in only.
+  if (const char* e = std::getenv("UMA_PYTHON_GP_WORKER")) {
+    if (e[0] == '1' && e[1] == '\0') return true;
+  }
+  if (const char* e = std::getenv("UMA_ALLOW_RAY_GP")) {
+    if (e[0] == '1' && e[1] == '\0') return true;
+  }
+  return false;
+}
+
+bool prefer_native_kokkos_gp_worker() {
+  // Used only when Python worker is selected: prefer uma_native_gp_worker.py
+  // over Ray unless UMA_ALLOW_RAY_GP=1.
+  if (const char* e = std::getenv("UMA_ALLOW_RAY_GP")) {
+    if (e[0] == '1' && e[1] == '\0') return false;
+  }
+  return true;
+}
+
 std::string resolve_gp_worker_script() {
   if (const char* e = std::getenv("UMA_GP_WORKER")) {
     if (*e && file_exists(e)) return e;
   }
+
+  const bool native = prefer_native_kokkos_gp_worker();
+  const char* native_name = "uma_native_gp_worker.py";
+  const char* ray_name = "uma_gp_worker.py";
+  const char* primary = native ? native_name : ray_name;
+  const char* secondary = native ? ray_name : native_name;
+
 #ifdef UMA_ENGINE_PYTHON_DIR
   {
-    std::string p = std::string(UMA_ENGINE_PYTHON_DIR) + "/uma_gp_worker.py";
+    std::string p = std::string(UMA_ENGINE_PYTHON_DIR) + "/" + primary;
     if (file_exists(p)) return p;
   }
 #endif
-  // Fallback: walk from CWD / common relative layouts.
-  const char* candidates[] = {
-      "src/ML-UMA/uma-engine/python/uma_gp_worker.py",
-      "uma-engine/python/uma_gp_worker.py",
-      "python/uma_gp_worker.py",
+  const char* rel_roots[] = {
+      "src/ML-UMA/uma-engine/python/",
+      "uma-engine/python/",
+      "python/",
   };
-  for (const char* c : candidates) {
-    if (file_exists(c)) return c;
+  for (const char* root : rel_roots) {
+    std::string p = std::string(root) + primary;
+    if (file_exists(p)) return p;
+  }
+  // Last resort: the other worker (still no silent Ray if forbid is set).
+#ifdef UMA_ENGINE_PYTHON_DIR
+  {
+    std::string p = std::string(UMA_ENGINE_PYTHON_DIR) + "/" + secondary;
+    if (file_exists(p)) return p;
+  }
+#endif
+  for (const char* root : rel_roots) {
+    std::string p = std::string(root) + secondary;
+    if (file_exists(p)) return p;
   }
   throw std::runtime_error(
-      "GraphParallelRuntime: uma_gp_worker.py not found (set UMA_GP_WORKER)");
+      "GraphParallelRuntime: GP worker script not found (set UMA_GP_WORKER)");
 }
 
 std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
@@ -125,6 +165,31 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
   if (num_devices <= 1) {
     throw std::runtime_error(
         "GraphParallelRuntime::create requires num_devices > 1");
+  }
+
+  // --- Product path: C++ LibTorch MP (Kokkos peer + vesin) ---
+  const bool force_python = prefer_python_gp_worker();
+  if (!force_python) {
+    if (LibtorchMpRuntime::artifacts_present(artifact_dir, num_devices)) {
+      auto cpp = LibtorchMpRuntime::try_create(artifact_dir, metadata, num_devices,
+                                               compute_dtype);
+      if (!cpp) {
+        throw std::runtime_error(
+            "GraphParallelRuntime: C++ LibTorch MP artifacts present but "
+            "LibtorchMpRuntime::try_create failed");
+      }
+      auto rt = std::unique_ptr<GraphParallelRuntime>(new GraphParallelRuntime(
+          num_devices, /*checkpoint=*/artifact_dir, cpp->backend()));
+      rt->cpp_mp_ = std::move(cpp);
+      return rt;
+    }
+    throw std::runtime_error(
+        "GraphParallelRuntime: C++ LibTorch MP artifacts missing under " +
+        artifact_dir +
+        " (need model_mp_w" + std::to_string(num_devices) +
+        "_r*.pt from python/export_mp_artifact.py). "
+        "Opt into legacy Python GP with UMA_PYTHON_GP_WORKER=1. "
+        "See agent_stamps/cpp_libtorch/BLOCKERS.md.");
   }
 
   const std::string checkpoint = resolve_gp_checkpoint(artifact_dir, metadata);
@@ -163,8 +228,12 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
   close(to_child[0]);
   close(from_child[1]);
 
+  const std::string default_backend =
+      (script.find("uma_native_gp_worker") != std::string::npos)
+          ? "kokkos_peer_thread_gp"
+          : "fairchem_eager_python";
   auto rt = std::unique_ptr<GraphParallelRuntime>(
-      new GraphParallelRuntime(num_devices, checkpoint, "fairchem_eager_python"));
+      new GraphParallelRuntime(num_devices, checkpoint, default_backend));
   rt->child_pid_ = pid;
   rt->to_child_fd_ = to_child[1];
   rt->from_child_fd_ = from_child[0];
@@ -188,9 +257,19 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
     const std::string backend = json_get_string(resp, "backend");
     if (!backend.empty()) rt->backend_ = backend;
 
+    const char* forbid = std::getenv("UMA_FORBID_RAY_GP");
+    if (forbid != nullptr && forbid[0] == '1' && forbid[1] == '\0') {
+      if (rt->backend_ == "fairchem_eager_python" ||
+          script.find("uma_gp_worker.py") != std::string::npos) {
+        throw std::runtime_error(
+            "GraphParallelRuntime: Ray GP forbidden (UMA_FORBID_RAY_GP=1); "
+            "use uma_native_gp_worker.py / UMA_NATIVE_KOKKOS_GP=1");
+      }
+    }
+
     std::cerr << "uma GraphParallelRuntime: backend=" << rt->backend_
               << " workers=" << num_devices << " dtype=" << dtype_name(compute_dtype)
-              << " checkpoint=" << checkpoint << "\n";
+              << " script=" << script << " checkpoint=" << checkpoint << "\n";
   } catch (...) {
     rt->shutdown_worker();
     throw;
@@ -204,9 +283,13 @@ GraphParallelRuntime::GraphParallelRuntime(int num_devices, std::string checkpoi
       checkpoint_(std::move(checkpoint)),
       backend_(std::move(backend)) {}
 
-GraphParallelRuntime::~GraphParallelRuntime() { shutdown_worker(); }
+GraphParallelRuntime::~GraphParallelRuntime() {
+  cpp_mp_.reset();
+  shutdown_worker();
+}
 
 void GraphParallelRuntime::shutdown_worker() {
+  if (cpp_mp_) return;
   if (child_pid_ > 0 && to_child_fd_ >= 0) {
     try {
       write_line("{\"cmd\":\"shutdown\"}");
@@ -290,6 +373,10 @@ Prediction GraphParallelRuntime::predict_host(int n, const double* pos_xyz,
                                               const int* pbc_3,
                                               double* forces_out_optional) {
   if (n < 1) throw std::runtime_error("GraphParallelRuntime::predict_host n < 1");
+  if (cpp_mp_) {
+    return cpp_mp_->predict_host(n, pos_xyz, atomic_numbers, cell_3x3, pbc_3,
+                                 forces_out_optional);
+  }
 
   std::ostringstream cmd;
   cmd << "{\"cmd\":\"predict\",\"n\":" << n << ",\"charge\":0,\"spin\":0}";
@@ -335,8 +422,11 @@ Prediction GraphParallelRuntime::predict_host(int n, const double* pos_xyz,
 Prediction GraphParallelRuntime::predict(const torch::Tensor& pos,
                                          const torch::Tensor& atomic_numbers,
                                          const torch::Tensor& cell,
-                                         const torch::Tensor& pbc, int64_t /*charge*/,
-                                         int64_t /*spin*/) {
+                                         const torch::Tensor& pbc, int64_t charge,
+                                         int64_t spin) {
+  if (cpp_mp_) {
+    return cpp_mp_->predict(pos, atomic_numbers, cell, pbc, charge, spin);
+  }
   auto pos_cpu = pos.to(torch::kCPU, torch::kFloat64).contiguous();
   auto z_cpu = atomic_numbers.to(torch::kCPU, torch::kLong).contiguous();
   auto cell_in = cell.to(torch::kCPU, torch::kFloat64).contiguous();
