@@ -227,9 +227,7 @@ int main(int argc, char** argv) {
         torch::autograd::AutoGradMode guard(true);
         normed = module.forward(args).toTensor().to(torch::kFloat64);
       }
-#if defined(UMA_ENGINE_USE_CUDA)
-      cudaDeviceSynchronize();
-#endif
+      // No explicit sync after forward — peer barrier below drains the device.
       const double ms_fwd =
           std::chrono::duration<double, std::milli>(clock::now() - t_fwd0).count();
       auto energy =
@@ -251,9 +249,6 @@ int main(int argc, char** argv) {
       const auto t_bwd0 = clock::now();
       auto grads = torch::autograd::grad({e_for_grad}, {pos_t}, {}, false, false, false);
       auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
-#if defined(UMA_ENGINE_USE_CUDA)
-      cudaDeviceSynchronize();
-#endif
       const double ms_bwd =
           std::chrono::duration<double, std::milli>(clock::now() - t_bwd0).count();
       const char* skip_fred = std::getenv("UMA_SKIP_FORCE_GP_REDUCE");
@@ -264,12 +259,13 @@ int main(int argc, char** argv) {
         const auto t_fred0 = clock::now();
         forces = uma::PeerContext::instance().slot().all_reduce(
             rank, forces.contiguous());
-#if defined(UMA_ENGINE_USE_CUDA)
-        cudaDeviceSynchronize();
-#endif
         ms_fred =
             std::chrono::duration<double, std::milli>(clock::now() - t_fred0).count();
       }
+#if defined(UMA_ENGINE_USE_CUDA)
+      // One sync before D2H / result publish.
+      cudaDeviceSynchronize();
+#endif
       if (rank == 0) {
         std::cerr << "PERF_TICK rank=0 world=" << world << " ms_fwd=" << ms_fwd
                   << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred

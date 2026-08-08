@@ -443,6 +443,12 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
 
   // Publish geometry + shards once into payload shm (pipe only wakes workers).
   PayloadShm* pay = impl_->payload;
+  std::vector<int64_t*> eidx_ptrs(static_cast<size_t>(num_devices_));
+  std::vector<double*> coff_ptrs(static_cast<size_t>(num_devices_));
+  for (int r = 0; r < num_devices_; ++r) {
+    eidx_ptrs[static_cast<size_t>(r)] = pay->eidx_ptr(r);
+    coff_ptrs[static_cast<size_t>(r)] = pay->coff_ptr(r);
+  }
   pthread_mutex_lock(&pay->hdr->mu);
   pay->hdr->n = static_cast<int32_t>(n);
   pay->hdr->world = num_devices_;
@@ -454,26 +460,16 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
               static_cast<size_t>(n) * 3 * sizeof(double));
   std::memcpy(pay->z_ptr(), z_cpu.data_ptr<int64_t>(),
               static_cast<size_t>(n) * sizeof(int64_t));
-  for (int r = 0; r < num_devices_; ++r) {
-    auto shard = graph_shard::shard_edges(eidx_full, coff_full, n, num_devices_, r);
-    const int64_t ne = shard.edge_index.size(1);
-    if (ne > PayloadShm::kMaxE) {
-      pthread_mutex_unlock(&pay->hdr->mu);
-      throw std::runtime_error("LibtorchMpRuntime: nedges exceeds PayloadShm::kMaxE");
-    }
-    pay->hdr->nedges[r] = static_cast<int32_t>(ne);
-    if (ne > 0) {
-      auto eidx_cpu = shard.edge_index.contiguous();
-      auto coff_cpu =
-          shard.cell_offsets.defined()
-              ? shard.cell_offsets.to(torch::kFloat64).contiguous()
-              : torch::zeros({ne, 3}, torch::kFloat64);
-      // Store as [2, E] flat (row-major): eidx[0,E) then eidx[E,2E)
-      std::memcpy(pay->eidx_ptr(r), eidx_cpu.data_ptr<int64_t>(),
-                  static_cast<size_t>(ne) * 2 * sizeof(int64_t));
-      std::memcpy(pay->coff_ptr(r), coff_cpu.data_ptr<double>(),
-                  static_cast<size_t>(ne) * 3 * sizeof(double));
-    }
+  const int64_t n_edges = eidx_full.size(1);
+  const double* coff_ptr =
+      (coff_full.defined() && coff_full.numel() > 0) ? coff_full.data_ptr<double>()
+                                                     : nullptr;
+  if (!graph_shard::pack_shards_cpu(eidx_full.data_ptr<int64_t>(), coff_ptr, n_edges, n,
+                                    num_devices_, PayloadShm::kMaxE, pay->hdr->nedges,
+                                    eidx_ptrs.data(), coff_ptrs.data())) {
+    pthread_mutex_unlock(&pay->hdr->mu);
+    throw std::runtime_error(
+        "LibtorchMpRuntime: pack_shards_cpu failed (nedges > kMaxE?)");
   }
   pay->hdr->result_gen = -1;
   const int32_t gen = ++pay->hdr->gen;
@@ -522,9 +518,25 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
       std::chrono::duration<double, std::milli>(t_wait - t_pub).count();
   const double ms_tot =
       std::chrono::duration<double, std::milli>(clock::now() - t0).count();
-  std::cerr << "PERF_PARENT world=" << num_devices_ << " ms_nl=" << ms_nl
-            << " ms_pub=" << ms_pub << " ms_wait_workers=" << ms_wait
-            << " ms_total=" << ms_tot << " gen=" << gen << "\n";
+  {
+    char line[256];
+    std::snprintf(line, sizeof(line),
+                  "PERF_PARENT world=%d ms_nl=%.3f ms_pub=%.3f ms_wait_workers=%.3f "
+                  "ms_total=%.3f gen=%d n_edges=%lld\n",
+                  num_devices_, ms_nl, ms_pub, ms_wait, ms_tot, gen,
+                  static_cast<long long>(n_edges));
+    std::cerr << line;
+    if (const char* log_dir = std::getenv("UMA_MP_LOG_DIR")) {
+      if (*log_dir) {
+        const std::string path = std::string(log_dir) + "/parent.log";
+        FILE* fp = std::fopen(path.c_str(), "a");
+        if (fp) {
+          std::fputs(line, fp);
+          std::fclose(fp);
+        }
+      }
+    }
+  }
 
   Prediction out;
   out.energy = energy;

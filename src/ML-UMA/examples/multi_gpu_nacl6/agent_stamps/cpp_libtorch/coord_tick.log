@@ -276,3 +276,10 @@
 2026-08-08T09:53:21-05:00 AGENT_LOOP_TICK_mp_perf progress job=20933393 state=COMPLETED
 2026-08-08T09:58:13-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=232 blockers=yes job=20933393 state=COMPLETED
 2026-08-08T09:59:03-05:00 COORD_TICK job=20933393 state=COMPLETED note=P2_PASS_ms=321.5/190.8/140.9_EF_green_beat_ASE2
+2026-08-08T10:02:47-05:00 COORD_TICK note=report_ownership_parent_only
+2026-08-08T10:02:59-05:00 PARENT_TICK refresh_reports P2=20933393
+2026-08-08T10:03:13-05:00 PARENT_TICK reports+canvases stamped P2=20933393 ms=321.5/190.8/140.9; resumed cpp agent for @4 gap
+2026-08-08T10:03:13-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=242 blockers=yes
+2026-08-08T10:05:00-05:00 PARENT_TICK poll
+2026-08-08T10:05:07-05:00 PARENT_TICK stamped P2 still current; P3 coding no job
+2026-08-08T10:05:41-05:00 COORD_TICK job=20934280 state=SUBMITTED note=perf_P3_fast_shard_sync_trim

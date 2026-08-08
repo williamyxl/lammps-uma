@@ -73,5 +73,55 @@ inline bool partitions_cover_all_edges(const torch::Tensor& edge_index,
   return assigned.all().item<bool>();
 }
 
+// Rank of atom i under torch::tensor_split(arange(n), world) (FairChem).
+inline int rank_of_atom(int64_t i, int64_t n_atoms, int world_size) {
+  if (world_size <= 1) return 0;
+  const int64_t base = n_atoms / world_size;
+  const int64_t rem = n_atoms % world_size;
+  const int64_t first = rem * (base + 1);
+  if (i < first) return static_cast<int>(i / (base + 1));
+  if (base == 0) return world_size - 1;
+  return static_cast<int>(rem + (i - first) / base);
+}
+
+// Fast CPU pack of all rank shards (no torch::isin).
+// Layout per rank: eidx [2, ne] row-major (row0 then row1); coff [ne, 3].
+// eidx_out[r] capacity ≥ 2*max_e; coff_out[r] ≥ 3*max_e.
+inline bool pack_shards_cpu(const int64_t* eidx_full,  // [2, E] row-major
+                            const double* coff_full,   // [E, 3] or nullptr
+                            int64_t n_edges, int64_t n_atoms, int world_size,
+                            int64_t max_e, int32_t* nedges_out,
+                            int64_t** eidx_out, double** coff_out) {
+  if (world_size < 1 || n_edges < 0) return false;
+  std::vector<int64_t> counts(static_cast<size_t>(world_size), 0);
+  const int64_t* neigh = eidx_full;
+  const int64_t* center = eidx_full + n_edges;
+  for (int64_t e = 0; e < n_edges; ++e) {
+    const int r = rank_of_atom(center[e], n_atoms, world_size);
+    if (r < 0 || r >= world_size) return false;
+    ++counts[static_cast<size_t>(r)];
+  }
+  for (int r = 0; r < world_size; ++r) {
+    if (counts[static_cast<size_t>(r)] > max_e) return false;
+    nedges_out[r] = static_cast<int32_t>(counts[static_cast<size_t>(r)]);
+    counts[static_cast<size_t>(r)] = 0;
+  }
+  for (int64_t e = 0; e < n_edges; ++e) {
+    const int r = rank_of_atom(center[e], n_atoms, world_size);
+    const int64_t ne = nedges_out[r];
+    const int64_t j = counts[static_cast<size_t>(r)]++;
+    eidx_out[r][j] = neigh[e];
+    eidx_out[r][ne + j] = center[e];
+    if (coff_full) {
+      coff_out[r][3 * j + 0] = coff_full[3 * e + 0];
+      coff_out[r][3 * j + 1] = coff_full[3 * e + 1];
+      coff_out[r][3 * j + 2] = coff_full[3 * e + 2];
+    } else {
+      coff_out[r][3 * j + 0] = coff_out[r][3 * j + 1] = coff_out[r][3 * j + 2] = 0.0;
+    }
+  }
+  return true;
+}
+
 }  // namespace graph_shard
 }  // namespace uma

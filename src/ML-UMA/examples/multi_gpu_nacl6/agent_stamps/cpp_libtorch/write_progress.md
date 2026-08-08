@@ -234,3 +234,19 @@ vs P0 320.6/330.5/382.9 and Phase-3 ~361/~473. Soft gap vs ASE/FC @4 (~115) rema
 ## Tick policy (2026-08-08 ~09:59)
 
 On every parent `AGENT_LOOP_TICK_mp_perf`: refresh `results/{RESULTS,SUMMARY,MULTIGPU_REPORT}.md` + canvases `nacl6-multigpu-results` / `nacl6-three-path-compare` from latest honest ms / gates (do not leave stale P1 numbers).
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits)
+
+## Burst 14 — P3 close @4 vs ASE/FC (2026-08-08 ~10:05 CDT)
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits)
+
+Constraint: stamps + `uma-engine/` only. Target: cut ~26 ms @4 (140.9 → ≲120) without weakening E+F/self-scale.
+
+### P3 code
+| Item | Detail |
+|------|--------|
+| `graph_shard::pack_shards_cpu` | One-pass CPU pack; drop `torch::isin` publish tax |
+| Worker | Drop mid-path `cudaDeviceSynchronize`; one sync before D2H |
+| Parent | `PERF_PARENT` also appended to `UMA_MP_LOG_DIR/parent.log` |
+| `perf_p3.slurm` | beat P2 @4 + self-scale + E+F; soft @4 ≤120 |
