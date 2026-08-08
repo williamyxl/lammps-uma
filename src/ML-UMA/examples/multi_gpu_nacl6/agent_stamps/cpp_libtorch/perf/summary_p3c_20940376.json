@@ -1,0 +1,19 @@
+{
+  "phase": "P3c_perf",
+  "jobid": "20940376",
+  "peer_transport": "nccl",
+  "status": "CANCELLED",
+  "exit_code": "0:0",
+  "ms": {"1": 321.56, "2": null, "4": null},
+  "E_F_green": {"1": true, "2": null, "4": null},
+  "self_scale_green": null,
+  "beat_p3a_green": false,
+  "hard_ase_fc_green": false,
+  "campaign_pass": false,
+  "p3a_baseline_ms": {"1": 320.6, "2": 183.57, "4": 117.63},
+  "ase_ms": {"2": 193.9, "4": 115.2},
+  "fc_ms": {"2": 193.2, "4": 118.0},
+  "failure": "teardown_deadlock: parent waitpid(rank0) while ncclCommDestroy; rank1 never got shutdown cmd=0",
+  "diagnosis": "P3C_HANG_20940376.md",
+  "note": "devices=1 OK; devices=2 first MP eval OK then hang on ~LibtorchMpRuntime"
+}

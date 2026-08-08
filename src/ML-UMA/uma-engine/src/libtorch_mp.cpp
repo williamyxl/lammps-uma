@@ -316,6 +316,9 @@ LibtorchMpRuntime::LibtorchMpRuntime(int num_devices, ArtifactMetadata metadata,
 
 LibtorchMpRuntime::~LibtorchMpRuntime() {
   if (!impl_) return;
+  // Broadcast shutdown to ALL ranks before waitpid any. NCCL teardown requires
+  // every rank to enter ncclCommDestroy; a per-rank write+waitpid deadlocks
+  // (P3c hang 20940376: rank0 stuck in destroy, rank1 never got cmd=0).
   for (auto& w : impl_->workers) {
     if (w.to_child >= 0) {
       try {
@@ -330,10 +333,28 @@ LibtorchMpRuntime::~LibtorchMpRuntime() {
       close(w.from_child);
       w.from_child = -1;
     }
+  }
+  for (auto& w : impl_->workers) {
     if (w.pid > 0) {
       int status = 0;
-      waitpid(w.pid, &status, 0);
-      w.pid = -1;
+      // Bounded wait so a stuck NCCL teardown cannot pin the parent forever.
+      for (int i = 0; i < 200; ++i) {  // ~20s
+        const pid_t r = waitpid(w.pid, &status, WNOHANG);
+        if (r == w.pid) {
+          w.pid = -1;
+          break;
+        }
+        if (r < 0) {
+          w.pid = -1;
+          break;
+        }
+        usleep(100000);
+      }
+      if (w.pid > 0) {
+        kill(w.pid, SIGKILL);
+        waitpid(w.pid, &status, 0);
+        w.pid = -1;
+      }
     }
   }
   if (impl_->shared) {

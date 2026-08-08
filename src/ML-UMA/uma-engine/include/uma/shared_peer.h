@@ -289,7 +289,33 @@ class SharedPeerGatherSlot {
 
   void release_nccl() {
 #if defined(UMA_ENGINE_USE_NCCL)
-    if (comm_) {
+    if (comm_ && shm_) {
+      // All ranks must enter destroy together; parent broadcasts shutdown first.
+      pthread_mutex_lock(&shm_->mu);
+      const int gen = shm_->gen;
+      ++shm_->nwrite;
+      if (shm_->nwrite == shm_->world) {
+        pthread_cond_broadcast(&shm_->cv);
+      } else {
+        while (shm_->nwrite < shm_->world && shm_->gen == gen) {
+          pthread_cond_wait(&shm_->cv, &shm_->mu);
+        }
+      }
+      ++shm_->nread;
+      if (shm_->nread == shm_->world) {
+        shm_->nwrite = 0;
+        shm_->nread = 0;
+        ++shm_->gen;
+        pthread_cond_broadcast(&shm_->cv);
+      } else {
+        while (shm_->gen == gen) {
+          pthread_cond_wait(&shm_->cv, &shm_->mu);
+        }
+      }
+      pthread_mutex_unlock(&shm_->mu);
+      ncclCommDestroy(comm_);
+      comm_ = nullptr;
+    } else if (comm_) {
       ncclCommDestroy(comm_);
       comm_ = nullptr;
     }

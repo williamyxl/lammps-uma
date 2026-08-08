@@ -349,3 +349,9 @@
 2026-08-08T12:18:21-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=313 blockers=yes job=20935770 state=FAILED
 2026-08-08T12:18:30-05:00 COORD_TICK job=20940372 state=SUBMITTED note=P3c_resubmit_after_false_sanity_fail prev=20935770
 2026-08-08T12:19:47-05:00 COORD_TICK job=20940376 state=SUBMITTED note=P3c_explicit_worker_NCCL_link cancelled=20940372 prev_false_fail=20935770
+2026-08-08T12:20:09-05:00 COORD_TICK job=20940372 state=CANCELLED note=P3c_resub_left_queue
+2026-08-08T12:23:21-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=332 blockers=yes job=20940376 state=PENDING
+2026-08-08T12:28:21-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=332 blockers=yes job=20940376 state=RUNNING
+2026-08-08T12:33:21-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=332 blockers=yes job=20940376 state=RUNNING
+2026-08-08T12:35:01-05:00 COORD_TICK job=20940376 state=CANCELLED note=P3c_20940376_done
+2026-08-08T12:35:32-05:00 COORD_TICK job=20940474 state=SUBMITTED note=P3c_after_teardown_deadlock_fix cancelled=20940376

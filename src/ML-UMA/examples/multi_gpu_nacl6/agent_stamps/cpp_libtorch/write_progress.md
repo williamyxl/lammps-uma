@@ -330,3 +330,9 @@ Hardening:
 - CMake: explicit `target_compile_definitions` + `target_link_libraries(${NCCL_LIBRARY})` + RPATH on `uma_libtorch_mp_worker`
 - Sanity: `nm -D` / `ldd` counts (not `grep -q`)
 - Cancelled pending `20940372`; resubmitted **`20940376`** RECOMPILE=1 / nccl
+
+## Burst 21 — P3c hang 20940376: NCCL teardown deadlock (2026-08-08 ~12:35 CDT)
+
+REPORT_OWNER=parent.
+
+**Not** mid-step NCCL deadlock. devices=2 first eval OK (PERF_PARENT gen=1, PotEng green); hang on `~LibtorchMpRuntime`: per-rank `write(cmd=0)+waitpid` left rank0 in `ncclCommDestroy` while rank1 sat in `pipe_read`. Cancelled. Fix: broadcast shutdown then waitpid; rendezvous before `ncclCommDestroy`. Details: `P3C_HANG_20940376.md`.
