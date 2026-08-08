@@ -15,9 +15,9 @@ Also: `results/SUMMARY.md`, `results/MULTIGPU_REPORT.md`, `results/SUMMARY.json`
 |------|-------------------|-------------:|-----------------:|-------|
 | ASE FairChem FP64 | 396.5 / 193.9 / 115.2 | ~0 | ~0 | Ray — reference |
 | FairChem FC LAMMPS | 345.5 / 193.2 / 118.0 | ≈4.9×10⁻⁶ | ≈7.1×10⁻⁶ | Ray — reference |
-| **uma/kk double (product)** | **320.3 / 265.0 / 193.3** | **≈1.2×10⁻¹⁰** | **≈5.0×10⁻⁷** | Kokkos+LibTorch + CUDA IPC · job `20932975` |
+| **uma/kk double (product)** | **321.5 / 190.8 / 140.9** | **≈1.2×10⁻¹⁰** | **≈5.0×10⁻⁷** | P2 job `20933393` · beats ASE/FC @2 |
 
-Full tables (timing + energy + per-atom force): [`results/RESULTS.md`](results/RESULTS.md) § Three-path · [`results/MULTIGPU_REPORT.md`](results/MULTIGPU_REPORT.md).
+Full tables: [`results/RESULTS.md`](results/RESULTS.md) § Three-path · [`results/MULTIGPU_REPORT.md`](results/MULTIGPU_REPORT.md). Canvas: `nacl6-multigpu-results` (refreshed each tick).
 
 ## Geometry contract (DO NOT regenerate)
 

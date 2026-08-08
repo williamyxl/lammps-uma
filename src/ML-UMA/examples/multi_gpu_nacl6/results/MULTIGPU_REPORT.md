@@ -1,13 +1,14 @@
 # UMA multi-GPU NaCl 6×6×6 parity report
 
-> **Canonical:** [`RESULTS.md`](RESULTS.md) · [`SUMMARY.md`](SUMMARY.md) · canvas `nacl6-three-path-compare`
+> **Canonical:** [`RESULTS.md`](RESULTS.md) · [`SUMMARY.md`](SUMMARY.md) · canvas `nacl6-multigpu-results`  
+> **Stamp:** 2026-08-08 ~09:59 CDT · Perf P2 job `20933393`
 
 ## Setup
 
 - **System:** NaCl 6×6×6 rocksalt, 1728 atoms (`structures/nacl6_rattle_fixed.extxyz`)
 - **ASE oracle:** −5830.9237201666 eV (`gp_round/oracle_ase_fp64_w1.json`)
 - **Product launch:** `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · `--ntasks=1`
-- **Backend:** Kokkos+LibTorch (`gp=kokkos_libtorch_vesin`) · peer **CUDA IPC** (`UMA_PEER_TRANSPORT=cuda_ipc`)
+- **Backend:** Kokkos+LibTorch (`gp=kokkos_libtorch_vesin`) · **CUDA IPC** + **payload shm** fan-out
 - **Precision:** FP64 only · mixed disabled
 
 ---
@@ -22,9 +23,11 @@ Same frozen geometry. Oracle = ASE FairChem FP64 `workers=1`.
 |------|------:|------:|------:|----:|----:|---------|
 | ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× | Ray ParallelMLIP (`workers=N`) |
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× | Ray ParallelMLIP in FC |
-| **uma/kk double (product)** | **320.34** | **264.96** | **193.32** | **1.21×** | **1.66×** | Kokkos+LibTorch + CUDA IPC |
+| **uma/kk double (product)** | **321.54** | **190.80** | **140.90** | **1.69×** | **2.28×** | Kokkos+LibTorch + CUDA IPC + payload shm |
 
-Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma `20932975`.
+Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma **P2 `20933393`** (P1 was 320.34 / 264.96 / 193.32).
+
+**@2:** uma **beats** ASE/FC. **@4:** soft ≲150 PASS; still ~26 ms behind ASE (~115).
 
 ### Energy vs ASE FP64@1
 
@@ -43,30 +46,29 @@ Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma `20932975`.
 | FairChem FC LAMMPS | 1 / 2 / 4 | **7.12×10⁻⁶** | **7.13×10⁻⁶** | 1.000000 |
 | **uma/kk double** | 1 / 2 / 4 | **5.00×10⁻⁷** | **7.67×10⁻⁷** | 1.000000 |
 
-uma devices=2/4 vs uma devices=1: max\|ΔF\| = **0**. FC ~14× larger force error vs ASE than uma/kk.
+uma devices=2/4 vs uma devices=1: max\|ΔF\| = **0**.
 
 ### Readout
 
-| Metric | Winner @1 GPU | Winner @4 GPU |
-|--------|---------------|---------------|
-| Timing | **uma/kk** (320 vs 397/346) | ASE/FC (~115–118) |
-| Energy vs ASE | **uma/kk** (~1e-10) | **uma/kk** |
-| Forces vs ASE | **uma/kk** (~5e-7) | **uma/kk** |
+| Metric | Winner @1 | Winner @2 | Winner @4 |
+|--------|-----------|-----------|-----------|
+| Timing | **uma/kk** | **uma/kk** | ASE/FC (~115–118) |
+| Energy vs ASE | **uma/kk** | **uma/kk** | **uma/kk** |
+| Forces vs ASE | **uma/kk** | **uma/kk** | **uma/kk** |
 
 ---
 
-## Product gate (uma/kk vs devices=1)
+## Product gate (uma/kk vs devices=1) — P2
 
 | devices | Energy (eV) | pair ms | \|dE\| vs d1 | max\|ΔF\| vs d1 | gate | Job |
 |--------:|-------------:|--------:|-------------:|----------------:|:----:|-----|
-| 1 | −5830.9237201667 | **320.34** | — | 0 | PASS | `20932975` |
-| 2 | −5830.9237201667 | **264.96** | 0 | **0** | **PASS** | `20932975` |
-| 4 | −5830.9237201667 | **193.32** | 1.8×10⁻¹² | **0** | **PASS** | `20932975` |
+| 1 | −5830.9237201667 | **321.54** | — | 0 | PASS | `20933393` |
+| 2 | −5830.9237201667 | **190.80** | 2.7×10⁻¹² | **0** | **PASS** | `20933393` |
+| 4 | −5830.9237201667 | **140.90** | 2.7×10⁻¹² | **0** | **PASS** | `20933393` |
 
-**Self-scale:** PASS (`ms(2)<ms(1)`, `ms(4)<ms(2)`).
+**Self-scale:** PASS. Soft targets @2 ≲200 / @4 ≲150: **PASS**.
 
 ## Notes
 
-- Same-node only (`gpuA100x4`); Phase 5 multi-node out of scope.
-- Machine-readable: `SUMMARY.json` → `three_path_compare`.
-- ASE/FC are reference baselines (Ray); product path is uma/kk Kokkos+LibTorch.
+- Tick policy: each parent 2‑min tick refreshes this report + canvas from latest `perf/summary_*.json` / honest `uma64` lines.
+- Machine-readable: `SUMMARY.json` · `../agent_stamps/cpp_libtorch/perf/summary_20933393.json`.

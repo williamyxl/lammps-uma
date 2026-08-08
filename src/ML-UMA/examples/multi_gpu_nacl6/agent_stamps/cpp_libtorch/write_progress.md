@@ -230,3 +230,7 @@ Honest pair ms: **321.54 / 190.80 / 140.90**. E+F green (max|ΔF|=0). Self-scale
 
 Honest pair ms: **320.34 / 264.96 / 193.32** @1/2/4. E+F green (max|ΔF|=0).
 vs P0 320.6/330.5/382.9 and Phase-3 ~361/~473. Soft gap vs ASE/FC @4 (~115) remains (optional P2).
+
+## Tick policy (2026-08-08 ~09:59)
+
+On every parent `AGENT_LOOP_TICK_mp_perf`: refresh `results/{RESULTS,SUMMARY,MULTIGPU_REPORT}.md` + canvases `nacl6-multigpu-results` / `nacl6-three-path-compare` from latest honest ms / gates (do not leave stale P1 numbers).
