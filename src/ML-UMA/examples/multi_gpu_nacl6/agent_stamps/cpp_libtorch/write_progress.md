@@ -1,5 +1,7 @@
 # C++ LibTorch track — WRITE progress
 
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits)
+
 ## Burst 1 — 2026-08-07 ~23:00 CDT
 
 ### Inventory (`model_state.pt`)
@@ -243,10 +245,24 @@ REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits)
 
 Constraint: stamps + `uma-engine/` only. Target: cut ~26 ms @4 (140.9 → ≲120) without weakening E+F/self-scale.
 
-### P3 code
+### P3 code (P3a)
 | Item | Detail |
 |------|--------|
 | `graph_shard::pack_shards_cpu` | One-pass CPU pack; drop `torch::isin` publish tax |
 | Worker | Drop mid-path `cudaDeviceSynchronize`; one sync before D2H |
 | Parent | `PERF_PARENT` also appended to `UMA_MP_LOG_DIR/parent.log` |
 | `perf_p3.slurm` | beat P2 @4 + self-scale + E+F; soft @4 ≤120 |
+
+## Burst 15 — P3 phased plan ack (2026-08-08 ~10:17 CDT)
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits). Plan: `uma_vs_ase_fc_perf`.
+
+| Phase | Scope | Status |
+|-------|--------|--------|
+| **P3a** | `pack_shards_cpu` + sync cuts + `PERF_PARENT`; default `UMA_PEER_TRANSPORT=cuda_ipc`; job `20934280` (`perf_p3.slurm`, RECOMPILE=1) | **in queue** (Priority; scontrol StartTime ~22:02 CDT) |
+| **P3b** | After P3a lands: attribute @4 residual from `PERF_PARENT` (`ms_nl`/`ms_pub`/`ms_wait_workers`) vs worker `PERF_TICK`; stamp under `cpp_libtorch/` only | blocked on P3a |
+| **P3c** | Opt-in `UMA_PEER_TRANSPORT=nccl` (raw libnccl behind `uma_peer` gather/reduce); cuda_ipc fallback; keep `uma/kk` + `-k on g N`; A/B vs P3a @1/2/4 | **do not code until P3a+P3b stamped** |
+| **P4a** | Harden/default nccl **only if P3c wins** | later |
+| **P4b** | Else parent NL/publish cuts | later |
+
+Hard gates unchanged: E+F green · self-scale · beat prior @4. Soft: @4 toward ASE ~115. No Ray; no RESULTS/SUMMARY/MULTIGPU/canvas edits.
