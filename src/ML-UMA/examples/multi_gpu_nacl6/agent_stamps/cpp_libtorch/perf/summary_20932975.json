@@ -1,0 +1,29 @@
+{
+  "phase": "P1_perf",
+  "jobid": "20932975",
+  "peer_transport": "cuda_ipc",
+  "ms": {
+    "1": 320.34,
+    "2": 264.96,
+    "4": 193.32399999999998
+  },
+  "dE_d1": {
+    "1": 1.8189894035458565e-12,
+    "2": 0.0,
+    "4": 1.8189894035458565e-12
+  },
+  "max_dF": {
+    "1": 0.0,
+    "2": 0.0,
+    "4": 0.0
+  },
+  "E_F_green": true,
+  "self_scale_green": true,
+  "hard_gate": "ms(2)<ms(1) and ms(4)<ms(2)",
+  "p0_baseline_ms": {
+    "1": 320.64,
+    "2": 330.52,
+    "4": 382.86
+  },
+  "note": "P1 = CUDA IPC device payloads; control still in shm"
+}

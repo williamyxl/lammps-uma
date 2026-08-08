@@ -59,8 +59,8 @@ Gates vs `results/ngpu1` uma_double (devices=1) and ASE oracle.
 | devices | Job | Energy (eV) | dE_d1 | max\|ΔF\| vs d1 | dE_ase | pair ms/eval\* |
 |--------:|-----|-------------:|------:|-----------------:|-------:|---------------:|
 | 1 | (baseline `ngpu1`) | −5830.9237201667 | — | 0 | 1.2×10⁻¹⁰ | **≈320** |
-| 2 | `20925747` | −5830.9237201667 | **9.1×10⁻¹³** | **0** | 1.2×10⁻¹⁰ | **≈361** |
-| 4 | `20925801` | −5830.9237201667 | **2.7×10⁻¹²** | **0** | 1.2×10⁻¹⁰ | **≈473** |
+| 2 | `20925747` | −5830.9237201667 | **9.1×10⁻¹³** | **0** | 1.2×10⁻¹⁰ | ≈361 (pre-P1) |
+| 4 | `20925801` | −5830.9237201667 | **2.7×10⁻¹²** | **0** | 1.2×10⁻¹⁰ | ≈473 (pre-P1) |
 
 \*Honest pair-path timer from `run_multigpu` (`uma64 E=… XXX ms`). Do **not** use SLURM `wall/N_TIMING` (inflates with setup).
 
@@ -70,9 +70,22 @@ Stamp gates:
 `agent_stamps/cpp_libtorch/lammps_gate_w2_20925747/gate.json` ·  
 `agent_stamps/cpp_libtorch/lammps_gate_w4_20925801/gate.json`
 
+### Perf P1 — CUDA IPC self-scale (job `20932975`)
+
+`UMA_PEER_TRANSPORT=cuda_ipc` (default): device payloads via `cudaIpcMemHandle_t`; E+F still green.
+
+| devices | pair ms/eval | vs devices=1 | dE_d1 | max\|ΔF\| |
+|--------:|-------------:|-------------:|------:|----------:|
+| 1 | **320.34** | — | 1.8×10⁻¹² | **0** |
+| 2 | **264.96** | **0.83×** | 0 | **0** |
+| 4 | **193.32** | **0.60×** | 1.8×10⁻¹² | **0** |
+
+**Hard gate PASS:** `ms(2)<ms(1)` and `ms(4)<ms(2)`.  
+vs P0 host-shm (320.6 / 330.5 / 382.9) and Phase-3 pre-IPC (~361 / ~473). Soft gap vs ASE/FC Ray (~194 / ~115 @2/@4) remains; further wins are P2 pipe tax / optional.
+
 ### Timing note (honest)
 
-Same-node Kokkos+LibTorch MP is **correctness-first**. Pair ms/eval at devices=2/4 (~361 / ~473) is **not** strong speedup vs devices=1 (~320); process-per-rank + host-staged peer gather adds overhead. Do not quote older Ray/Python GP ms (~192 / ~113 @2/@4) as the product backend.
+Product path now **self-scales** with CUDA IPC collectives. Quote P1 job `20932975` numbers above — not Phase-3 host-shm (~361 / ~473) and not Ray/Python GP (~192 / ~113).
 
 ---
 
@@ -85,7 +98,7 @@ Historical FairChem timings (jobs `20910344`–`20910354`). ASE/FC scaling conte
 | ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | `workers=N` → Ray ParallelMLIP |
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell FP32 → \|ΔE\|≈4.9×10⁻⁶ vs ASE |
 
-**Current uma/kk pair ms** (product, Kokkos+LibTorch): **≈320 / ≈361 / ≈473** at devices=1/2/4 — see Phase 3 table above (jobs `ngpu1` / `20925747` / `20925801`). Do not quote older Ray/Python GP uma timings (~192 / ~113 @2/@4) or pre-rewrite path-isolated uma multi-GPU rows as the product backend.
+**Current uma/kk pair ms** (product, Kokkos+LibTorch + CUDA IPC): **≈320 / ≈265 / ≈193** at devices=1/2/4 — job `20932975`. Do not quote Ray/Python GP or pre-IPC host-shm multi-GPU rows as the product backend.
 
 ---
 
@@ -94,8 +107,9 @@ Historical FairChem timings (jobs `20910344`–`20910354`). ASE/FC scaling conte
 1. **Product path is Kokkos+LibTorch** (`kokkos_libtorch_vesin`), not Ray / FairChem eager GP / Python workers.
 2. Engine CLI and LAMMPS agree: devices=2 and devices=4 E+F match devices=1 to numerical noise; forces vs d1 are exact (max\|ΔF\|=0) on the LAMMPS path.
 3. Energy vs ASE FP64@1 stays ~10⁻¹⁰ eV on NaCl6.
-4. Honest multi-GPU pair timing does **not** claim Ray-like speedups; correctness gate is the Phase 3 deliverable.
-5. **Phase 5 (multi-node MPI-GP)** is out of scope for this report.
+4. **Self-scale green** after CUDA IPC (P1): pair ms falls 320 → 265 → 193 at devices=1/2/4 with E+F still PASS.
+5. ASE/FC Ray still faster at 4 GPUs (~115 ms); further uma/kk wins are optional P2 (parent↔worker IPC).
+6. **Phase 5 (multi-node MPI-GP)** is out of scope for this report.
 
 ---
 
