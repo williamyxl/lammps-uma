@@ -4,10 +4,12 @@
 // Threads cannot run concurrent jit::Module::forward (deadlock). Each GP rank
 // is a process; control sync uses PTHREAD_PROCESS_SHARED.
 //
-// Transports (UMA_PEER_TRANSPORT=shm|cuda_ipc):
+// Transports (UMA_PEER_TRANSPORT=shm|cuda_ipc|nccl):
 //   shm      — host-staged payload in mmap (legacy / fallback)
 //   cuda_ipc — device payload via cudaIpcMemHandle_t; shm holds only control +
 //              handles + nbytes. Default when CUDA is available.
+//   nccl     — opt-in raw libnccl AllGather/AllReduce; shm holds control +
+//              ncclUniqueId. Falls back unavailable if built without NCCL.
 
 #include <cstdint>
 #include <cstdlib>
@@ -28,6 +30,9 @@
 #if defined(UMA_ENGINE_USE_CUDA)
 #include <cuda_runtime_api.h>
 #endif
+#if defined(UMA_ENGINE_USE_NCCL)
+#include <nccl.h>
+#endif
 
 namespace uma {
 namespace kokkos_peer {
@@ -37,6 +42,7 @@ class SharedPeerGatherSlot {
   static constexpr size_t kMaxBytesPerRank = 256ull * 1024ull * 1024ull;
   static constexpr int kTransportShm = 0;
   static constexpr int kTransportCudaIpc = 1;
+  static constexpr int kTransportNccl = 2;
 
 #if defined(UMA_ENGINE_USE_CUDA)
   using IpcHandle = cudaIpcMemHandle_t;
@@ -53,18 +59,28 @@ class SharedPeerGatherSlot {
     int nwrite;
     int nread;
     int world;
-    int transport;       // kTransportShm | kTransportCudaIpc
-    int ipc_init_count;  // ranks that published IPC handles
+    int transport;       // shm | cuda_ipc | nccl
+    int ipc_init_count;  // ranks ready for cuda_ipc OR nccl bootstrap
+    char nccl_id[128];   // ncclUniqueId bytes (rank0 publishes)
     // trailing per rank (see rank_stride):
     //   int64_t nbytes
     //   [cuda_ipc] IpcHandle
     //   [shm]      char payload[kMaxBytesPerRank]
+    //   [nccl]     (nbytes unused)
   };
 
   static int select_transport() {
     if (const char* e = std::getenv("UMA_PEER_TRANSPORT")) {
       if (std::strcmp(e, "shm") == 0) return kTransportShm;
       if (std::strcmp(e, "cuda_ipc") == 0) return kTransportCudaIpc;
+      if (std::strcmp(e, "nccl") == 0) {
+#if defined(UMA_ENGINE_USE_NCCL)
+        return kTransportNccl;
+#else
+        throw std::runtime_error(
+            "UMA_PEER_TRANSPORT=nccl but uma-engine built without NCCL");
+#endif
+      }
     }
 #if defined(UMA_ENGINE_USE_CUDA)
     if (torch::cuda::is_available()) return kTransportCudaIpc;
@@ -76,6 +92,8 @@ class SharedPeerGatherSlot {
     size_t n = sizeof(int64_t);
     if (transport == kTransportCudaIpc) {
       n += sizeof(IpcHandle);
+    } else if (transport == kTransportNccl) {
+      // control-only trailing; nbytes slots unused
     } else {
       n += kMaxBytesPerRank;
     }
@@ -88,7 +106,9 @@ class SharedPeerGatherSlot {
   }
 
   static const char* transport_name(int transport) {
-    return transport == kTransportCudaIpc ? "cuda_ipc" : "shm";
+    if (transport == kTransportCudaIpc) return "cuda_ipc";
+    if (transport == kTransportNccl) return "nccl";
+    return "shm";
   }
 
   static SharedPeerGatherSlot* create(int world) {
@@ -117,6 +137,7 @@ class SharedPeerGatherSlot {
   int transport() const { return shm_ ? shm_->transport : kTransportShm; }
 
   void destroy() {
+    release_nccl();
     release_cuda_ipc();
     if (!shm_) {
       delete this;
@@ -134,7 +155,7 @@ class SharedPeerGatherSlot {
   int world() const { return shm_->world; }
 
   // Worker-only: allocate CUDA send buffer, publish IPC handle, open remotes.
-  // No-op for shm transport or if already initialized.
+  // No-op for shm/nccl transport or if already initialized.
   void init_cuda_ipc(int rank) {
     if (!shm_ || shm_->transport != kTransportCudaIpc) return;
     if (ipc_ready_) return;
@@ -212,21 +233,104 @@ class SharedPeerGatherSlot {
     }
 #endif
     ipc_ready_ = false;
-    my_rank_ = -1;
+    if (!nccl_ready_) my_rank_ = -1;
+  }
+
+  // Worker-only: bootstrap ncclComm from shared unique id. No-op unless nccl.
+  void init_nccl(int rank) {
+    if (!shm_ || shm_->transport != kTransportNccl) return;
+    if (nccl_ready_) return;
+#if !defined(UMA_ENGINE_USE_NCCL)
+    throw std::runtime_error("SharedPeerGatherSlot: nccl requested without NCCL");
+#else
+    if (rank < 0 || rank >= shm_->world) {
+      throw std::runtime_error("SharedPeerGatherSlot: bad rank for init_nccl");
+    }
+    my_rank_ = rank;
+#if defined(UMA_ENGINE_USE_CUDA)
+    cudaSetDevice(0);
+#endif
+    ncclUniqueId id;
+    std::memset(&id, 0, sizeof(id));
+    static_assert(sizeof(ncclUniqueId) <= 128, "ncclUniqueId larger than Shm::nccl_id");
+
+    pthread_mutex_lock(&shm_->mu);
+    if (rank == 0) {
+      ncclResult_t nr = ncclGetUniqueId(&id);
+      if (nr != ncclSuccess) {
+        pthread_mutex_unlock(&shm_->mu);
+        throw std::runtime_error(std::string("ncclGetUniqueId: ") +
+                                 ncclGetErrorString(nr));
+      }
+      std::memcpy(shm_->nccl_id, &id, sizeof(id));
+    }
+    ++shm_->ipc_init_count;
+    if (shm_->ipc_init_count == shm_->world) {
+      pthread_cond_broadcast(&shm_->cv);
+    } else {
+      while (shm_->ipc_init_count < shm_->world) {
+        pthread_cond_wait(&shm_->cv, &shm_->mu);
+      }
+    }
+    std::memcpy(&id, shm_->nccl_id, sizeof(id));
+    pthread_mutex_unlock(&shm_->mu);
+
+    ncclResult_t nr =
+        ncclCommInitRank(&comm_, shm_->world, id, rank);
+    if (nr != ncclSuccess) {
+      throw std::runtime_error(std::string("ncclCommInitRank: ") +
+                               ncclGetErrorString(nr));
+    }
+    nccl_ready_ = true;
+    std::cerr << "SharedPeerGatherSlot: nccl ready rank=" << rank
+              << " world=" << shm_->world << "\n";
+#endif
+  }
+
+  void release_nccl() {
+#if defined(UMA_ENGINE_USE_NCCL)
+    if (comm_) {
+      ncclCommDestroy(comm_);
+      comm_ = nullptr;
+    }
+#endif
+    nccl_ready_ = false;
+    if (!ipc_ready_) my_rank_ = -1;
   }
 
   torch::Tensor all_gather_concat(int rank, const torch::Tensor& local,
                                   int64_t n_atoms) {
+#if defined(UMA_ENGINE_USE_NCCL)
+    if (shm_ && shm_->transport == kTransportNccl) {
+      return all_gather_nccl_(rank, local, n_atoms);
+    }
+#endif
     auto parts = exchange_(rank, local);
     return all_gather_nodes(parts, n_atoms, local.device());
   }
 
   torch::Tensor all_reduce(int rank, const torch::Tensor& local) {
+#if defined(UMA_ENGINE_USE_NCCL)
+    if (shm_ && shm_->transport == kTransportNccl) {
+      return all_reduce_nccl_(rank, local);
+    }
+#endif
     auto parts = exchange_(rank, local);
     return all_reduce_sum(parts, local.device());
   }
 
   void barrier(int rank) {
+    if (shm_ && shm_->transport == kTransportNccl) {
+#if defined(UMA_ENGINE_USE_NCCL) && defined(UMA_ENGINE_USE_CUDA)
+      auto t = torch::zeros({1}, torch::dtype(torch::kFloat64)
+                                     .device(torch::Device(torch::kCUDA, 0)));
+      (void)all_reduce_nccl_(rank, t);
+      return;
+#else
+      (void)rank;
+      throw std::runtime_error("SharedPeerGatherSlot: nccl barrier without NCCL/CUDA");
+#endif
+    }
     auto opts = torch::TensorOptions().dtype(torch::kFloat64);
 #if defined(UMA_ENGINE_USE_CUDA)
     if (shm_ && shm_->transport == kTransportCudaIpc && torch::cuda::is_available()) {
@@ -279,6 +383,129 @@ class SharedPeerGatherSlot {
     }
     return exchange_host_(rank, local);
   }
+
+#if defined(UMA_ENGINE_USE_NCCL)
+  static ncclDataType_t nccl_dtype_(c10::ScalarType t) {
+    switch (t) {
+      case torch::kFloat64:
+        return ncclDouble;
+      case torch::kFloat32:
+        return ncclFloat;
+      case torch::kFloat16:
+        return ncclHalf;
+      case torch::kInt64:
+        return ncclInt64;
+      case torch::kInt32:
+        return ncclInt32;
+      default:
+        throw std::runtime_error("SharedPeerGatherSlot: unsupported NCCL dtype");
+    }
+  }
+
+  torch::Tensor ensure_cuda_(const torch::Tensor& local) const {
+    torch::Device dev(torch::kCUDA, 0);
+    auto gpu = local.detach();
+    if (!gpu.defined()) {
+      return torch::empty({0}, torch::dtype(torch::kFloat64).device(dev));
+    }
+    if (!gpu.is_cuda()) gpu = gpu.to(dev);
+    return gpu.contiguous();
+  }
+
+  torch::Tensor all_gather_nccl_(int rank, const torch::Tensor& local,
+                                 int64_t n_atoms) {
+    (void)rank;
+    if (!nccl_ready_ || !comm_) {
+      throw std::runtime_error(
+          "SharedPeerGatherSlot: nccl not initialized (call init_nccl)");
+    }
+    auto gpu = ensure_cuda_(local);
+    const int world = shm_->world;
+    if (world == 1) {
+      auto sizes = size_list(n_atoms, 1);
+      if (gpu.dim() == 0) return gpu;
+      return gpu.narrow(0, 0, sizes[0]).contiguous();
+    }
+    if (gpu.numel() == 0) {
+      barrier(rank);
+      auto opts = torch::TensorOptions().dtype(gpu.scalar_type()).device(gpu.device());
+      return torch::empty({0}, opts);
+    }
+    const int64_t n_local0 = gpu.dim() == 0 ? 1 : gpu.size(0);
+    std::vector<int64_t> out_sizes = gpu.sizes().vec();
+    if (gpu.dim() == 0) {
+      out_sizes = {static_cast<int64_t>(world)};
+    } else {
+      out_sizes[0] = n_local0 * world;
+    }
+    auto gathered = torch::empty(out_sizes, gpu.options());
+    const size_t sendcount = static_cast<size_t>(gpu.numel());
+    ncclResult_t nr =
+        ncclAllGather(gpu.data_ptr(), gathered.data_ptr(), sendcount,
+                      nccl_dtype_(gpu.scalar_type()), comm_, cudaStreamDefault);
+    if (nr != ncclSuccess) {
+      throw std::runtime_error(std::string("ncclAllGather: ") +
+                               ncclGetErrorString(nr));
+    }
+    cudaError_t st = cudaDeviceSynchronize();
+    if (st != cudaSuccess) {
+      throw std::runtime_error(std::string("cudaDeviceSynchronize after AllGather: ") +
+                               cudaGetErrorString(st));
+    }
+    if (gpu.dim() == 0) {
+      // Not used for node gather; return raw concat.
+      return gathered;
+    }
+    auto sizes = size_list(n_atoms, world);
+    std::vector<torch::Tensor> parts;
+    parts.reserve(static_cast<size_t>(world));
+    for (int r = 0; r < world; ++r) {
+      const auto want = sizes[static_cast<size_t>(r)];
+      parts.push_back(
+          gathered.narrow(0, r * n_local0, want).contiguous());
+    }
+    return torch::cat(parts, /*dim=*/0).contiguous();
+  }
+
+  torch::Tensor all_reduce_nccl_(int rank, const torch::Tensor& local) {
+    (void)rank;
+    if (!nccl_ready_ || !comm_) {
+      throw std::runtime_error(
+          "SharedPeerGatherSlot: nccl not initialized (call init_nccl)");
+    }
+    auto gpu = ensure_cuda_(local);
+    if (gpu.numel() == 0) {
+      // Keep ranks in lockstep without a zero-byte NCCL call.
+      auto t = torch::zeros({1}, torch::dtype(torch::kFloat64).device(gpu.device()));
+      auto out = torch::empty_like(t);
+      ncclResult_t nr =
+          ncclAllReduce(t.data_ptr(), out.data_ptr(), 1, ncclDouble, ncclSum,
+                        comm_, cudaStreamDefault);
+      if (nr != ncclSuccess) {
+        throw std::runtime_error(std::string("ncclAllReduce(empty sync): ") +
+                                 ncclGetErrorString(nr));
+      }
+      cudaDeviceSynchronize();
+      return gpu;
+    }
+    auto out = torch::empty_like(gpu);
+    ncclResult_t nr =
+        ncclAllReduce(gpu.data_ptr(), out.data_ptr(),
+                      static_cast<size_t>(gpu.numel()),
+                      nccl_dtype_(gpu.scalar_type()), ncclSum, comm_,
+                      cudaStreamDefault);
+    if (nr != ncclSuccess) {
+      throw std::runtime_error(std::string("ncclAllReduce: ") +
+                               ncclGetErrorString(nr));
+    }
+    cudaError_t st = cudaDeviceSynchronize();
+    if (st != cudaSuccess) {
+      throw std::runtime_error(std::string("cudaDeviceSynchronize after AllReduce: ") +
+                               cudaGetErrorString(st));
+    }
+    return out;
+  }
+#endif  // UMA_ENGINE_USE_NCCL
 
   torch::Tensor make_part_tensor_(const torch::Tensor& local, int64_t nb,
                                   torch::Device device) {
@@ -476,6 +703,12 @@ class SharedPeerGatherSlot {
   std::vector<void*> remote_dev_ptrs_;
   bool ipc_ready_ = false;
   int my_rank_ = -1;
+
+  // Process-local NCCL state.
+#if defined(UMA_ENGINE_USE_NCCL)
+  ncclComm_t comm_ = nullptr;
+#endif
+  bool nccl_ready_ = false;
 };
 
 }  // namespace kokkos_peer

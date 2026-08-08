@@ -1,0 +1,55 @@
+{
+  "phase": "P3_perf",
+  "jobid": "20934280",
+  "peer_transport": "cuda_ipc",
+  "ms": {
+    "1": 320.6,
+    "2": 183.57000000000002,
+    "4": 117.62999999999998
+  },
+  "dE_d1": {
+    "1": 2.7284841053187847e-12,
+    "2": 2.7284841053187847e-12,
+    "4": 1.8189894035458565e-12
+  },
+  "max_dF": {
+    "1": 0.0,
+    "2": 0.0,
+    "4": 0.0
+  },
+  "E_F_green": true,
+  "self_scale_green": true,
+  "beat_p2_green": true,
+  "soft_ase_targets": {
+    "devices2_le_200": true,
+    "devices4_le_120": true
+  },
+  "gap_vs_ase": {
+    "2": -10.329999999999984,
+    "4": 2.4299999999999784
+  },
+  "gap_vs_fc": {
+    "2": -9.629999999999967,
+    "4": -0.37000000000001876
+  },
+  "p2_baseline_ms": {
+    "1": 321.54,
+    "2": 190.8,
+    "4": 140.9
+  },
+  "ase_ms": {
+    "2": 193.9,
+    "4": 115.2
+  },
+  "fc_ms": {
+    "2": 193.2,
+    "4": 118.0
+  },
+  "hard_gate": "E+F green + self-scale + beat P2 @4",
+  "note": "P3 = fast CPU shard pack + fewer CUDA syncs",
+  "perf_parent_tail": [
+    "PERF_PARENT world=4 ms_nl=8.268 ms_pub=1.442 ms_wait_workers=105.813 ms_total=115.537 gen=5 n_edges=55296",
+    "PERF_PARENT world=4 ms_nl=8.129 ms_pub=1.651 ms_wait_workers=104.070 ms_total=113.864 gen=6 n_edges=55296",
+    "PERF_PARENT world=4 ms_nl=8.116 ms_pub=1.472 ms_wait_workers=109.591 ms_total=119.200 gen=7 n_edges=55296"
+  ]
+}

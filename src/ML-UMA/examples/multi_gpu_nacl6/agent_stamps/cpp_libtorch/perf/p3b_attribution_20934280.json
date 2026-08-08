@@ -1,0 +1,75 @@
+{
+  "phase": "P3b_attribution",
+  "jobid": "20934280",
+  "devices": 4,
+  "honest_pair_ms": 117.63,
+  "ase_ms": 115.2,
+  "fc_ms": 118.0,
+  "gap_vs_ase": 2.4299999999999926,
+  "gap_vs_fc": -0.37000000000000455,
+  "hard_bar": {
+    "le_ase": false,
+    "le_fc": true,
+    "campaign_pass_at_4": false
+  },
+  "perf_parent_warm_gen_ge3": {
+    "nl": {
+      "mean": 8.321,
+      "min": 8.116,
+      "max": 8.83,
+      "n": 5
+    },
+    "pub": {
+      "mean": 1.5062000000000002,
+      "min": 1.292,
+      "max": 1.674,
+      "n": 5
+    },
+    "wait": {
+      "mean": 106.7406,
+      "min": 104.07,
+      "max": 109.591,
+      "n": 5
+    },
+    "total": {
+      "mean": 116.58500000000001,
+      "min": 113.864,
+      "max": 119.2,
+      "n": 5
+    }
+  },
+  "perf_tick_warm_skip2": {
+    "fwd": {
+      "mean": 47.016380000000005,
+      "min": 45.4881,
+      "max": 48.8865,
+      "n": 5
+    },
+    "bwd": {
+      "mean": 58.44894000000001,
+      "min": 57.4077,
+      "max": 59.1435,
+      "n": 5
+    },
+    "force_ar": {
+      "mean": 0.390598,
+      "min": 0.226754,
+      "max": 0.621796,
+      "n": 5
+    },
+    "compute": {
+      "mean": 105.8558,
+      "min": 103.133,
+      "max": 108.652,
+      "n": 5
+    }
+  },
+  "findings": [
+    "ms_wait_workers \u2248 worker ms_compute (warm ~105\u2013110); parent wait is compute-bound, not pipe-idle.",
+    "ms_force_ar ~0.2\u20130.6 ms \u2014 CUDA IPC force allreduce is not the @4 residual.",
+    "Parent ms_nl~8.2 + ms_pub~1.5 \u2248 9.7 ms; sits mostly outside wait (ms_total\u2248nl+pub+wait).",
+    "Honest pair 117.63 tracks warm PERF_PARENT ms_total (~114\u2013119).",
+    "Residual vs ASE (~2.4 ms): need cut in worker fwd/bwd (collectives inside compute) and/or nl; NCCL (P3c) targets mid-graph peer gather/reduce inside ms_fwd/ms_bwd.",
+    "Already \u2264 FC @4 (\u22120.37 ms); hard bar still FAIL until \u2264 ASE @4."
+  ]
+}

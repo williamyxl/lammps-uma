@@ -117,8 +117,9 @@ int main(int argc, char** argv) {
     // Parent sets CUDA_VISIBLE_DEVICES=<rank> before exec; only cuda:0 is visible.
     cudaSetDevice(0);
 #endif
-    // CUDA IPC device buffers (UMA_PEER_TRANSPORT=cuda_ipc); no-op for shm.
+    // Peer device transport: cuda_ipc (default) or nccl (opt-in); no-op for shm.
     slot->init_cuda_ipc(rank);
+    slot->init_nccl(rank);
 
     const char* pay_path = std::getenv("UMA_MP_PAYLOAD_SHM");
     const char* pay_bytes_e = std::getenv("UMA_MP_PAYLOAD_BYTES");
@@ -165,6 +166,7 @@ int main(int argc, char** argv) {
       read_all(STDIN_FILENO, &cmd, sizeof(cmd));
       if (cmd == 0) {
         std::cerr << "uma_libtorch_mp_worker rank=" << rank << " shutdown\n" << std::flush;
+        slot->release_nccl();
         slot->release_cuda_ipc();
         payload->destroy();
         break;

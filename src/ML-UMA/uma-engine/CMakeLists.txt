@@ -33,6 +33,33 @@ target_compile_definitions(uma_engine PRIVATE
   "UMA_ENGINE_PYTHON_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/python\"")
 if(UMA_ENGINE_USE_CUDA)
   target_compile_definitions(uma_engine PUBLIC UMA_ENGINE_USE_CUDA)
+  # Opt-in UMA_PEER_TRANSPORT=nccl (raw libnccl behind uma_peer collectives).
+  find_path(NCCL_INCLUDE_DIR nccl.h
+    HINTS
+      ENV NCCL_ROOT
+      ENV CUDA_HOME
+      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl-2.25/include
+      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl/include
+      /usr/local/cuda/include
+    PATH_SUFFIXES include
+  )
+  find_library(NCCL_LIBRARY nccl
+    HINTS
+      ENV NCCL_ROOT
+      ENV CUDA_HOME
+      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl-2.25/lib
+      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl/lib
+      /usr/local/cuda/lib64
+    PATH_SUFFIXES lib lib64
+  )
+  if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
+    target_include_directories(uma_engine PUBLIC ${NCCL_INCLUDE_DIR})
+    target_link_libraries(uma_engine PUBLIC ${NCCL_LIBRARY})
+    target_compile_definitions(uma_engine PUBLIC UMA_ENGINE_USE_NCCL)
+    message(STATUS "uma-engine: NCCL enabled (${NCCL_LIBRARY})")
+  else()
+    message(WARNING "uma-engine: NCCL not found; UMA_PEER_TRANSPORT=nccl unavailable")
+  endif()
 endif()
 
 # Optional CUDA vesin neighbor list (borrowed from graspa-mlip vesin_nl.h).

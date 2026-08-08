@@ -259,9 +259,9 @@ REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits). Plan: `uma_vs_as
 
 | Phase | Scope | Status |
 |-------|--------|--------|
-| **P3a** | `pack_shards_cpu` + sync cuts + `PERF_PARENT`; default `UMA_PEER_TRANSPORT=cuda_ipc`; job `20934280` (`perf_p3.slurm`, RECOMPILE=1) | **in queue** (Priority; scontrol StartTime ~22:02 CDT) |
-| **P3b** | After P3a lands: attribute @4 residual from `PERF_PARENT` (`ms_nl`/`ms_pub`/`ms_wait_workers`) vs worker `PERF_TICK`; stamp under `cpp_libtorch/` only | blocked on P3a |
-| **P3c** | Opt-in `UMA_PEER_TRANSPORT=nccl` (raw libnccl behind `uma_peer` gather/reduce); cuda_ipc fallback; keep `uma/kk` + `-k on g N`; A/B vs P3a @1/2/4 | **do not code until P3a+P3b stamped** |
+| **P3a** | `pack_shards_cpu` + sync cuts + `PERF_PARENT`; default `UMA_PEER_TRANSPORT=cuda_ipc`; job `20934280` | **DONE** 320.6 / 183.6 / 117.6 |
+| **P3b** | PERF_PARENT vs PERF_TICK @4 attribution | **DONE** — see Burst 17 / `P3B_ATTRIBUTION.md` |
+| **P3c** | Opt-in `UMA_PEER_TRANSPORT=nccl`; cuda_ipc fallback; keep `uma/kk` | **coding now** |
 | **P4a** | Harden/default nccl **only if P3c wins** | later |
 | **P4b** | Else parent NL/publish cuts | later |
 
@@ -280,3 +280,34 @@ REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits).
 | Soft stretch | close to / under ASE @4 (~115) |
 
 P2 status: PASS @1/@2 · **FAIL @4** (uma~140.9 vs ASE~115 / FC~118) → campaign **OPEN**. Continue P3a→P3b→P3c against this bar.
+
+## Burst 17 — P3a result + P3b attribution (2026-08-08 ~10:56 CDT)
+
+REPORT_OWNER=parent. Job `20934280` COMPLETED (cuda_ipc).
+
+Honest ms: **320.60 / 183.57 / 117.63**. E+F green · self-scale · beat P2.
+- @2: ≤ASE and ≤FC **PASS**
+- @4: ≤FC (−0.37) **PASS** · ≤ASE (+2.43) **FAIL** → campaign still OPEN
+
+P3b warm @4: `ms_wait≈ms_compute~106` · `ms_force_ar~0.4` · `ms_nl+pub~9.8` · residual vs ASE in worker fwd/bwd collectives (+ optional nl). Details: `P3B_ATTRIBUTION.md`, `perf/p3b_attribution_20934280.json`.
+
+Next: P3c opt-in NCCL behind `uma_peer`.
+
+## Burst 18 — P3c NCCL implement + submit (2026-08-08 ~11:00 CDT)
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits).
+
+| Item | Detail |
+|------|--------|
+| `shared_peer.h` | `UMA_PEER_TRANSPORT=nccl` → raw `ncclAllGather` / `ncclAllReduce`; cuda_ipc remains default |
+| CMake | find/link libnccl → `UMA_ENGINE_USE_NCCL` |
+| Worker | `init_nccl` / `release_nccl` |
+| `perf_p3c.slurm` | RECOMPILE=1, transport=nccl; gates E+F · self-scale · beat P3a @4; report hard ≤ASE/FC |
+
+Goal: cut last ~2.4 ms @4 so uma ≤ ASE 115.2 and ≤ FC 118. Keep Kokkos `uma/kk`.
+
+### Submit correction (2026-08-08 ~11:17 CDT)
+
+Prior “in flight” stamp was **wrong** — earlier `sbatch` never landed (approval interrupt); `active_jobid` stayed `20934280` (P3a); no `perf_p3c-*.out`.
+
+Re-ran: `sbatch --export=ALL,RECOMPILE=1,UMA_PEER_TRANSPORT=nccl,N_TIMING=5 perf_p3c.slurm` → **JobID `20935770`** (PENDING Priority). `active_jobid.txt` updated.
