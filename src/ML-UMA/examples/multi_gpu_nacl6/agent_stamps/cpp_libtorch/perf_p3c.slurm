@@ -69,14 +69,18 @@ export LMP_UMA="${ROOT}/build-uma/lmp"
 test -x "${LMP_UMA}"
 test -x "${UMA_LIBTORCH_MP_WORKER}"
 export RECOMPILE=0
-# Sanity: payload shm + NCCL symbols in worker.
-# Avoid `grep -q` under pipefail (SIGPIPE from strings → false FAIL).
+# Sanity: payload shm + NCCL link on worker (nm undefined dynsym + ldd).
+# Avoid `grep -q` under pipefail (SIGPIPE from strings → false FAIL on 20935770).
 payload_refs=$(strings "${UMA_LIBTORCH_MP_WORKER}" | grep -c UMA_MP_PAYLOAD_SHM || true)
-nccl_refs=$(strings "${UMA_LIBTORCH_MP_WORKER}" | grep -c ncclCommInitRank || true)
+nccl_nm=$(nm -D "${UMA_LIBTORCH_MP_WORKER}" 2>/dev/null | grep -c ' ncclCommInitRank$' || true)
+nccl_ldd=$(ldd "${UMA_LIBTORCH_MP_WORKER}" 2>/dev/null | grep -c 'libnccl\.so' || true)
 echo "payload_env_refs=${payload_refs}"
-echo "nccl_init_refs=${nccl_refs}"
-if [[ "${nccl_refs}" -lt 1 ]]; then
-  echo "FAIL: worker missing ncclCommInitRank (build without NCCL?)"
+echo "nccl_nm_CommInitRank=${nccl_nm}"
+echo "nccl_ldd_libnccl=${nccl_ldd}"
+nm -D "${UMA_LIBTORCH_MP_WORKER}" 2>/dev/null | grep nccl || true
+ldd "${UMA_LIBTORCH_MP_WORKER}" 2>/dev/null | grep -i nccl || true
+if [[ "${nccl_nm}" -lt 1 || "${nccl_ldd}" -lt 1 ]]; then
+  echo "FAIL: worker not linked to NCCL (nm CommInitRank=${nccl_nm} ldd=${nccl_ldd})"
   exit 1
 fi
 

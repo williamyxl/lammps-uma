@@ -319,3 +319,14 @@ REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits).
 Job `20935770` FAILED at pre-run sanity: `nccl_init_refs=3` then `FAIL: worker missing ncclCommInitRank` — **false negative** from `set -o pipefail` + `grep -q` (SIGPIPE). Worker actually links `libnccl.so.2` and has `ncclCommInitRank`.
 
 Fix: count-based sanity in `perf_p3c.slurm`. Resubmitting RECOMPILE=1 / `UMA_PEER_TRANSPORT=nccl`.
+
+## Burst 20 — P3c worker NCCL link harden + resubmit (2026-08-08 ~12:20 CDT)
+
+REPORT_OWNER=parent.
+
+Root cause of `20935770` abort: `set -o pipefail` + `grep -q` SIGPIPE false FAIL — worker already had `U ncclCommInitRank` and `libnccl.so.2` (verified on login node).
+
+Hardening:
+- CMake: explicit `target_compile_definitions` + `target_link_libraries(${NCCL_LIBRARY})` + RPATH on `uma_libtorch_mp_worker`
+- Sanity: `nm -D` / `ldd` counts (not `grep -q`)
+- Cancelled pending `20940372`; resubmitted **`20940376`** RECOMPILE=1 / nccl

@@ -31,6 +31,7 @@ target_link_libraries(uma_engine PUBLIC ${TORCH_LIBRARIES})
 # Locate uma_gp_worker.py for devices>1 FairChem eager GP backend.
 target_compile_definitions(uma_engine PRIVATE
   "UMA_ENGINE_PYTHON_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/python\"")
+set(UMA_ENGINE_HAS_NCCL OFF)
 if(UMA_ENGINE_USE_CUDA)
   target_compile_definitions(uma_engine PUBLIC UMA_ENGINE_USE_CUDA)
   # Opt-in UMA_PEER_TRANSPORT=nccl (raw libnccl behind uma_peer collectives).
@@ -53,11 +54,18 @@ if(UMA_ENGINE_USE_CUDA)
     PATH_SUFFIXES lib lib64
   )
   if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)
+    set(UMA_ENGINE_HAS_NCCL ON)
+    get_filename_component(NCCL_LIB_DIR "${NCCL_LIBRARY}" DIRECTORY)
     target_include_directories(uma_engine PUBLIC ${NCCL_INCLUDE_DIR})
     target_link_libraries(uma_engine PUBLIC ${NCCL_LIBRARY})
     target_compile_definitions(uma_engine PUBLIC UMA_ENGINE_USE_NCCL)
+    # Ensure dependents (worker / lmp) resolve libnccl at runtime.
+    set_property(TARGET uma_engine APPEND PROPERTY BUILD_RPATH "${NCCL_LIB_DIR}")
+    set_property(TARGET uma_engine APPEND PROPERTY INSTALL_RPATH "${NCCL_LIB_DIR}")
+    set_property(TARGET uma_engine APPEND PROPERTY INTERFACE_LINK_DIRECTORIES "${NCCL_LIB_DIR}")
     message(STATUS "uma-engine: NCCL enabled (${NCCL_LIBRARY})")
   else()
+    set(UMA_ENGINE_HAS_NCCL OFF)
     message(WARNING "uma-engine: NCCL not found; UMA_PEER_TRANSPORT=nccl unavailable")
   endif()
 endif()
@@ -95,6 +103,19 @@ target_link_libraries(kokkos_peer_device_smoke PRIVATE uma_engine)
 
 add_executable(uma_libtorch_mp_worker tests/uma_libtorch_mp_worker.cpp)
 target_link_libraries(uma_libtorch_mp_worker PRIVATE uma_engine)
+# Header-only NCCL paths live in shared_peer.h (included by the worker TU).
+# Explicitly attach defs + libnccl so the worker is not relying solely on
+# transitive propagation from the static uma_engine archive.
+if(UMA_ENGINE_HAS_NCCL)
+  target_compile_definitions(uma_libtorch_mp_worker PRIVATE UMA_ENGINE_USE_NCCL UMA_ENGINE_USE_CUDA)
+  target_include_directories(uma_libtorch_mp_worker PRIVATE ${NCCL_INCLUDE_DIR})
+  target_link_libraries(uma_libtorch_mp_worker PRIVATE ${NCCL_LIBRARY})
+  get_filename_component(_uma_nccl_lib_dir "${NCCL_LIBRARY}" DIRECTORY)
+  set_target_properties(uma_libtorch_mp_worker PROPERTIES
+    BUILD_RPATH "${_uma_nccl_lib_dir}"
+    INSTALL_RPATH "${_uma_nccl_lib_dir}")
+  message(STATUS "uma-engine: worker explicitly linked to NCCL (${NCCL_LIBRARY})")
+endif()
 
 install(TARGETS uma_engine uma_parity_cli graph_shard_smoke kokkos_peer_smoke
                 kokkos_peer_device_smoke uma_libtorch_mp_worker
