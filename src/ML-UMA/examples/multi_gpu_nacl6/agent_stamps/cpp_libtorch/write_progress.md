@@ -206,6 +206,20 @@ Next: P1 CUDA IPC device collectives.
 
 Force-green regime unchanged (all_reduce bwd + force SUM + escale 1/world). No Ray.
 
+## Burst 12 — perf P2 pipe-tax (2026-08-08 ~09:15 CDT)
+
+P1 PASS (20932975): 320.34 / 264.96 / 193.32. Soft gap vs ASE/FC @2/@4 remains.
+
+### P2 landed (code)
+| Item | Detail |
+|------|--------|
+| `payload_shm.h` | Shared mmap for pos/z/per-rank edges + rank0 forces |
+| `libtorch_mp.cpp` | Publish once; pipe wake = cmd+gen; `PERF_PARENT` timers; cache partition check |
+| Worker | Read payload shm; rank0 writes E+F to shm; pipe returns ok only; quiet unless `UMA_MP_VERBOSE=1` |
+| `perf_p2.slurm` | devices 1→2→4, RECOMPILE=1, beat-P1 + self-scale + E+F gates |
+
+Goals: keep E+F + self-scale; beat P1 @2/@4; soft-push toward ASE ~194/@2 and ~115–150/@4.
+
 ### P1 result (job `20932975`) — SELF_SCALE_GREEN
 
 Honest pair ms: **320.34 / 264.96 / 193.32** @1/2/4. E+F green (max|ΔF|=0).

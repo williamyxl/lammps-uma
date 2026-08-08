@@ -1,36 +1,27 @@
 # C++ LibTorch track — blockers
 
-**Stamp:** 2026-08-08 ~09:00 CDT  
+**Stamp:** 2026-08-08 ~09:15 CDT  
 **Track:** `cpp_libtorch`  
-**Status:** Phase 3 DONE · Phase 4 report · **Perf P1 CUDA IPC DONE (self-scale GREEN)**
+**Status:** Perf P1 **PASS** · **P2 pipe-tax cut in flight**
 
-## B1 / B2 / B4–B7 — resolved or mitigated (product = C++ LibTorch MP, not Ray)
+## Non-negotiable gates
 
-See prior bursts. MP TS remains n_atoms-specific (B7 mitigation: `UMA_MP_NATOMS` + `model_mp_w*_n*_r*.pt`).
+1. E+F vs devices=1: \|ΔE\| ≤ 1e-8, max\|ΔF\| ≤ 1e-6 (prefer ~1e-10 / ~5e-7 vs ASE).
+2. Self-scale: `pair_ms(2) < pair_ms(1)` and `pair_ms(4) < pair_ms(2)`.
 
-## Perf campaign — HARD GATE PASS
+## Perf campaign
 
-Hard gate: `pair_ms(2) < pair_ms(1)` and `pair_ms(4) < pair_ms(2)` on NaCl6 1728 FP64, E+F green vs d1.
+| Phase | Job | ms @1/2/4 | Notes |
+|-------|-----|-----------|-------|
+| P0 | `20932843` | 320.64 / 330.52 / 382.86 | CUDA_LAUNCH_BLOCKING off; scale FAIL |
+| P1 | `20932975` | **320.34 / 264.96 / 193.32** | CUDA IPC; scale **PASS**; E+F green |
+| P2 | (active) | TBD | payload shm fan-out + rank0-only forces |
 
-### P0 — DONE (job `20932843`)
+### Soft targets (P2+)
 
-CUDA_LAUNCH_BLOCKING off. Honest pair ms: **320.64 / 330.52 / 382.86** @1/2/4. E+F green. Self-scale **FAIL**.
+Close gap vs ASE (193.9 / 115.2 @2/@4) and FC (193.2 / 118.0): aim devices=2 ≲200→~194, devices=4 ≲150→~115–120 **without** weakening (1)–(2).
 
-### P1 — CUDA IPC — DONE (job `20932975`)
+### P2 residual (from P1 profile)
 
-| devices | pair ms | dE_d1 | max\|ΔF\| |
-|--------:|--------:|------:|----------:|
-| 1 | **320.34** | 1.8e-12 | **0** |
-| 2 | **264.96** | 0 | **0** |
-| 4 | **193.32** | 1.8e-12 | **0** |
-
-Self-scale **GREEN** (0.83× / 0.60× vs d1). Transport: `UMA_PEER_TRANSPORT=cuda_ipc` (default). Commit `8e7e6a0d27`.
-
-### Optional next (not blocking)
-
-- **P2:** shrink parent↔worker pipe/mmap tax (further close on ASE/FC ~194 / ~115 @2/@4).
-- Unbake `gp_node_offset` for size-agnostic MP artifacts.
-
-## Phase 5 — multi-node
-
-Out of scope.
+@4: compute ≈103 ms (fwd+bwd) vs pair 193 ms → ~90 ms parent/pipe/NL tax.  
+Cut: shared payload mmap for pos/z/edges; return forces from rank0 only; quiet worker logs; cache partition check.

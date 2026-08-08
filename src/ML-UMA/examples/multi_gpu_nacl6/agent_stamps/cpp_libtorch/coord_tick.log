@@ -239,3 +239,9 @@
 2026-08-08T08:58:10-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=207 blockers=yes job=20932975 state=RUNNING
 2026-08-08T08:59:05-05:00 AGENT_LOOP_TICK_mp_perf progress job=20932975 state=RUNNING
 2026-08-08T08:59:23-05:00 COORD_TICK job=20932975 state=COMPLETED note=P1_EF_green_self_scale_GREEN_ms=320.3/265.0/193.3
+2026-08-08T09:03:10-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=212 blockers=yes job=20932975 state=COMPLETED
+2026-08-08T09:08:10-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=212 blockers=yes job=20932975 state=COMPLETED
+2026-08-08T09:11:15-05:00 AGENT_LOOP_TICK_mp_perf progress job=20932975 state=COMPLETED note=P2
+2026-08-08T09:13:10-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=226 blockers=yes job=20932975 state=COMPLETED
+2026-08-08T09:13:20-05:00 AGENT_LOOP_TICK_mp_perf progress job=20932975 state=COMPLETED
+2026-08-08T09:13:51-05:00 COORD_TICK job=20933393 state=SUBMITTED note=perf_P2_payload_shm_pipe_tax

@@ -1,6 +1,7 @@
 #include "uma/libtorch_mp.h"
 
 #include <cerrno>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
@@ -31,6 +32,7 @@
 #include "uma/graph_shard.h"
 #include "uma/kokkos_peer.h"
 #include "uma/neighbor_list.h"
+#include "uma/payload_shm.h"
 #include "uma/peer_context.h"
 #include "uma/postprocess.h"
 #include "uma/shared_peer.h"
@@ -111,8 +113,12 @@ struct LibtorchMpRuntime::Worker {
 struct LibtorchMpRuntime::Impl {
   std::string artifact_dir;
   std::string shm_path;
+  std::string payload_path;
   kokkos_peer::SharedPeerGatherSlot* shared = nullptr;
+  PayloadShm* payload = nullptr;
   std::vector<Worker> workers;
+  int64_t part_check_n = -1;
+  int64_t part_check_e = -1;
 };
 
 std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
@@ -177,6 +183,14 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
               << kokkos_peer::SharedPeerGatherSlot::transport_name(transport)
               << " shm_bytes=" << bytes << "\n";
   }
+  // Geometry/edge payload shm (pipe-tax cut).
+  {
+    rt->impl_->payload_path = rt->impl_->shm_path + "_payload";
+    rt->impl_->payload = PayloadShm::create_file(rt->impl_->payload_path.c_str());
+    rt->impl_->payload->hdr->world = num_devices;
+    std::cerr << "uma LibtorchMpRuntime: payload_shm_bytes="
+              << rt->impl_->payload->bytes << "\n";
+  }
   PeerContext::instance().reset_shared(rt->impl_->shared);
 
   // Resolve worker binary next to this process or via env.
@@ -235,6 +249,9 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
         if (*e) log_dir = e;
       }
       ::setenv("UMA_MP_LOG_DIR", log_dir.c_str(), 1);
+      ::setenv("UMA_MP_PAYLOAD_SHM", rt->impl_->payload_path.c_str(), 1);
+      ::setenv("UMA_MP_PAYLOAD_BYTES",
+               std::to_string(rt->impl_->payload->bytes).c_str(), 1);
       {
         ::mkdir(log_dir.c_str(), 0755);  // best-effort; may already exist
         const std::string log_path = log_dir + "/worker_r" + rank_s + ".log";
@@ -330,8 +347,15 @@ LibtorchMpRuntime::~LibtorchMpRuntime() {
     }
     impl_->shared = nullptr;
   }
+  if (impl_->payload) {
+    impl_->payload->destroy();
+    impl_->payload = nullptr;
+  }
   if (!impl_->shm_path.empty()) {
     ::unlink(impl_->shm_path.c_str());
+  }
+  if (!impl_->payload_path.empty()) {
+    ::unlink(impl_->payload_path.c_str());
   }
   PeerContext::instance().clear();
 }
@@ -383,12 +407,32 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   pbc0_ = pbc_in;
   n_cached_ = n;
 
+  using clock = std::chrono::steady_clock;
+  const auto t0 = clock::now();
+
   pos0_ = wrap_positions_to_cell(pos0_, cell0_, pbc0_);
   rebuild_neighbors_full(build_dev);
+  const auto t_nl = clock::now();
 
-  if (!graph_shard::partitions_cover_all_edges(edge_index_.to(torch::kCPU), n,
-                                               num_devices_)) {
-    throw std::runtime_error("LibtorchMpRuntime: edge partitions do not cover graph");
+  auto eidx_full = edge_index_.to(torch::kCPU).contiguous();
+  auto coff_full = cell_offsets_.to(torch::kCPU, torch::kFloat64).contiguous();
+  if (n != impl_->part_check_n || eidx_full.size(1) != impl_->part_check_e) {
+    if (!graph_shard::partitions_cover_all_edges(eidx_full, n, num_devices_)) {
+      throw std::runtime_error(
+          "LibtorchMpRuntime: edge partitions do not cover graph");
+    }
+    impl_->part_check_n = n;
+    impl_->part_check_e = eidx_full.size(1);
+  }
+
+  if (n > PayloadShm::kMaxN) {
+    throw std::runtime_error("LibtorchMpRuntime: n exceeds PayloadShm::kMaxN");
+  }
+  if (num_devices_ > PayloadShm::kMaxWorld) {
+    throw std::runtime_error("LibtorchMpRuntime: world exceeds PayloadShm::kMaxWorld");
+  }
+  if (!impl_->payload) {
+    throw std::runtime_error("LibtorchMpRuntime: payload shm missing");
   }
 
   auto pos_cpu = pos0_.to(torch::kCPU, torch::kFloat64).contiguous();
@@ -397,40 +441,55 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   int32_t pbc32[3] = {pbc0_[0].item<bool>() ? 1 : 0, pbc0_[1].item<bool>() ? 1 : 0,
                       pbc0_[2].item<bool>() ? 1 : 0};
 
-  // Fan-out predict cmd + per-rank sharded edges.
-  for (int r = 0; r < num_devices_; ++r) {
-    auto shard = graph_shard::shard_edges(edge_index_, cell_offsets_, n, num_devices_, r);
-    auto eidx_cpu = shard.edge_index.to(torch::kCPU).contiguous();
-    auto coff_cpu =
-        shard.cell_offsets.defined()
-            ? shard.cell_offsets.to(torch::kCPU, torch::kFloat64).contiguous()
-            : torch::zeros({eidx_cpu.size(1), 3}, torch::kFloat64);
-    const int32_t nedges = static_cast<int32_t>(eidx_cpu.size(1));
-    const int32_t cmd = 1;
-    const int32_t ni = static_cast<int32_t>(n);
-    auto& w = impl_->workers[static_cast<size_t>(r)];
-    write_all(w.to_child, &cmd, sizeof(cmd));
-    write_all(w.to_child, &ni, sizeof(ni));
-    write_all(w.to_child, pos_cpu.data_ptr<double>(),
+  // Publish geometry + shards once into payload shm (pipe only wakes workers).
+  PayloadShm* pay = impl_->payload;
+  pthread_mutex_lock(&pay->hdr->mu);
+  pay->hdr->n = static_cast<int32_t>(n);
+  pay->hdr->world = num_devices_;
+  pay->hdr->charge = charge;
+  pay->hdr->spin = spin;
+  std::memcpy(pay->hdr->cell, cell_cpu.data_ptr<double>(), 9 * sizeof(double));
+  std::memcpy(pay->hdr->pbc, pbc32, sizeof(pbc32));
+  std::memcpy(pay->pos_ptr(), pos_cpu.data_ptr<double>(),
               static_cast<size_t>(n) * 3 * sizeof(double));
-    write_all(w.to_child, z_cpu.data_ptr<int64_t>(),
+  std::memcpy(pay->z_ptr(), z_cpu.data_ptr<int64_t>(),
               static_cast<size_t>(n) * sizeof(int64_t));
-    write_all(w.to_child, cell_cpu.data_ptr<double>(), 9 * sizeof(double));
-    write_all(w.to_child, pbc32, sizeof(pbc32));
-    write_all(w.to_child, &charge, sizeof(charge));
-    write_all(w.to_child, &spin, sizeof(spin));
-    write_all(w.to_child, &nedges, sizeof(nedges));
-    if (nedges > 0) {
-      write_all(w.to_child, eidx_cpu.data_ptr<int64_t>(),
-                static_cast<size_t>(nedges) * 2 * sizeof(int64_t));
-      write_all(w.to_child, coff_cpu.data_ptr<double>(),
-                static_cast<size_t>(nedges) * 3 * sizeof(double));
+  for (int r = 0; r < num_devices_; ++r) {
+    auto shard = graph_shard::shard_edges(eidx_full, coff_full, n, num_devices_, r);
+    const int64_t ne = shard.edge_index.size(1);
+    if (ne > PayloadShm::kMaxE) {
+      pthread_mutex_unlock(&pay->hdr->mu);
+      throw std::runtime_error("LibtorchMpRuntime: nedges exceeds PayloadShm::kMaxE");
+    }
+    pay->hdr->nedges[r] = static_cast<int32_t>(ne);
+    if (ne > 0) {
+      auto eidx_cpu = shard.edge_index.contiguous();
+      auto coff_cpu =
+          shard.cell_offsets.defined()
+              ? shard.cell_offsets.to(torch::kFloat64).contiguous()
+              : torch::zeros({ne, 3}, torch::kFloat64);
+      // Store as [2, E] flat (row-major): eidx[0,E) then eidx[E,2E)
+      std::memcpy(pay->eidx_ptr(r), eidx_cpu.data_ptr<int64_t>(),
+                  static_cast<size_t>(ne) * 2 * sizeof(int64_t));
+      std::memcpy(pay->coff_ptr(r), coff_cpu.data_ptr<double>(),
+                  static_cast<size_t>(ne) * 3 * sizeof(double));
     }
   }
+  pay->hdr->result_gen = -1;
+  const int32_t gen = ++pay->hdr->gen;
+  pthread_mutex_unlock(&pay->hdr->mu);
+  const auto t_pub = clock::now();
 
-  // Collect rank0 result (all ranks compute; energies should match after reduce).
+  // Tiny wake: cmd=1 + gen (no geometry on pipe).
+  const int32_t cmd = 1;
+  for (int r = 0; r < num_devices_; ++r) {
+    auto& w = impl_->workers[static_cast<size_t>(r)];
+    write_all(w.to_child, &cmd, sizeof(cmd));
+    write_all(w.to_child, &gen, sizeof(gen));
+  }
+
+  // Collect status from all ranks; energy+forces from payload (rank0).
   double energy = 0.0;
-  std::vector<double> forces(static_cast<size_t>(n) * 3);
   for (int r = 0; r < num_devices_; ++r) {
     auto& w = impl_->workers[static_cast<size_t>(r)];
     uint8_t ok = 0;
@@ -443,19 +502,33 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
       throw std::runtime_error("LibtorchMpRuntime worker " + std::to_string(r) +
                                ": " + msg);
     }
-    double e = 0.0;
-    read_all(w.from_child, &e, sizeof(e));
-    std::vector<double> f(static_cast<size_t>(n) * 3);
-    read_all(w.from_child, f.data(), f.size() * sizeof(double));
-    if (r == 0) {
-      energy = e;
-      forces = std::move(f);
-    }
   }
+  const auto t_wait = clock::now();
+
+  pthread_mutex_lock(&pay->hdr->mu);
+  if (pay->hdr->result_gen != gen) {
+    pthread_mutex_unlock(&pay->hdr->mu);
+    throw std::runtime_error("LibtorchMpRuntime: payload result_gen mismatch");
+  }
+  energy = pay->hdr->energy;
+  auto forces = torch::from_blob(pay->forces_ptr(), {n, 3}, torch::kFloat64).clone();
+  pthread_mutex_unlock(&pay->hdr->mu);
+
+  const double ms_nl =
+      std::chrono::duration<double, std::milli>(t_nl - t0).count();
+  const double ms_pub =
+      std::chrono::duration<double, std::milli>(t_pub - t_nl).count();
+  const double ms_wait =
+      std::chrono::duration<double, std::milli>(t_wait - t_pub).count();
+  const double ms_tot =
+      std::chrono::duration<double, std::milli>(clock::now() - t0).count();
+  std::cerr << "PERF_PARENT world=" << num_devices_ << " ms_nl=" << ms_nl
+            << " ms_pub=" << ms_pub << " ms_wait_workers=" << ms_wait
+            << " ms_total=" << ms_tot << " gen=" << gen << "\n";
 
   Prediction out;
   out.energy = energy;
-  out.forces = torch::from_blob(forces.data(), {n, 3}, torch::kFloat64).clone();
+  out.forces = forces;
   return out;
 }
 

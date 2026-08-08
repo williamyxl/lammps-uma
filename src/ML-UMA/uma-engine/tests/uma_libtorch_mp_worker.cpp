@@ -28,6 +28,7 @@
 
 #include "uma/kokkos_peer.h"
 #include "uma/metadata.h"
+#include "uma/payload_shm.h"
 #include "uma/peer_context.h"
 #include "uma/postprocess.h"
 #include "uma/shared_peer.h"
@@ -73,6 +74,10 @@ int main(int argc, char** argv) {
   const std::string artifact_dir = argv[3];
   const std::string shm_path = argv[4];
   const size_t shm_bytes = static_cast<size_t>(std::stoull(argv[5]));
+  const bool verbose = [] {
+    const char* e = std::getenv("UMA_MP_VERBOSE");
+    return e && e[0] == '1' && e[1] == '\0';
+  }();
 
   // Banner to per-rank stderr log (parent may have already dup2'd STDERR).
   std::cerr << "uma_libtorch_mp_worker START rank=" << rank << " world=" << world
@@ -114,6 +119,18 @@ int main(int argc, char** argv) {
 #endif
     // CUDA IPC device buffers (UMA_PEER_TRANSPORT=cuda_ipc); no-op for shm.
     slot->init_cuda_ipc(rank);
+
+    const char* pay_path = std::getenv("UMA_MP_PAYLOAD_SHM");
+    const char* pay_bytes_e = std::getenv("UMA_MP_PAYLOAD_BYTES");
+    if (!pay_path || !*pay_path || !pay_bytes_e) {
+      throw std::runtime_error("worker: UMA_MP_PAYLOAD_SHM/BYTES required");
+    }
+    auto* payload =
+        uma::PayloadShm::attach_file(pay_path, static_cast<size_t>(std::stoull(pay_bytes_e)));
+    std::cerr << "uma_libtorch_mp_worker rank=" << rank
+              << " payload_shm=" << pay_path << "\n"
+              << std::flush;
+
     torch::Device dev(torch::kCUDA, 0);
     // Prefer n-specific export (partition offsets baked at trace time).
     std::string path;
@@ -134,6 +151,10 @@ int main(int argc, char** argv) {
 
     auto metadata = uma::load_artifact_metadata(artifact_dir + "/metadata.json");
 
+    const bool verbose = [] {
+      const char* e = std::getenv("UMA_MP_VERBOSE");
+      return e && e[0] == '1' && e[1] == '\0';
+    }();
     std::cerr << "uma_libtorch_mp_worker rank=" << rank << " module loaded, sending ready\n"
               << std::flush;
     uint8_t ready = 1;
@@ -145,50 +166,61 @@ int main(int argc, char** argv) {
       if (cmd == 0) {
         std::cerr << "uma_libtorch_mp_worker rank=" << rank << " shutdown\n" << std::flush;
         slot->release_cuda_ipc();
+        payload->destroy();
         break;
       }
-      int32_t n = 0;
-      read_all(STDIN_FILENO, &n, sizeof(n));
-      std::cerr << "uma_libtorch_mp_worker rank=" << rank << " predict n=" << n << "\n"
-                << std::flush;
-      std::vector<double> pos(static_cast<size_t>(n) * 3);
-      std::vector<int64_t> z(static_cast<size_t>(n));
+      // cmd=1: predict via payload shm. Pipe carries only gen (wake).
+      int32_t gen = 0;
+      read_all(STDIN_FILENO, &gen, sizeof(gen));
+
+      // Parent does not rewrite payload until all ranks return ok — safe to read
+      // after gen matches without holding the mutex through H2D.
+      pthread_mutex_lock(&payload->hdr->mu);
+      if (payload->hdr->gen != gen) {
+        pthread_mutex_unlock(&payload->hdr->mu);
+        throw std::runtime_error("worker: payload gen mismatch");
+      }
+      const int32_t n = payload->hdr->n;
+      const int32_t nedges = payload->hdr->nedges[rank];
+      const int64_t charge = payload->hdr->charge;
+      const int64_t spin = payload->hdr->spin;
       double cell[9];
       int32_t pbc[3];
-      int64_t charge = 0, spin = 0;
-      int32_t nedges = 0;
-      read_all(STDIN_FILENO, pos.data(), pos.size() * sizeof(double));
-      read_all(STDIN_FILENO, z.data(), z.size() * sizeof(int64_t));
-      read_all(STDIN_FILENO, cell, sizeof(cell));
-      read_all(STDIN_FILENO, pbc, sizeof(pbc));
-      read_all(STDIN_FILENO, &charge, sizeof(charge));
-      read_all(STDIN_FILENO, &spin, sizeof(spin));
-      read_all(STDIN_FILENO, &nedges, sizeof(nedges));
-      std::vector<int64_t> eidx(static_cast<size_t>(nedges) * 2);
-      std::vector<double> coff(static_cast<size_t>(nedges) * 3);
-      if (nedges > 0) {
-        read_all(STDIN_FILENO, eidx.data(), eidx.size() * sizeof(int64_t));
-        read_all(STDIN_FILENO, coff.data(), coff.size() * sizeof(double));
-      }
+      std::memcpy(cell, payload->hdr->cell, sizeof(cell));
+      std::memcpy(pbc, payload->hdr->pbc, sizeof(pbc));
+      pthread_mutex_unlock(&payload->hdr->mu);
 
-      auto pos_t = torch::from_blob(pos.data(), {n, 3}, torch::kFloat64).clone().to(dev);
+      auto pos_t =
+          torch::from_blob(payload->pos_ptr(), {n, 3}, torch::kFloat64).to(dev).contiguous();
+      auto z_t = torch::from_blob(payload->z_ptr(), {n}, torch::kLong).to(dev).contiguous();
+      auto cell_t = torch::from_blob(cell, {3, 3}, torch::kFloat64).to(dev).contiguous();
+      auto eidx_t =
+          (nedges > 0)
+              ? torch::from_blob(payload->eidx_ptr(rank), {2, nedges}, torch::kLong)
+                    .to(dev)
+                    .contiguous()
+              : torch::empty({2, 0}, torch::TensorOptions().dtype(torch::kLong).device(dev));
+      auto coff_t =
+          (nedges > 0)
+              ? torch::from_blob(payload->coff_ptr(rank), {nedges, 3}, torch::kFloat64)
+                    .to(dev)
+                    .contiguous()
+              : torch::empty({0, 3},
+                             torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+
       pos_t = pos_t.set_requires_grad(true);
-      auto z_t = torch::from_blob(z.data(), {n}, torch::kLong).clone().to(dev);
-      auto cell_t = torch::from_blob(cell, {3, 3}, torch::kFloat64).clone().to(dev);
       auto pbc_t = torch::tensor({pbc[0] != 0, pbc[1] != 0, pbc[2] != 0},
                                  torch::TensorOptions().dtype(torch::kBool).device(dev));
-      auto eidx_t =
-          torch::from_blob(eidx.data(), {2, nedges}, torch::kLong).clone().to(dev);
-      auto coff_t =
-          torch::from_blob(coff.data(), {nedges, 3}, torch::kFloat64).clone().to(dev);
       auto ch = torch::tensor(charge, torch::TensorOptions().dtype(torch::kLong).device(dev));
       auto sp = torch::tensor(spin, torch::TensorOptions().dtype(torch::kLong).device(dev));
 
       using clock = std::chrono::steady_clock;
       const auto t_fwd0 = clock::now();
-      std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                << " edges=" << nedges << " starting module.forward\n"
-                << std::flush;
+      if (verbose) {
+        std::cerr << "uma_libtorch_mp_worker rank=" << rank << " edges=" << nedges
+                  << " starting module.forward\n"
+                  << std::flush;
+      }
       std::vector<torch::jit::IValue> args = {pos_t, z_t, cell_t, pbc_t, eidx_t, coff_t, ch, sp};
       torch::Tensor normed;
       {
@@ -198,76 +230,37 @@ int main(int argc, char** argv) {
 #if defined(UMA_ENGINE_USE_CUDA)
       cudaDeviceSynchronize();
 #endif
-      const auto t_fwd1 = clock::now();
       const double ms_fwd =
-          std::chrono::duration<double, std::milli>(t_fwd1 - t_fwd0).count();
-      std::cerr << "uma_libtorch_mp_worker rank=" << rank << " forward done"
-                << " ms_fwd=" << ms_fwd
-                << " normed.shape=" << normed.sizes()
-                << " requires_grad=" << normed.requires_grad()
-                << " grad_fn=" << (normed.grad_fn() ? "yes" : "no")
-                << " normed0=" << normed.reshape({-1})[0].item<double>() << "\n"
-                << std::flush;
+          std::chrono::duration<double, std::milli>(clock::now() - t_fwd0).count();
       auto energy =
           uma::denorm_energy(normed, metadata.normalizer_mean, metadata.normalizer_rmsd);
-      std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                << " after_denorm=" << energy.reshape({-1})[0].item<double>()
-                << " mean=" << metadata.normalizer_mean
-                << " rmsd=" << metadata.normalizer_rmsd << "\n"
-                << std::flush;
       if (metadata.element_references.defined()) {
         auto refs = metadata.element_references.to(dev, torch::kFloat64);
         auto batch =
             torch::zeros({n}, torch::TensorOptions().dtype(torch::kLong).device(dev));
         energy = uma::undo_element_references(energy, z_t, batch, refs);
-        std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                  << " after_refs=" << energy.reshape({-1})[0].item<double>() << "\n"
-                  << std::flush;
       }
       // TS graph already contains uma_peer::all_reduce_sum on the energy logit.
-      // Do NOT all_reduce again (that would 2x a full-system energy).
-      // Concurrent per-rank grad(E_full) + all_reduce bwd double-counts the
-      // seed grad; scale loss by 1/world (override via UMA_GRAD_ENERGY_SCALE).
       double escale = 1.0 / static_cast<double>(world);
       if (const char* es = std::getenv("UMA_GRAD_ENERGY_SCALE")) {
         escale = std::strtod(es, nullptr);
         if (!(escale > 0.0)) escale = 1.0 / static_cast<double>(world);
       }
       auto e_for_grad = energy.reshape({-1}).sum() * escale;
-      // Sync ranks before backward (collectives inside gather bwd).
       uma::PeerContext::instance().slot().barrier(rank);
-      std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                << " e_for_grad=" << e_for_grad.item<double>()
-                << " requires_grad=" << e_for_grad.requires_grad()
-                << " grad_fn=" << (e_for_grad.grad_fn() ? "yes" : "no")
-                << " starting autograd::grad\n"
-                << std::flush;
       const auto t_bwd0 = clock::now();
       auto grads = torch::autograd::grad({e_for_grad}, {pos_t}, {}, false, false, false);
       auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
 #if defined(UMA_ENGINE_USE_CUDA)
       cudaDeviceSynchronize();
 #endif
-      const auto t_bwd1 = clock::now();
       const double ms_bwd =
-          std::chrono::duration<double, std::milli>(t_bwd1 - t_bwd0).count();
-      // Each rank backprops E_full through its local energy shard (identity bwd
-      // on mid-graph all_reduce). Forces are therefore PARTIAL and must be
-      // summed. Gather sum_grad only totals embedding grads on local shards —
-      // it does not assemble full dE/dpos across edge partitions.
-      // UMA_SKIP_FORCE_GP_REDUCE=1: skip sum (diag / over-count experiments).
+          std::chrono::duration<double, std::milli>(clock::now() - t_bwd0).count();
       const char* skip_fred = std::getenv("UMA_SKIP_FORCE_GP_REDUCE");
       double ms_fred = 0.0;
       if (skip_fred && std::string(skip_fred) == "1") {
         uma::PeerContext::instance().slot().barrier(rank);
-        std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                  << " force_reduce=SKIP fmax="
-                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>()
-                  << " ms_bwd=" << ms_bwd << "\n"
-                  << std::flush;
       } else {
-        const double fmax_pre =
-            forces.norm(/*p=*/2, /*dim=*/1).max().item<double>();
         const auto t_fred0 = clock::now();
         forces = uma::PeerContext::instance().slot().all_reduce(
             rank, forces.contiguous());
@@ -276,12 +269,6 @@ int main(int argc, char** argv) {
 #endif
         ms_fred =
             std::chrono::duration<double, std::milli>(clock::now() - t_fred0).count();
-        std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                  << " force_reduce=SUM fmax_pre=" << fmax_pre << " fmax_post="
-                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>()
-                  << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
-                  << " ms_fwd=" << ms_fwd << "\n"
-                  << std::flush;
       }
       if (rank == 0) {
         std::cerr << "PERF_TICK rank=0 world=" << world << " ms_fwd=" << ms_fwd
@@ -290,14 +277,22 @@ int main(int argc, char** argv) {
                   << std::flush;
       }
 
-      // Report unscaled physical energy (escale only affects forces).
-      double e = energy.reshape({-1})[0].item<double>();
-      auto f_cpu = forces.to(torch::kCPU).contiguous();
+      // Rank0 publishes E+F into payload shm; pipe returns ok only (pipe-tax cut).
+      const double e = energy.reshape({-1})[0].item<double>();
+      if (rank == 0) {
+        auto f_cpu = forces.to(torch::kCPU).contiguous();
+        pthread_mutex_lock(&payload->hdr->mu);
+        payload->hdr->energy = e;
+        std::memcpy(payload->forces_ptr(), f_cpu.data_ptr<double>(),
+                    static_cast<size_t>(n) * 3 * sizeof(double));
+        payload->hdr->result_gen = gen;
+        pthread_mutex_unlock(&payload->hdr->mu);
+      } else {
+        // Ensure non-rank0 finished before parent reads (parent waits on all oks).
+        (void)e;
+      }
       uint8_t ok = 1;
       write_all(STDOUT_FILENO, &ok, 1);
-      write_all(STDOUT_FILENO, &e, sizeof(e));
-      write_all(STDOUT_FILENO, f_cpu.data_ptr<double>(),
-                static_cast<size_t>(n) * 3 * sizeof(double));
     }
     return 0;
   } catch (const std::exception& ex) {
