@@ -266,3 +266,17 @@ REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits). Plan: `uma_vs_as
 | **P4b** | Else parent NL/publish cuts | later |
 
 Hard gates unchanged: E+F green · self-scale · beat prior @4. Soft: @4 toward ASE ~115. No Ray; no RESULTS/SUMMARY/MULTIGPU/canvas edits.
+
+## Burst 16 — HARD campaign success criteria (2026-08-08 ~10:25 CDT)
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits).
+
+**Campaign FAIL** if product `uma/kk` honest pair ms is **slower than ASE FairChem FP64 or FairChem FC LAMMPS** at the same GPU count (NaCl6 1728, FP64), even if self-scale and E+F are green. Soft ≤150 alone does **not** close the campaign.
+
+| Required | Bar |
+|----------|-----|
+| Accuracy | E+F green vs devices=1 and vs ASE oracle bands (no regress) |
+| Perf @2 and @4 | honest `uma64`/pair ms **≤ ASE and ≤ FC** |
+| Soft stretch | close to / under ASE @4 (~115) |
+
+P2 status: PASS @1/@2 · **FAIL @4** (uma~140.9 vs ASE~115 / FC~118) → campaign **OPEN**. Continue P3a→P3b→P3c against this bar.
