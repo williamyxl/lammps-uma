@@ -78,13 +78,14 @@ Same-node Kokkos+LibTorch MP is **correctness-first**. Pair ms/eval at devices=2
 
 ## Reference — ASE / FC path-isolated batch (not product)
 
-Historical FairChem timings (jobs `20910344`–`20910354`). Useful for ASE/FC scaling context only.
+Historical FairChem timings (jobs `20910344`–`20910354`). ASE/FC scaling context only — **not** uma/kk product numbers.
 
 | Path | 1 GPU | 2 GPU | 4 GPU | Notes |
 |------|------:|------:|------:|-------|
 | ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | `workers=N` → Ray ParallelMLIP |
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell FP32 → \|ΔE\|≈4.9×10⁻⁶ vs ASE |
-| uma/kk (pre-C++ MP era) | 320.4 | *(obsolete)* | *(obsolete)* | Superseded by Phase 3 Kokkos+LibTorch numbers above |
+
+**Current uma/kk pair ms** (product, Kokkos+LibTorch): **≈320 / ≈361 / ≈473** at devices=1/2/4 — see Phase 3 table above (jobs `ngpu1` / `20925747` / `20925801`). Do not quote older Ray/Python GP uma timings (~192 / ~113 @2/@4) or pre-rewrite path-isolated uma multi-GPU rows as the product backend.
 
 ---
 
