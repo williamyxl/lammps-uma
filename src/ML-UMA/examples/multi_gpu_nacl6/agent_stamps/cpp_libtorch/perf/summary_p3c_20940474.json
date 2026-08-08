@@ -1,0 +1,70 @@
+{
+  "phase": "P3c_perf",
+  "jobid": "20940474",
+  "peer_transport": "nccl",
+  "ms": {
+    "1": 321.03999999999996,
+    "2": 183.30200000000002,
+    "4": 112.038
+  },
+  "dE_d1": {
+    "1": 9.094947017729282e-13,
+    "2": 0.0,
+    "4": 2.7284841053187847e-12
+  },
+  "max_dF": {
+    "1": 0.0,
+    "2": 0.0,
+    "4": 0.0
+  },
+  "E_F_green": true,
+  "self_scale_green": true,
+  "beat_p3a_green": true,
+  "hard_ase_fc_green": true,
+  "soft_ase_targets": {
+    "devices2_le_200": true,
+    "devices4_le_ase": true
+  },
+  "gap_vs_ase": {
+    "2": -10.597999999999985,
+    "4": -3.162000000000006
+  },
+  "gap_vs_fc": {
+    "2": -9.897999999999968,
+    "4": -5.962000000000003
+  },
+  "p3a_baseline_ms": {
+    "1": 320.6,
+    "2": 183.57,
+    "4": 117.63
+  },
+  "ase_ms": {
+    "2": 193.9,
+    "4": 115.2
+  },
+  "fc_ms": {
+    "2": 193.2,
+    "4": 118.0
+  },
+  "hard_gate": "E+F green + self-scale + beat P3a @4 + <=ASE/FC @2/@4",
+  "note": "P3c = UMA_PEER_TRANSPORT=nccl opt-in A/B vs P3a cuda_ipc",
+  "perf_parent_tail": [
+    "PERF_PARENT world=4 ms_nl=8.447 ms_pub=0.759 ms_wait_workers=101.575 ms_total=110.800 gen=5 n_edges=55296",
+    "PERF_PARENT world=4 ms_nl=8.308 ms_pub=0.787 ms_wait_workers=103.412 ms_total=112.521 gen=6 n_edges=55296",
+    "PERF_PARENT world=4 ms_nl=8.139 ms_pub=1.398 ms_wait_workers=98.575 ms_total=108.126 gen=7 n_edges=55296"
+  ],
+  "status": "COMPLETED",
+  "campaign_pass": true,
+  "hard_bar": {
+    "le_ase_at_2": true,
+    "le_fc_at_2": true,
+    "le_ase_at_4": true,
+    "le_fc_at_4": true
+  },
+  "delta_vs_p3a": {
+    "1": 0.4399999999999409,
+    "2": -0.26799999999997226,
+    "4": -5.591999999999999
+  },
+  "teardown": "clean_shutdown_all_ranks (fix for 20940376 deadlock verified)"
+}

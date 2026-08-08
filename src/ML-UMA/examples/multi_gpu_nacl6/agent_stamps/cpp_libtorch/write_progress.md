@@ -336,3 +336,20 @@ Hardening:
 REPORT_OWNER=parent.
 
 **Not** mid-step NCCL deadlock. devices=2 first eval OK (PERF_PARENT gen=1, PotEng green); hang on `~LibtorchMpRuntime`: per-rank `write(cmd=0)+waitpid` left rank0 in `ncclCommDestroy` while rank1 sat in `pipe_read`. Cancelled. Fix: broadcast shutdown then waitpid; rendezvous before `ncclCommDestroy`. Details: `P3C_HANG_20940376.md`.
+
+## Burst 22 — P3c COMPLETED `20940474` CAMPAIGN PASS (2026-08-08 ~12:55 CDT)
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits).
+
+Honest `uma64` ms (`UMA_PEER_TRANSPORT=nccl`): **321.04 / 183.30 / 112.04**
+
+| Gate | Result |
+|------|--------|
+| E+F | green (max\|ΔF\|=0) |
+| Self-scale | PASS |
+| vs P3a cuda_ipc (320.6/183.57/117.63) | @4 **−5.6 ms** (beat) |
+| vs ASE @4 (115.2) | **−3.16 ms** PASS |
+| vs FC @4 (118.0) | **−5.96 ms** PASS |
+| HARD_ASE_FC | **OK** → campaign **PASS** |
+
+Teardown fix verified: all ranks logged `shutdown` @2 and @4 (no repeat of `20940376` deadlock).

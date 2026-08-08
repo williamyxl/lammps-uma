@@ -1,0 +1,18 @@
+{
+  "phase": "P3c_perf",
+  "devices": 1,
+  "jobid": "20940474",
+  "E": -5830.923720166721,
+  "dE_d1": 9.094947017729282e-13,
+  "max_dF": 0.0,
+  "E_green": true,
+  "F_green": true,
+  "ms_per_eval": 321.03999999999996,
+  "ms_source": "pair_section_or_uma64_log",
+  "wall_s": 30.131,
+  "ms_fwd": null,
+  "ms_bwd": null,
+  "ms_force_ar": null,
+  "perf_parent": {},
+  "peer_transport": "nccl"
+}
