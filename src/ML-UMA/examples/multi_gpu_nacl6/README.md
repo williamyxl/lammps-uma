@@ -11,15 +11,13 @@ Paths: ASE FairChem FP64 · FairChem LAMMPS fix-external · `uma/kk` **double**
 Canonical write-up: **[`results/RESULTS.md`](results/RESULTS.md)**  
 Also: `results/SUMMARY.md`, `results/MULTIGPU_REPORT.md`, `results/SUMMARY.json`.
 
-| Path | 1 / 2 / 4 GPU (ms) | 1→2 / 1→4 | Notes |
-|------|-------------------|-----------|-------|
-| **uma/kk double (product)** | **320.3 / 265.0 / 193.3** | **1.21× / 1.66×** | Kokkos+LibTorch + CUDA IPC · job `20932975` · E+F PASS |
-| ASE FairChem FP64 | 396.5 / 193.9 / 115.2 | 2.04× / 3.44× | Ray ParallelMLIP — **reference only** |
-| FairChem FC | 345.5 / 193.2 / 118.0 | 1.79× / 2.93× | **reference only** |
+| Path | 1 / 2 / 4 GPU (ms) | \|ΔE\| vs ASE | max\|ΔF\| vs ASE | Notes |
+|------|-------------------|-------------:|-----------------:|-------|
+| ASE FairChem FP64 | 396.5 / 193.9 / 115.2 | ~0 | ~0 | Ray — reference |
+| FairChem FC LAMMPS | 345.5 / 193.2 / 118.0 | ≈4.9×10⁻⁶ | ≈7.1×10⁻⁶ | Ray — reference |
+| **uma/kk double (product)** | **320.3 / 265.0 / 193.3** | **≈1.2×10⁻¹⁰** | **≈5.0×10⁻⁷** | Kokkos+LibTorch + CUDA IPC · job `20932975` |
 
-uma vs devices=1: **E+F PASS** at devices=2 and 4 (max\|ΔF\|=0). Self-scale **PASS**.
-
-> Product backend: [`native_kokkos_libtorch_gp.md`](../../uma-engine/docs/native_kokkos_libtorch_gp.md). Do **not** quote legacy Ray uma timings (~192 / ~113) as the product path.
+Full tables (timing + energy + per-atom force): [`results/RESULTS.md`](results/RESULTS.md) § Three-path · [`results/MULTIGPU_REPORT.md`](results/MULTIGPU_REPORT.md).
 
 ## Geometry contract (DO NOT regenerate)
 

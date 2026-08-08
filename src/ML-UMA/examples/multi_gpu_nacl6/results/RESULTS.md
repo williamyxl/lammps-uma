@@ -163,9 +163,10 @@ Historical FairChem timings (jobs `20910344`–`20910354`). ASE/FC scaling conte
 
 | Path | Role |
 |------|------|
-| `RESULTS.md` | This document (canonical Phase 4) |
-| `SUMMARY.md` | Compact Phase 4 summary |
+| `RESULTS.md` | Canonical — **three-path** ASE/FC/uma timing + E + F + product gates |
+| `MULTIGPU_REPORT.md` | Same three-path tables (report mirror) |
+| `SUMMARY.md` / `SUMMARY.json` | Compact + `three_path_compare` JSON |
 | `ngpu{1,2,4}/parity.json` | Merged energies (wall ms often contaminated) |
-| `ngpu{1,2,4}/forces.npz` | Forces for parity |
+| `ngpu{1,2,4}/forces.npz` | Forces for ASE/FC/uma parity |
 | `gp_round/oracle_ase_fp64_w1.json` | ASE FP64 oracle |
-| `../agent_stamps/cpp_libtorch/` | Campaign stamps + LAMMPS gate JSON |
+| `../agent_stamps/cpp_libtorch/` | Campaign stamps + LAMMPS / perf gate JSON |

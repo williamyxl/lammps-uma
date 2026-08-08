@@ -1,7 +1,6 @@
 # UMA multi-GPU NaCl 6×6×6 parity report
 
-> **Canonical (current):** [`RESULTS.md`](RESULTS.md) · [`SUMMARY.md`](SUMMARY.md).  
-> This file is a short product-facing mirror. Do **not** use the obsolete FAIL/wall-time tables that previously lived here.
+> **Canonical:** [`RESULTS.md`](RESULTS.md) · [`SUMMARY.md`](SUMMARY.md) · canvas `nacl6-three-path-compare`
 
 ## Setup
 
@@ -10,40 +9,64 @@
 - **Product launch:** `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · `--ntasks=1`
 - **Backend:** Kokkos+LibTorch (`gp=kokkos_libtorch_vesin`) · peer **CUDA IPC** (`UMA_PEER_TRANSPORT=cuda_ipc`)
 - **Precision:** FP64 only · mixed disabled
-- **Primary gate:** uma/kk `devices=N` vs `devices=1` (E + per-atom F)
 
-### Parity thresholds (vs devices=1)
+---
 
-| Mode | \|ΔE\| max | max\|ΔF\| |
-|------|----------:|----------:|
-| double | 1×10⁻⁸ | 1×10⁻⁶ |
+## Three-path comparison — ASE FairChem FP64 vs FC LAMMPS vs uma/kk FP64
 
-## Product results (Perf P1, job `20932975`)
+Same frozen geometry. Oracle = ASE FairChem FP64 `workers=1`.
 
-| Path | devices | Energy (eV) | pair ms\* | \|dE\| vs d1 | max\|ΔF\| vs d1 | gate |
-|------|--------:|-------------:|----------:|-------------:|----------------:|:----:|
-| uma/kk double | 1 | −5830.9237201667 | **320.34** | — | 0 | PASS |
-| uma/kk double | 2 | −5830.9237201667 | **264.96** | 0 | **0** | **PASS** |
-| uma/kk double | 4 | −5830.9237201667 | **193.32** | 1.8×10⁻¹² | **0** | **PASS** |
+### Timing (honest ms/eval)
 
-\*Honest `uma64 E=… ms` from `run_multigpu` — not SLURM wall.
+| Path | 1 GPU | 2 GPU | 4 GPU | 1→2 | 1→4 | Backend |
+|------|------:|------:|------:|----:|----:|---------|
+| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× | Ray ParallelMLIP (`workers=N`) |
+| FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× | Ray ParallelMLIP in FC |
+| **uma/kk double (product)** | **320.34** | **264.96** | **193.32** | **1.21×** | **1.66×** | Kokkos+LibTorch + CUDA IPC |
+
+Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma `20932975`.
+
+### Energy vs ASE FP64@1
+
+| Path | devices | Energy (eV) | \|ΔE\| vs ASE@1 |
+|------|--------:|-------------:|----------------:|
+| ASE FairChem FP64 | 1 | −5830.9237201666 | — (oracle) |
+| ASE FairChem FP64 | 2 / 4 | −5830.9237201666 | ≲ 10⁻¹² |
+| FairChem FC LAMMPS | 1 / 2 / 4 | −5830.9237152511 | **≈4.92×10⁻⁶** |
+| **uma/kk double** | 1 / 2 / 4 | −5830.9237201667 | **≈1.2×10⁻¹⁰** |
+
+### Per-atom forces vs ASE FP64@1
+
+| Path | devices | max\|ΔF\| (eV/Å) | max‖ΔFᵢ‖ (eV/Å) | force cosine |
+|------|--------:|-----------------:|----------------:|-------------:|
+| ASE FairChem FP64 | 1 / 2 / 4 | ~10⁻¹⁶ | ~10⁻¹⁶ | 1.000000 |
+| FairChem FC LAMMPS | 1 / 2 / 4 | **7.12×10⁻⁶** | **7.13×10⁻⁶** | 1.000000 |
+| **uma/kk double** | 1 / 2 / 4 | **5.00×10⁻⁷** | **7.67×10⁻⁷** | 1.000000 |
+
+uma devices=2/4 vs uma devices=1: max\|ΔF\| = **0**. FC ~14× larger force error vs ASE than uma/kk.
+
+### Readout
+
+| Metric | Winner @1 GPU | Winner @4 GPU |
+|--------|---------------|---------------|
+| Timing | **uma/kk** (320 vs 397/346) | ASE/FC (~115–118) |
+| Energy vs ASE | **uma/kk** (~1e-10) | **uma/kk** |
+| Forces vs ASE | **uma/kk** (~5e-7) | **uma/kk** |
+
+---
+
+## Product gate (uma/kk vs devices=1)
+
+| devices | Energy (eV) | pair ms | \|dE\| vs d1 | max\|ΔF\| vs d1 | gate | Job |
+|--------:|-------------:|--------:|-------------:|----------------:|:----:|-----|
+| 1 | −5830.9237201667 | **320.34** | — | 0 | PASS | `20932975` |
+| 2 | −5830.9237201667 | **264.96** | 0 | **0** | **PASS** | `20932975` |
+| 4 | −5830.9237201667 | **193.32** | 1.8×10⁻¹² | **0** | **PASS** | `20932975` |
 
 **Self-scale:** PASS (`ms(2)<ms(1)`, `ms(4)<ms(2)`).
-
-## Reference timings (not product)
-
-| Path | 1 GPU | 2 GPU | 4 GPU | Notes |
-|------|------:|------:|------:|-------|
-| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | Ray ParallelMLIP |
-| FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell may be FP32 |
-| uma/kk (pre-IPC Phase 3) | ≈320 | ≈361 | ≈473 | host `/dev/shm` — superseded |
-
-## Three-path (ASE / FC / uma/kk)
-
-See [`RESULTS.md`](RESULTS.md) § Three-path comparison for full timing + energy + per-atom force tables.
-Snapshot: uma **320/265/193 ms**, |ΔE|≈1.2e-10, max|ΔF|≈5e-7 vs ASE; FC |ΔE|≈4.9e-6, max|ΔF|≈7e-6; ASE Ray fastest @4 (~115 ms).
 
 ## Notes
 
 - Same-node only (`gpuA100x4`); Phase 5 multi-node out of scope.
-- Machine-readable: `SUMMARY.json` · stamps `../agent_stamps/cpp_libtorch/perf/summary_20932975.json`.
+- Machine-readable: `SUMMARY.json` → `three_path_compare`.
+- ASE/FC are reference baselines (Ray); product path is uma/kk Kokkos+LibTorch.
