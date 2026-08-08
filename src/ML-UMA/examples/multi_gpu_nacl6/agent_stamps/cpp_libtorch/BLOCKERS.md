@@ -1,62 +1,48 @@
 # C++ LibTorch track — blockers
 
-**Stamp:** 2026-08-08 ~00:22 CDT  
+**Stamp:** 2026-08-08 ~00:50 CDT  
 **Track:** `cpp_libtorch`
 
 ## B1 — `model_state.pt` is weights-only (architecture gap)
 
-| Fact | Detail |
-|------|--------|
-| File | `artifacts/uma-s-1p2-omat-f64/model_state.pt` (~2.2 G) |
-| Contents | `{"state_dict": …, "dtype": "float64", "task": "omat", "checkpoint_path": …}` |
-| Keys | 154 pure `torch.float64` tensors (`backbone.*`, heads, …) |
-| Module type (sidecar) | `fairchem.core.models.base.HydraModel` (`eager_arch.json`) |
-| `torch.jit.load(model_state.pt)` | **Fails** (not a TorchScript archive) |
-| C++ `torch::nn::Module` from state_dict alone | **Impossible** — UMA eSCN/Hydra graph, SO2/SO3 ops, and GP control flow live only in FairChem Python |
-
-**Implication:** LibTorch cannot reconstruct a runnable eager module from `model_state.pt` without either (a) a scripted/traced artifact that embeds the forward, or (b) generated C++ module code mirroring FairChem (out of scope / multi-month).
-
-**Not a pivot to Ray/Python GP.** Product path (landed):
-
-1. **Export-time (Python FairChem as build tool only):** load checkpoint → `uma_peer` custom ops → `torch.jit.trace` per rank → `model_mp_w{N}_r{R}.pt`.
-2. **Runtime (C++ only):** register `uma_peer` Autograd ops → process-per-rank exec + `SharedPeerGatherSlot` → vesin → `graph_shard` → N× LibTorch modules.
-3. Default `devices>1` = this C++ path. Python workers only if `UMA_PYTHON_GP_WORKER=1`.
+Documented previously. Product path: export-time FairChem → per-rank TorchScript with `uma_peer` → C++ process-per-rank runtime. **Not Ray / not Python GP as product.**
 
 ## B2 — Serial `model_traced.pt` cannot host MP collectives
 
-Opaque TorchScript energy wrapper has no gather/reduce insertion points. Do **not** claim multi-GPU by N× independent serial forwards.
+Still true. Use `model_mp_w{N}_r*` / `model_mp_w{N}_n{NATOMS}_r*`.
 
-## B4 — TorchScript multi-thread deadlock — **resolved**
+## B4 / B5 / B5b — deadlock, CVD bake, missing Autograd — **resolved**
 
-Cause: mid-forward peer collectives need concurrent rank forwards; `jit::Module::forward` is not multi-thread safe.  
-**Fix:** process-per-rank `fork+exec` + `/dev/shm` `SharedPeerGatherSlot`.
+See prior stamps. Process-per-rank + Autograd `uma_peer` + process-global rank + single-thread autograd.
 
-## B5 — Rank-1 cuda:0 vs cuda:1 device bake — **resolved**
+## B6 — Force mismatch vs devices=1 — **resolved**
 
-**Fix:** `CUDA_VISIBLE_DEVICES=<rank>` at export and worker exec; worker uses `cuda:0` only.
+| Sweep `20925383` best | `sumF` + `all_reduce` bwd + `escale=1/world` |
+|----------------------|-----------------------------------------------|
+| Root cause | Concurrent per-rank `grad(E_full)` needs (1) all_reduce grads on mid-graph `all_reduce_sum`, (2) force all_reduce across edge shards, (3) loss scale `1/world` |
+| Defaults | `UMA_ALLREDUCE_WITH_GRAD_BWD` default ON; worker `escale=1/world`; force `SUM` (skip via `UMA_SKIP_FORCE_GP_REDUCE=1`) |
 
-## B5b — Worker abort mid-predict — **resolved** (energy green)
+### nacl64 E+F (job `20925398`)
 
-| Job | Result |
-|-----|--------|
-| `20925077` | Captured abort: forward OK; `autograd::grad` → *element 0 … does not require grad* |
-| Root cause | `uma_peer` registered only under `CompositeExplicitAutograd` → no `grad_fn` through collectives |
-| Fix | `TORCH_LIBRARY_IMPL(uma_peer, Autograd, …)` with `AllGatherNodesFn` / `AllReduceSumFn` |
-| Follow-ons | Gather bwd arity (return grad for `n_atoms`); no double energy all_reduce; **process-global rank** (not `thread_local` — autograd engine threads); `AutogradState::set_multithreading_enabled(false)` so mid-bwd collectives stay ordered |
+| | devices=1 | devices=2 |
+|--|-----------|-----------|
+| E (eV) | −216.267998868581 | −216.267998868581 |
+| max\|ΔF\| | — | **5.3e-16** |
 
-### Energy gate (job `20925309`, `nacl64.txt`)
+### NaCl6 1728-atom E+F (job `20925457`)
 
-| Path | E (eV) |
-|------|--------|
-| devices=1 (`uma_parity_cli`) | −216.267998868581 |
-| devices=2 C++ LibTorch MP | −216.267998868581 |
-| **dE_d1** | **0.0** |
+| | devices=1 | devices=2 | ASE FP64@1 |
+|--|-----------|-----------|------------|
+| E (eV) | −5830.923720166719 | −5830.923720166721 | −5830.9237201666 |
+| dE_d1 | — | **1.8e-12** | dE_ase≈1.2e-10 |
+| max\|ΔF\| | — | **5.3e-16** | — |
 
-Note: ASE FP64@1 oracle −5830.92 eV is the **1728-atom** NaCl6 geometry, not `nacl64.txt` (64 atoms). Same-structure gate is devices=1 / this artifact.
+Requires n-specific export `model_mp_w2_n1728_r{0,1}.pt` (`UMA_MP_NATOMS=1728`).
 
-`SMOKE_OK` on `gpuA100x4` / `bbpl-delta-gpu`. Worker logs: `worker_logs_20925309/`.
+## B7 — MP TorchScript is **n_atoms-specific** (baked `gp_node_offset`)
 
-### Remaining (not blocking E)
+FairChem traces `gp_node_offset = node_partition.min()` as a constant. A 64-atom export OOBs on 1728 (`index_add` CUDA assert).
 
-- **Forces:** devices=2 `fmax≈0.286` vs devices=1 `fmax≈0.327` — force parity not yet gated; next: compare `force_max_d1` vs ASE/d1 and tune gather-bwd / force-reduce regime.
-- **Scale-up:** devices=4; full NaCl6 (1728) geometry when ready.
+**Mitigation:** export `model_mp_w{W}_n{N}_r{R}.pt` via `--atoms`; runtime `UMA_MP_NATOMS=N`. Legacy `model_mp_w2_r*.pt` = n=64.
+
+**Next (optional):** unbake offset (tensorized from `natoms`/rank) for one artifact across sizes; devices=4.

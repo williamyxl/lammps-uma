@@ -86,10 +86,17 @@ void read_all(int fd, void* dst, size_t n) {
 bool LibtorchMpRuntime::artifacts_present(const std::string& artifact_dir,
                                           int num_devices) {
   if (num_devices < 2) return false;
+  // Legacy wN_rR or n-specific wN_n{N}_rR (via UMA_MP_NATOMS).
+  std::string ntag;
+  if (const char* e = std::getenv("UMA_MP_NATOMS")) {
+    if (*e) ntag = std::string("_n") + e;
+  }
   for (int r = 0; r < num_devices; ++r) {
+    const std::string p_n = artifact_dir + "/model_mp_w" + std::to_string(num_devices) +
+                            ntag + "_r" + std::to_string(r) + ".pt";
     const std::string p = artifact_dir + "/model_mp_w" + std::to_string(num_devices) +
                           "_r" + std::to_string(r) + ".pt";
-    if (!file_exists(p)) return false;
+    if (!file_exists(p_n) && !file_exists(p)) return false;
   }
   return true;
 }

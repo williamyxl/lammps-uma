@@ -30,7 +30,7 @@ static bool load_structure(const std::string& path, std::vector<double>& pos,
 
 static void usage(const char* argv0) {
   std::cerr << "Usage: " << argv0
-            << " <artifact_dir> [structure.txt] [--devices N]\n"
+            << " <artifact_dir> [structure.txt] [--devices N] [--write-forces FILE]\n"
             << "  devices=1 (default): TorchScript traced Predictor\n"
             << "  devices>1: C++ LibTorch MP (model_mp_wN_r*.pt); "
             << "Python only if UMA_PYTHON_GP_WORKER=1\n"
@@ -45,6 +45,7 @@ int main(int argc, char** argv) {
 
   std::string artifact;
   std::string structure;
+  std::string forces_out;
   int num_devices = 1;
 
   for (int i = 1; i < argc; ++i) {
@@ -55,6 +56,12 @@ int main(int argc, char** argv) {
         return 1;
       }
       num_devices = std::stoi(argv[++i]);
+    } else if (a == "--write-forces") {
+      if (i + 1 >= argc) {
+        usage(argv[0]);
+        return 1;
+      }
+      forces_out = argv[++i];
     } else if (a == "--help" || a == "-h") {
       usage(argv[0]);
       return 0;
@@ -124,7 +131,26 @@ int main(int argc, char** argv) {
   int pbc[3] = {1, 1, 1};
   auto out = pred.predict_host(n, pos.data(), z.data(), cell.data(), pbc, forces.data());
   double fmax = 0.0;
-  for (double f : forces) fmax = std::max(fmax, std::abs(f));
-  std::printf("n=%d energy=%.12f eV  fmax=%.10e\n", n, out.energy, fmax);
+  double fmax_atom = 0.0;
+  for (int i = 0; i < n; ++i) {
+    const double fx = forces[static_cast<size_t>(3 * i)];
+    const double fy = forces[static_cast<size_t>(3 * i + 1)];
+    const double fz = forces[static_cast<size_t>(3 * i + 2)];
+    fmax = std::max(fmax, std::max(std::abs(fx), std::max(std::abs(fy), std::abs(fz))));
+    fmax_atom = std::max(fmax_atom, std::sqrt(fx * fx + fy * fy + fz * fz));
+  }
+  std::printf("n=%d energy=%.12f eV  fmax=%.10e  fmax_atom=%.10e\n", n, out.energy,
+              fmax, fmax_atom);
+  if (!forces_out.empty()) {
+    std::ofstream fo(forces_out);
+    if (!fo) {
+      std::cerr << "Failed to write forces to " << forces_out << "\n";
+      return 1;
+    }
+    fo.write(reinterpret_cast<const char*>(forces.data()),
+             static_cast<std::streamsize>(forces.size() * sizeof(double)));
+    std::printf("wrote_forces=%s bytes=%zu\n", forces_out.c_str(),
+                forces.size() * sizeof(double));
+  }
   return 0;
 }

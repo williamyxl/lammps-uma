@@ -1,6 +1,8 @@
 #include "uma/peer_context.h"
 
+#include <cstdlib>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <torch/csrc/autograd/custom_function.h>
@@ -67,7 +69,9 @@ torch::Tensor uma_peer_op_all_reduce_sum(const torch::Tensor& local) {
       PeerContext::thread_rank(), local.contiguous());
 }
 
-// Identity backward (FairChem ReduceFromMP / process-GP all_reduce_with_grad).
+// Process-per-rank default: all_reduce grads in backward (nn.functional.all_reduce).
+// Pair with force all_reduce + grad energy scale 1/world (see mp worker).
+// UMA_ALLREDUCE_WITH_GRAD_BWD=0: identity backward (FairChem ReduceFromMP / diag).
 class AllReduceSumFn : public torch::autograd::Function<AllReduceSumFn> {
  public:
   static torch::Tensor forward(torch::autograd::AutogradContext* /*ctx*/,
@@ -79,6 +83,13 @@ class AllReduceSumFn : public torch::autograd::Function<AllReduceSumFn> {
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* /*ctx*/,
       torch::autograd::variable_list grad_outputs) {
+    const char* mode = std::getenv("UMA_ALLREDUCE_WITH_GRAD_BWD");
+    // Default ON for process-per-rank (sweep 20925383: needed for F green).
+    const bool ar_bwd = !(mode && std::string(mode) == "0");
+    if (ar_bwd) {
+      at::AutoDispatchBelowADInplaceOrView guard;
+      return {uma_peer_op_all_reduce_sum(grad_outputs[0].contiguous())};
+    }
     return {grad_outputs[0]};
   }
 };

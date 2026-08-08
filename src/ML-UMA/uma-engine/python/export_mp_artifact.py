@@ -52,6 +52,17 @@ def _nacl_perturbed(seed: int = 0, noise: float = 0.05):
     return atoms
 
 
+def _load_atoms(path: Path | None):
+    """Load ASE atoms from extxyz/any ASE-readable file, or default NaCl64."""
+    if path is None:
+        return _nacl_perturbed()
+    from ase.io import read
+
+    atoms = read(str(path))
+    atoms.pbc = True
+    return atoms
+
+
 def _load_state_dict_into(model: torch.nn.Module, state_path: Path) -> None:
     obj = torch.load(state_path, map_location="cpu", weights_only=False)
     sd = obj["state_dict"] if isinstance(obj, dict) and "state_dict" in obj else obj
@@ -94,6 +105,7 @@ def export_mp_rank(
     task: str,
     device: str,
     state_path: Path | None,
+    atoms_path: Path | None = None,
 ) -> dict:
     import os
 
@@ -114,7 +126,8 @@ def export_mp_rank(
     settings.activation_checkpointing = False
     settings.execution_mode = "general"
 
-    atoms = _nacl_perturbed()
+    atoms = _load_atoms(atoms_path)
+    n_atoms = len(atoms)
     sample = atoms_to_atomic_data(atoms, task_name=task, settings=settings)
     model, _ckpt, _ = load_prepared_hydra_model(
         str(checkpoint), sample, settings=settings, device="cpu"
@@ -144,7 +157,11 @@ def export_mp_rank(
     wrapper = wrapper.to(dev)
 
     notes: list[str] = []
-    out_path = output_dir / f"model_mp_w{world}_r{rank}.pt"
+    # Partition offsets are baked into TorchScript at trace time → n-specific.
+    out_path = output_dir / f"model_mp_w{world}_n{n_atoms}_r{rank}.pt"
+    if atoms_path is None and n_atoms == 64:
+        # Keep legacy filename for the default NaCl64 export.
+        out_path = output_dir / f"model_mp_w{world}_r{rank}.pt"
     try:
         apply_trace_patches()
         try:
@@ -172,6 +189,7 @@ def export_mp_rank(
         "ok": ok,
         "world": world,
         "rank": rank,
+        "n_atoms": n_atoms,
         "path": str(out_path) if ok else None,
         "device": str(dev),
         "error": err,
@@ -193,6 +211,13 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=None,
         help="optional model_state.pt to load after prepare_for_inference",
+    )
+    p.add_argument(
+        "--atoms",
+        type=Path,
+        default=None,
+        help="ASE-readable structure for trace (default: perturbed NaCl 2x2x2 = 64). "
+        "MP TS bakes partition offsets → re-export per n_atoms.",
     )
     args = p.parse_args(argv)
 
@@ -235,6 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                 task=args.task,
                 device=device,
                 state_path=state_path,
+                atoms_path=args.atoms.expanduser().resolve() if args.atoms else None,
             )
         )
 

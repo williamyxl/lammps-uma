@@ -112,8 +112,19 @@ int main(int argc, char** argv) {
     cudaSetDevice(0);
 #endif
     torch::Device dev(torch::kCUDA, 0);
-    const std::string path = artifact_dir + "/model_mp_w" + std::to_string(world) +
-                             "_r" + std::to_string(rank) + ".pt";
+    // Prefer n-specific export (partition offsets baked at trace time).
+    std::string path;
+    if (const char* natoms_e = std::getenv("UMA_MP_NATOMS")) {
+      const std::string nspec = artifact_dir + "/model_mp_w" + std::to_string(world) +
+                                "_n" + natoms_e + "_r" + std::to_string(rank) + ".pt";
+      if (::access(nspec.c_str(), R_OK) == 0) path = nspec;
+    }
+    if (path.empty()) {
+      path = artifact_dir + "/model_mp_w" + std::to_string(world) + "_r" +
+             std::to_string(rank) + ".pt";
+    }
+    std::cerr << "uma_libtorch_mp_worker rank=" << rank << " loading " << path << "\n"
+              << std::flush;
     auto module = torch::jit::load(path, dev);
     module.eval();
     module.to(dev);
@@ -201,9 +212,15 @@ int main(int argc, char** argv) {
                   << std::flush;
       }
       // TS graph already contains uma_peer::all_reduce_sum on the energy logit.
-      // Do NOT all_reduce again (that would 2x a full-system energy). Keep the
-      // tensor on the Autograd graph for forces.
-      auto e_for_grad = energy.reshape({-1}).sum();
+      // Do NOT all_reduce again (that would 2x a full-system energy).
+      // Concurrent per-rank grad(E_full) + all_reduce bwd double-counts the
+      // seed grad; scale loss by 1/world (override via UMA_GRAD_ENERGY_SCALE).
+      double escale = 1.0 / static_cast<double>(world);
+      if (const char* es = std::getenv("UMA_GRAD_ENERGY_SCALE")) {
+        escale = std::strtod(es, nullptr);
+        if (!(escale > 0.0)) escale = 1.0 / static_cast<double>(world);
+      }
+      auto e_for_grad = energy.reshape({-1}).sum() * escale;
       // Sync ranks before backward (collectives inside gather bwd).
       uma::PeerContext::instance().slot().barrier(rank);
       std::cerr << "uma_libtorch_mp_worker rank=" << rank
@@ -214,11 +231,31 @@ int main(int argc, char** argv) {
                 << std::flush;
       auto grads = torch::autograd::grad({e_for_grad}, {pos_t}, {}, false, false, false);
       auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
-      // Gather sum_grad bwd already all_reduces embedding grads; do not
-      // all_reduce forces here (would 2x). Barrier so both ranks finish bwd.
-      uma::PeerContext::instance().slot().barrier(rank);
+      // Each rank backprops E_full through its local energy shard (identity bwd
+      // on mid-graph all_reduce). Forces are therefore PARTIAL and must be
+      // summed. Gather sum_grad only totals embedding grads on local shards —
+      // it does not assemble full dE/dpos across edge partitions.
+      // UMA_SKIP_FORCE_GP_REDUCE=1: skip sum (diag / over-count experiments).
+      const char* skip_fred = std::getenv("UMA_SKIP_FORCE_GP_REDUCE");
+      if (skip_fred && std::string(skip_fred) == "1") {
+        uma::PeerContext::instance().slot().barrier(rank);
+        std::cerr << "uma_libtorch_mp_worker rank=" << rank
+                  << " force_reduce=SKIP fmax="
+                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>() << "\n"
+                  << std::flush;
+      } else {
+        const double fmax_pre =
+            forces.norm(/*p=*/2, /*dim=*/1).max().item<double>();
+        forces = uma::PeerContext::instance().slot().all_reduce(
+            rank, forces.contiguous());
+        std::cerr << "uma_libtorch_mp_worker rank=" << rank
+                  << " force_reduce=SUM fmax_pre=" << fmax_pre << " fmax_post="
+                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>() << "\n"
+                  << std::flush;
+      }
 
-      double e = e_for_grad.item<double>();
+      // Report unscaled physical energy (escale only affects forces).
+      double e = energy.reshape({-1})[0].item<double>();
       auto f_cpu = forces.to(torch::kCPU).contiguous();
       uint8_t ok = 1;
       write_all(STDOUT_FILENO, &ok, 1);

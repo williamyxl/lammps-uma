@@ -92,3 +92,23 @@
 ### Next
 1. Force parity vs devices=1 / ASE on same structure.
 2. devices=4 smoke; optionally full NaCl6 geometry.
+
+## Burst 6 — 2026-08-08 ~00:50 CDT (F green + NaCl6)
+
+### Force regime (sweep `20925383`)
+Best: **force all_reduce SUM** + **`all_reduce` bwd** on `uma_peer::all_reduce_sum` + **grad energy scale 1/world**.
+Defaults wired in worker / `AllReduceSumFn` (override with env for diag).
+
+### Gates
+| Job | Structure | dE_d1 | max\|ΔF\| | Result |
+|-----|-----------|-------|----------|--------|
+| `20925398` | nacl64 | 0 | 5.3e-16 | E+F green |
+| `20925456` | export n1728 | — | — | `model_mp_w2_n1728_r*.pt` |
+| `20925457` | NaCl6 1728 | 1.8e-12 | 5.3e-16 | E+F green; dE_ase≈1.2e-10 |
+
+### Note
+MP TS bakes `gp_node_offset` → n-specific artifacts (`UMA_MP_NATOMS`). Keep legacy `model_mp_w2_r*.pt` for n=64.
+
+### Next
+1. Optional: unbake node offset for size-agnostic MP TS.
+2. devices=4.
