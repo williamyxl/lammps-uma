@@ -12,9 +12,16 @@
   "product_backend": "kokkos_libtorch_vesin",
   "peer_transport": "cuda_ipc",
   "product_launch": "lmp -k on g N -sf kk; pair_style uma/kk precision double devices N; ntasks=1",
-  "not_product": ["Ray", "FairChem ParallelMLIPPredictUnit", "UMA_PYTHON_GP_WORKER"],
+  "not_product": [
+    "Ray",
+    "FairChem ParallelMLIPPredictUnit",
+    "UMA_PYTHON_GP_WORKER"
+  ],
   "ase_oracle_eV": -5830.9237201666,
-  "thresholds_vs_d1": {"dE_max": 1e-8, "max_dF": 1e-6},
+  "thresholds_vs_d1": {
+    "dE_max": 1e-08,
+    "max_dF": 1e-06
+  },
   "lammps_gates_current": [
     {
       "devices": 1,
@@ -47,20 +54,120 @@
     }
   ],
   "lammps_gates_phase3_historical": [
-    {"devices": 2, "job": "20925747", "dE_d1": 9.1e-13, "max_dF": 0.0, "pair_ms": 361, "note": "pre-IPC host-shm"},
-    {"devices": 4, "job": "20925801", "dE_d1": 2.7e-12, "max_dF": 0.0, "pair_ms": 473, "note": "pre-IPC host-shm"}
+    {
+      "devices": 2,
+      "job": "20925747",
+      "dE_d1": 9.1e-13,
+      "max_dF": 0.0,
+      "pair_ms": 361,
+      "note": "pre-IPC host-shm"
+    },
+    {
+      "devices": 4,
+      "job": "20925801",
+      "dE_d1": 2.7e-12,
+      "max_dF": 0.0,
+      "pair_ms": 473,
+      "note": "pre-IPC host-shm"
+    }
   ],
   "engine_cli_gates": [
-    {"structure": "nacl64", "devices": 2, "job": "20925398", "dE_d1": 0.0, "max_dF": 5.3e-16},
-    {"structure": "nacl6_1728", "devices": 2, "job": "20925457", "dE_d1": 1.8e-12, "max_dF": 5.3e-16, "dE_ase": 1.2e-10},
-    {"structure": "nacl64", "devices": 4, "job": "20925504", "dE_d1": 0.0, "max_dF": 6.7e-16},
-    {"structure": "nacl6_1728", "devices": 4, "job": "20925506", "dE_d1": 1.8e-12, "max_dF": 5.8e-16, "dE_ase": 1.2e-10}
+    {
+      "structure": "nacl64",
+      "devices": 2,
+      "job": "20925398",
+      "dE_d1": 0.0,
+      "max_dF": 5.3e-16
+    },
+    {
+      "structure": "nacl6_1728",
+      "devices": 2,
+      "job": "20925457",
+      "dE_d1": 1.8e-12,
+      "max_dF": 5.3e-16,
+      "dE_ase": 1.2e-10
+    },
+    {
+      "structure": "nacl64",
+      "devices": 4,
+      "job": "20925504",
+      "dE_d1": 0.0,
+      "max_dF": 6.7e-16
+    },
+    {
+      "structure": "nacl6_1728",
+      "devices": 4,
+      "job": "20925506",
+      "dE_d1": 1.8e-12,
+      "max_dF": 5.8e-16,
+      "dE_ase": 1.2e-10
+    }
   ],
   "devices1_pair_ms": 320.34,
   "self_scale_green": true,
-  "speedup_vs_d1": {"2": 1.209, "4": 1.657},
+  "speedup_vs_d1": {
+    "2": 1.209,
+    "4": 1.657
+  },
   "all_passed": true,
   "phase5_multinode": "out_of_scope",
   "canonical": "RESULTS.md",
-  "perf_summary": "agent_stamps/cpp_libtorch/perf/summary_20932975.json"
+  "perf_summary": "agent_stamps/cpp_libtorch/perf/summary_20932975.json",
+  "three_path_compare": {
+    "geometry": "nacl6_rattle_fixed.extxyz",
+    "oracle_ase_eV": -5830.9237201666,
+    "timing_ms": {
+      "ase_fairchem_fp64": {
+        "1": 396.5,
+        "2": 193.9,
+        "4": 115.2,
+        "jobs": "20910344/48/52"
+      },
+      "fairchem_fc_lammps": {
+        "1": 345.5,
+        "2": 193.2,
+        "4": 118.0,
+        "jobs": "20910345/49/53"
+      },
+      "uma_kk_double": {
+        "1": 320.34,
+        "2": 264.96,
+        "4": 193.324,
+        "job": "20932975",
+        "transport": "cuda_ipc"
+      }
+    },
+    "energy_vs_ase": {
+      "ase": {
+        "dE": 0.0
+      },
+      "fc": {
+        "E": -5830.9237152511,
+        "dE": 4.915e-06,
+        "note": "FC cell may be FP32"
+      },
+      "uma_kk_double": {
+        "E": -5830.9237201667,
+        "dE": 1.2e-10
+      }
+    },
+    "force_vs_ase": {
+      "ase": {
+        "max_dF": 1e-16,
+        "max_dF_atom": 1e-16,
+        "cosine": 1.0
+      },
+      "fc": {
+        "max_dF": 7.123e-06,
+        "max_dF_atom": 7.127e-06,
+        "cosine": 1.0
+      },
+      "uma_kk_double": {
+        "max_dF": 5e-07,
+        "max_dF_atom": 7.673e-07,
+        "cosine": 1.0,
+        "note": "same across devices 1/2/4; vs uma d1 max_dF=0"
+      }
+    }
+  }
 }

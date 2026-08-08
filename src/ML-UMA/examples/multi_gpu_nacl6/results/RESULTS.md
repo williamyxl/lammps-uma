@@ -16,7 +16,52 @@
 | Current pair ms | **≈320 / ≈265 / ≈193** @ devices=1/2/4 (job `20932975`) |
 | **Not** product | Ray · FairChem `ParallelMLIPPredictUnit` · Python GP worker (env opt-in only) |
 
-ASE FairChem / FC rows below are **reference baselines only** (historical path-isolated batch). They are not the uma/kk product path.
+ASE FairChem / FC rows below are **reference baselines**; uma/kk is the product path. Timing for ASE/FC is from the path-isolated batch (jobs `20910344`–`20910354`); uma/kk timing is Perf P1 CUDA IPC (job `20932975`).
+
+---
+
+## Three-path comparison (NaCl6 1728, FP64)
+
+Same frozen geometry. Oracle = ASE FairChem FP64 `workers=1` (−5830.9237201666 eV).
+
+### Timing (honest ms/eval)
+
+| Path | 1 GPU | 2 GPU | 4 GPU | 1→2 | 1→4 | Backend |
+|------|------:|------:|------:|----:|----:|---------|
+| ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× | Ray ParallelMLIP (`workers=N`) |
+| FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× | Ray ParallelMLIP in FC |
+| **uma/kk double (product)** | **320.34** | **264.96** | **193.32** | **1.21×** | **1.66×** | Kokkos+LibTorch + CUDA IPC |
+
+Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma `20932975`.
+
+### Energy vs ASE FP64@1
+
+| Path | devices | Energy (eV) | \|ΔE\| vs ASE@1 |
+|------|--------:|-------------:|----------------:|
+| ASE FairChem FP64 | 1 | −5830.9237201666 | — (oracle) |
+| ASE FairChem FP64 | 2 / 4 | −5830.9237201666 | ≲ 10⁻¹² |
+| FairChem FC LAMMPS | 1 / 2 / 4 | −5830.9237152511 | **≈4.92×10⁻⁶** |
+| **uma/kk double** | 1 / 2 / 4 | −5830.9237201667 | **≈1.2×10⁻¹⁰** |
+
+FC energy offset is consistent with FC cell build in FP32 (documented). uma/kk stays ~10⁻¹⁰ eV of the ASE FP64 oracle at all device counts.
+
+### Per-atom forces vs ASE FP64@1
+
+| Path | devices | max\|ΔF\| (eV/Å) | max‖ΔFᵢ‖ (eV/Å) | force cosine |
+|------|--------:|-----------------:|----------------:|-------------:|
+| ASE FairChem FP64 | 1 / 2 / 4 | ~10⁻¹⁶ | ~10⁻¹⁶ | 1.000000 |
+| FairChem FC LAMMPS | 1 / 2 / 4 | **7.12×10⁻⁶** | **7.13×10⁻⁶** | 1.000000 |
+| **uma/kk double** | 1 / 2 / 4 | **5.00×10⁻⁷** | **7.67×10⁻⁷** | 1.000000 |
+
+uma/kk forces are identical across devices=1/2/4 to numerical noise vs each other (max\|ΔF\| vs uma d1 = **0** on P1); residual vs ASE is ~5×10⁻⁷ eV/Å (well under the 1×10⁻⁶ gate). FC is ~14× larger force error vs ASE than uma/kk.
+
+### Readout
+
+| Metric | Winner @1 GPU | Winner @4 GPU | Notes |
+|--------|---------------|---------------|-------|
+| Timing | **uma/kk** (320 vs 397/346) | ASE/FC (~115–118) | uma self-scales but trails Ray bandwidth @4 |
+| Energy vs ASE | **uma/kk** (~1e-10) | **uma/kk** | FC stuck at ~5e-6 |
+| Forces vs ASE | **uma/kk** (~5e-7) | **uma/kk** | FC ~7e-6 |
 
 ---
 

@@ -35,4 +35,12 @@ Phase-3 host-shm jobs `20925747`/`20925801` remain E+F green historical (~361 / 
 | NaCl6 1728 | 4 | `20925506` | 1.8×10⁻¹² | 5.8×10⁻¹⁶ |
 | nacl64 / NaCl6 | 2 | `20925398` / `20925457` | 0 / 1.8×10⁻¹² | ~5×10⁻¹⁶ |
 
-Canonical detail: [`RESULTS.md`](RESULTS.md). Phase 5 multi-node is later / out of scope.
+Canonical detail: [`RESULTS.md`](RESULTS.md) (includes full **three-path** ASE / FC / uma/kk timing + E + F tables). Phase 5 multi-node is later / out of scope.
+
+### Three-path snapshot (vs ASE FP64@1)
+
+| Path | ms @1/2/4 | \|ΔE\| | max\|ΔF\| |
+|------|-----------|-------:|----------:|
+| ASE FairChem FP64 | 396.5 / 193.9 / 115.2 | ~0 | ~0 |
+| FairChem FC LAMMPS | 345.5 / 193.2 / 118.0 | ≈4.9×10⁻⁶ | ≈7.1×10⁻⁶ |
+| **uma/kk double** | **320.3 / 265.0 / 193.3** | **≈1.2×10⁻¹⁰** | **≈5.0×10⁻⁷** |

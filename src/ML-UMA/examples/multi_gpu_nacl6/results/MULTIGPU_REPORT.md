@@ -38,6 +38,11 @@
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell may be FP32 |
 | uma/kk (pre-IPC Phase 3) | ≈320 | ≈361 | ≈473 | host `/dev/shm` — superseded |
 
+## Three-path (ASE / FC / uma/kk)
+
+See [`RESULTS.md`](RESULTS.md) § Three-path comparison for full timing + energy + per-atom force tables.
+Snapshot: uma **320/265/193 ms**, |ΔE|≈1.2e-10, max|ΔF|≈5e-7 vs ASE; FC |ΔE|≈4.9e-6, max|ΔF|≈7e-6; ASE Ray fastest @4 (~115 ms).
+
 ## Notes
 
 - Same-node only (`gpuA100x4`); Phase 5 multi-node out of scope.
