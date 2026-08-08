@@ -122,3 +122,15 @@
 2026-08-08T01:17:15-05:00 COORD_TICK job=20925506 state=COMPLETED note=w4_chain_sm1728
 2026-08-08T01:17:38-05:00 COORD_TICK job=20925506 state=COMPLETED note=w4_nacl6_EF_GREEN_dE=1.8e-12_maxdF=5.8e-16
 2026-08-08T01:17:38-05:00 COORD_TICK job=20925504 state=COMPLETED note=w4_nacl64_EF_GREEN_dE=0_maxdF=6.7e-16
+2026-08-08T01:18:05-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=134 blockers=yes job=20925506 state=COMPLETED
+2026-08-08T01:23:05-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=134 blockers=yes job=20925506 state=COMPLETED
+2026-08-08T01:23:10-05:00 COORD_TICK job=20925747 state=SUBMITTED note=phase3_lammps_w2_nacl6
+2026-08-08T01:28:04-05:00 COORD_TICK job=20925747 state=COMPLETED note=phase3_lammps_w2_GREEN_dE=9e-13_maxdF=0
+2026-08-08T01:28:04-05:00 COORD_TICK job=20925801 state=SUBMITTED note=phase3_lammps_w4_nacl6
+2026-08-08T01:28:05-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=150 blockers=yes job=20925801 state=PENDING
+2026-08-08T01:33:05-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=150 blockers=yes job=20925801 state=PENDING
+2026-08-08T01:38:05-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=150 blockers=yes job=20925801 state=PENDING
+2026-08-08T01:43:05-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=150 blockers=yes job=20925801 state=PENDING
+2026-08-08T01:48:06-05:00 AGENT_LOOP_TICK_cpp_libtorch progress=150 blockers=yes job=20925801 state=RUNNING
+2026-08-08T01:49:09-05:00 COORD_TICK job=20925801 state=COMPLETED note=phase3_lammps_w4_GREEN_dE=2.7e-12_maxdF=0
+2026-08-08T01:49:09-05:00 COORD_TICK note=phase3_DONE_lammps_w2_w4_EF_GREEN

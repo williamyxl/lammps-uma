@@ -39,6 +39,19 @@ cmake -S "${ROOT}/cmake" -B "${LAMMPS_BUILD}" \
 
 cmake --build "${LAMMPS_BUILD}" -j"${JOBS}"
 
+# Process-per-rank MP worker (EXCLUDE_FROM_ALL under LAMMPS add_subdirectory).
+# Prefer building into uma-engine/build-cpp-mp so UMA_LIBTORCH_MP_WORKER is stable.
+ENG_MP_BUILD="${ENG}/build-cpp-mp"
+mkdir -p "${ENG_MP_BUILD}"
+cmake -S "${ENG}" -B "${ENG_MP_BUILD}" \
+  -DCMAKE_PREFIX_PATH="${TORCH_CMAKE}" \
+  -DUMA_ENGINE_USE_CUDA=ON
+cmake --build "${ENG_MP_BUILD}" -j"${JOBS}" --target uma_libtorch_mp_worker
+# Also try building the worker in the LAMMPS tree (best-effort).
+cmake --build "${LAMMPS_BUILD}" -j"${JOBS}" --target uma_libtorch_mp_worker 2>/dev/null || true
+echo "MP worker: ${ENG_MP_BUILD}/uma_libtorch_mp_worker"
+ls -la "${ENG_MP_BUILD}/uma_libtorch_mp_worker"
+
 echo "Built: ${LAMMPS_BUILD}/lmp"
 # Sanity: PairUMA must be in the archive (avoids silent incomplete ar races).
 # Use grep -c (reads all input) — grep -q + pipefail falsely fails on SIGPIPE when

@@ -1,6 +1,6 @@
 # C++ LibTorch track — blockers
 
-**Stamp:** 2026-08-08 ~01:17 CDT  
+**Stamp:** 2026-08-08 ~01:49 CDT  
 **Track:** `cpp_libtorch`
 
 ## B1 — `model_state.pt` is weights-only (architecture gap)
@@ -19,27 +19,29 @@ Process-per-rank + Autograd `uma_peer` + force regime: **all_reduce bwd + force 
 
 **Mitigation:** `model_mp_w{W}_n{N}_r{R}.pt` + `UMA_MP_NATOMS=N`. Legacy `model_mp_w{W}_r*.pt` = n=64.
 
-Optional later: unbake offset for size-agnostic artifacts.
+## Phase 2b — engine/CLI E+F **GREEN** (devices=2 and 4)
 
-## Gates — devices=2 and devices=4 **GREEN**
+| Structure | devices | Job | dE_d1 | max\|ΔF\| | dE_ase |
+|-----------|---------|-----|-------|----------|--------|
+| nacl64 | 2 | `20925398` | 0 | 5.3e-16 | — |
+| NaCl6 1728 | 2 | `20925457` | 1.8e-12 | 5.3e-16 | ≈1.2e-10 |
+| nacl64 | 4 | `20925504` | 0 | 6.7e-16 | — |
+| NaCl6 1728 | 4 | `20925506` | 1.8e-12 | 5.8e-16 | 1.2e-10 |
 
-### devices=2 (prior)
+## Phase 3 — LAMMPS end-to-end **GREEN**
 
-| Structure | Job | dE_d1 | max\|ΔF\| | dE_ase |
-|-----------|-----|-------|----------|--------|
-| nacl64 | `20925398` | 0 | 5.3e-16 | — |
-| NaCl6 1728 | `20925457` | 1.8e-12 | 5.3e-16 | ≈1.2e-10 |
+`lmp -k on g N -sf kk` + `pair_style uma/kk precision double devices N` (1 MPI rank), FP64, `gp=kokkos_libtorch_vesin`.
 
-### devices=4 (this burst)
+| devices | Job | Structure | dE_d1 | max\|ΔF\| | dE_ase | pair ms/eval* |
+|---------|-----|-----------|-------|----------|--------|---------------|
+| 2 | `20925747` | NaCl6 1728 | 9.1e-13 | **0** | 1.2e-10 | ≈361 |
+| 4 | `20925801` | NaCl6 1728 | 2.7e-12 | **0** | 1.2e-10 | ≈473 |
 
-| Structure | Export | Smoke | dE_d1 | max\|ΔF\| | dE_ase |
-|-----------|--------|-------|-------|----------|--------|
-| nacl64 | `20925503` → `model_mp_w4_r{0..3}.pt` | `20925504` | **0** | **6.7e-16** | — |
-| NaCl6 1728 | `20925505` → `model_mp_w4_n1728_r{0..3}.pt` | `20925506` | **1.8e-12** | **5.8e-16** | **1.2e-10** |
+\*Honest pair-path timer from `run_multigpu` (not SLURM wall/N_TIMING, which includes setup).
 
-`UMA_MP_NATOMS=1728` for NaCl6. Force defaults unchanged. No unbake needed for w=4.
+Gates: `lammps_gate_w2_20925747/gate.json`, `lammps_gate_w4_20925801/gate.json`.
 
-### Next (optional)
+### Optional next
 
-- Unbake `gp_node_offset` for one artifact across sizes.
-- Wire LAMMPS `pair_style uma/kk … devices 4` end-to-end smoke if not already covered.
+- Unbake `gp_node_offset` for size-agnostic MP artifacts.
+- Stronger multi-GPU timing study (warm SP only; do not invent Ray/MPI-GP).

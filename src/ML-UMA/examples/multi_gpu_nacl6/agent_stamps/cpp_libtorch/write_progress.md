@@ -132,3 +132,35 @@ Same force regime as w=2; escale=1/world (=0.25) works. No offset unbake require
 ### Next (optional)
 1. Unbake `gp_node_offset`.
 2. LAMMPS `pair_style uma/kk devices 4` integration smoke.
+
+## Burst 8 — 2026-08-08 ~01:20 CDT (Phase 3 LAMMPS wire)
+
+Phase 2b engine/CLI done → Phase 3 end-to-end LAMMPS.
+
+### Wiring fixes
+| Change | Why |
+|--------|-----|
+| `build_lammps_uma.sh` also builds `uma_libtorch_mp_worker` | EXCLUDE_FROM_ALL under LAMMPS cmake |
+| `run_multigpu.setup_ld_path` + `UMA_MP_NATOMS` from N atoms | worker path + n1728 shards |
+| `pair_uma` GP log → `kokkos_libtorch_vesin` | was misleading `fairchem_eager_python` |
+| `lammps_smoke.slurm` | RECOMPILE=1, forbid Ray, force-green env, gate vs `results/ngpu1` |
+
+### Jobs
+- devices=2 NaCl6 LAMMPS smoke submitted (see `active_jobid.txt`).
+- devices=4 after w2 green.
+
+## Burst 9 — 2026-08-08 ~01:49 CDT (Phase 3 LAMMPS GREEN)
+
+### Rebuild
+`build-uma/lmp` now links `libtorch_mp.o` + `peer_context.o` (`LibtorchMpRuntime` symbols present). Worker: `build-cpp-mp/uma_libtorch_mp_worker`.
+
+### LAMMPS gates (NaCl6 1728, `uma_double`, FP64)
+| Job | devices | dE_d1 | max\|ΔF\| | dE_ase | pair ms | wall_s |
+|-----|---------|-------|----------|--------|---------|--------|
+| `20925747` | 2 | 9.1e-13 | 0 | 1.2e-10 | ≈361 | 49.4 |
+| `20925801` | 4 | 2.7e-12 | 0 | 1.2e-10 | ≈473 | 64.4 |
+
+Log: `gp=kokkos_libtorch_vesin`. No Ray / no Python GP.
+
+### Timing note
+Report pair-path `ms_per_eval` from `run_multigpu` for honesty. SLURM `wall/N_TIMING` inflates (setup + SP dump + NVE).

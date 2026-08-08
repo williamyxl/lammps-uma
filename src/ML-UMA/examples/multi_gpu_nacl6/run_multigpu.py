@@ -349,6 +349,22 @@ def setup_ld_path() -> dict:
         env["PATH"] = f"{fc.parent}:{env.get('PATH', '')}"
     except FileNotFoundError:
         pass
+    # C++ LibTorch MP worker (process-per-rank). Prefer explicit env, else
+    # build-cpp-mp / build-uma sidecar next to the engine.
+    if not env.get("UMA_LIBTORCH_MP_WORKER"):
+        lammps_root = ENGINE.parent.parent.parent  # .../lammps-uma
+        for cand in (
+            ENGINE / "build-cpp-mp" / "uma_libtorch_mp_worker",
+            lammps_root / "build-uma" / "uma-engine" / "uma_libtorch_mp_worker",
+        ):
+            if cand.is_file() and os.access(cand, os.X_OK):
+                env["UMA_LIBTORCH_MP_WORKER"] = str(cand)
+                break
+    # NaCl6 (1728) needs n-specific MP shards (baked gp_node_offset).
+    if not env.get("UMA_MP_NATOMS"):
+        n_atoms = int(os.environ.get("UMA_STRUCTURE_NATOMS", "0") or "0")
+        if n_atoms > 0:
+            env["UMA_MP_NATOMS"] = str(n_atoms)
     return env
 
 
@@ -449,22 +465,18 @@ def _run_lmp(cmd: list[str], *, cwd: Path, env: dict, tag: str) -> None:
 
 
 def uma_pair_style_line(precision: str, uma_devices: int) -> str:
-    """pair_style line: uma/kk for devices=1; plain uma when devices>1 (Ray owns GPUs)."""
-    style = "uma" if uma_devices > 1 else "uma/kk"
-    return f"pair_style {style} precision {precision} devices {uma_devices}"
+    """Always ``uma/kk`` — native Kokkos-peer GP keeps Kokkos on for devices>1.
+
+    Legacy Ray (``UMA_ALLOW_RAY_GP=1``) used plain ``uma`` without ``-k``; that
+    path is no longer the default.
+    """
+    return f"pair_style uma/kk precision {precision} devices {uma_devices}"
 
 
 def uma_kk_argv(ngpus: int, *extra: str, uma_devices: int | None = None) -> list[str]:
-    """LAMMPS argv for uma paths.
-
-    devices=1: ``lmp -k on g N -sf kk`` (traced LibTorch on one GPU).
-    devices>1: plain ``lmp`` (no Kokkos) so FairChem Ray can claim all GPUs —
-    Kokkos/parent CUDA on GPU 0 otherwise hangs the first GP predict.
-    """
+    """LAMMPS argv for uma paths: always ``lmp -k on g N -sf kk`` (single rank)."""
     lmp = find_uma_lmp_binary()
-    dev = ngpus if uma_devices is None else int(uma_devices)
-    if dev > 1:
-        return [str(lmp), *extra]
+    del uma_devices  # pair_style carries devices; Kokkos g uses ngpus
     return [str(lmp), "-k", "on", "g", str(ngpus), "-sf", "kk", *extra]
 
 
@@ -747,20 +759,16 @@ def run_uma_kk(
     log_sp = work / "log.sp"
     log_nve = work / "log.nve"
     env = setup_ld_path()
+    # MP TorchScript shards bake gp_node_offset for a fixed N.
+    if uma_devices > 1 and "UMA_MP_NATOMS" not in env:
+        env["UMA_MP_NATOMS"] = str(int(atoms.get_global_number_of_atoms()))
     el = " ".join(symbols)
     pair_style = uma_pair_style_line(precision, uma_devices)
 
-    # devices>1: no Kokkos — FairChem Ray must own all CUDA devices.
-    if uma_devices > 1:
-        kk_note = (
-            f"argv: lmp (no -k/-sf kk; devices>1 Ray GP). pair_style: {pair_style}. "
-            "Avoids parent CUDA/Kokkos holding GPU 0 during FairChem workers."
-        )
-    else:
-        kk_note = (
-            f"argv: lmp -k on g {ngpus} -sf kk (single MPI rank). "
-            f"pair_style: {pair_style}."
-        )
+    kk_note = (
+        f"argv: lmp -k on g {ngpus} -sf kk (single MPI rank). "
+        f"pair_style: {pair_style} (native Kokkos-peer GP when devices>1)."
+    )
 
     inp_sp = work / "in.sp"
     inp_sp.write_text(
@@ -828,21 +836,36 @@ run {n_timing_steps}
         ngpus, "-in", inp_nve.name, "-log", log_nve.name, uma_devices=uma_devices
     )
     (work / "cmd.nve.txt").write_text(" ".join(cmd_nve) + "\n")
+    nve_ok = True
+    nve_err = None
     try:
         _run_lmp(cmd_nve, cwd=work, env=env, tag="nve")
     except RuntimeError as exc:
-        raise RuntimeError(f"uma/kk {precision} NVE (g={ngpus}) failed:\n{exc}") from exc
+        nve_ok = False
+        nve_err = str(exc)
+        # Under SLURM, ms_per_eval comes from wall-clock; keep SP E/F for parity.
+        if os.environ.get("USE_SLURM_TIMING", "0") != "1":
+            raise RuntimeError(
+                f"uma/kk {precision} NVE (g={ngpus}) failed:\n{exc}"
+            ) from exc
+        print(
+            f"WARN: uma/kk {precision} NVE (g={ngpus}) failed; "
+            "continuing with SP forces (USE_SLURM_TIMING=1):\n"
+            f"{exc}",
+            flush=True,
+        )
 
     pair_s = None
-    for line in log_nve.read_text().splitlines():
-        if line.strip().startswith("Pair") and "|" in line:
-            parts = [p.strip() for p in line.split("|")]
-            try:
-                v = float(parts[2])
-                if v > 0:
-                    pair_s = v
-            except ValueError:
-                pass
+    if nve_ok and log_nve.is_file():
+        for line in log_nve.read_text().splitlines():
+            if line.strip().startswith("Pair") and "|" in line:
+                parts = [p.strip() for p in line.split("|")]
+                try:
+                    v = float(parts[2])
+                    if v > 0:
+                        pair_s = v
+                except ValueError:
+                    pass
     ms = (pair_s / n_timing_steps) * 1e3 if pair_s else None
     return _pack(
         f"uma/kk precision {precision}",
@@ -856,6 +879,8 @@ run {n_timing_steps}
         uma_devices=uma_devices,
         pair_style=pair_style,
         multi_gpu_note=kk_note,
+        nve_ok=nve_ok,
+        nve_error=None if nve_ok else (nve_err or "")[:500],
     )
 
 

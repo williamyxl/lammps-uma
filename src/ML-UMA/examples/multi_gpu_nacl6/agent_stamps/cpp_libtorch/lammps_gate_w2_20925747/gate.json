@@ -1,0 +1,27 @@
+{
+  "phase": "3_lammps",
+  "devices": 2,
+  "E": -5830.923720166721,
+  "E_d1": -5830.923720166722,
+  "dE_d1": 9.094947017729282e-13,
+  "dE_ase": 1.2460077414289117e-10,
+  "max_dF": 0.0,
+  "max_dF_atom": 0.0,
+  "E_green": true,
+  "F_green": true,
+  "ms_per_eval": 16471.0,
+  "wall_s": 49.413,
+  "timing_slurm": {
+    "slurm_wall_s": 49.413,
+    "n_timing": 3,
+    "ms_per_eval": 16471.0,
+    "paths": [
+      "uma_double"
+    ],
+    "slurm_job_id": "20925747",
+    "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/results/ngpu2"
+  },
+  "gp_log": "Pair uma: loaded artifact '/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64' cutoff=6.000 device=cpu precision=double devices=2 gp=kokkos_libtorch_vesin (pos/energy float64, forces float64)",
+  "results_dir": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/results/ngpu2",
+  "jobid": "20925747"
+}

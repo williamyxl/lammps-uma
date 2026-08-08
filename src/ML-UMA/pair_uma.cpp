@@ -33,6 +33,7 @@
 #include "kokkos.h"
 #endif
 
+#include <cstdlib>
 #include <cstring>
 
 using namespace LAMMPS_NS;
@@ -261,12 +262,22 @@ void PairUMA::load_predictor()
         (precision == PRECISION_DOUBLE) ? torch::kFloat64 : torch::kFloat32;
     predictor->set_compute_dtype(want);
 
+    const char *gp_label = "off";
+    if (predictor->uses_graph_parallel()) {
+      // Default product path is C++ LibTorch MP; Python/Ray only via env opt-in.
+      const char *py = std::getenv("UMA_PYTHON_GP_WORKER");
+      const char *ray = std::getenv("UMA_ALLOW_RAY_GP");
+      if ((py && py[0] == '1') || (ray && ray[0] == '1'))
+        gp_label = "python_optin";
+      else
+        gp_label = "kokkos_libtorch_vesin";
+    }
     utils::logmesg(lmp,
                    "Pair uma: loaded artifact '{}' cutoff={:.3f} device={} precision={} "
                    "devices={} gp={} (pos/energy {}, forces float64)\n",
                    artifact_dir, cutoff, device.str(),
                    (precision == PRECISION_DOUBLE) ? "double" : "mixed", num_devices,
-                   predictor->uses_graph_parallel() ? "fairchem_eager_python" : "traced",
+                   gp_label,
                    (precision == PRECISION_DOUBLE) ? "float64" : "float32");
   } catch (const std::exception &e) {
     error->all(FLERR, "Failed to load UMA artifact '{}': {}", artifact_dir, e.what());
