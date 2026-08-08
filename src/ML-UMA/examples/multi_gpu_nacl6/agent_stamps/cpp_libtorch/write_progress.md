@@ -178,3 +178,30 @@ Same-node GP scientifically GREEN through Phase 3. **No new GPU jobs.**
 
 ### Not in this burst
 Multi-node · Ray · offset unbake.
+
+## Burst 10 — perf P0 (2026-08-08 ~08:32 CDT)
+
+Goal: improve devices=2/4 pair ms while keeping E+F green vs devices=1.
+Hard gate: pair_ms(2)<pair_ms(1) and pair_ms(4)<pair_ms(2).
+
+P0: stop forcing CUDA_LAUNCH_BLOCKING=1 on workers (opt-in UMA_CUDA_LAUNCH_BLOCKING=1).
+Worker PERF_TICK timers (ms_fwd/ms_bwd/ms_force_ar). Job 20932843 = perf_p0.slurm devices=1→2→4.
+
+## Burst 10 — P0 result (job 20932843)
+
+Honest pair ms: **320.64 / 330.52 / 382.86** @1/2/4. E+F green (max|ΔF|=0). Self-scale FAIL.
+P0 (no CUDA_LAUNCH_BLOCKING) helped vs Phase-3 (~361/~473) but still slower than @1.
+Next: P1 CUDA IPC device collectives.
+
+## Burst 11 — perf P1 CUDA IPC (2026-08-08 ~08:50 CDT)
+
+### Landed
+| Item | Detail |
+|------|--------|
+| `shared_peer.h` | `UMA_PEER_TRANSPORT=shm\|cuda_ipc`; device IPC buffers; shm = control + handles + nbytes |
+| Worker | `init_cuda_ipc(rank)` after `cudaSetDevice(0)` |
+| `libtorch_mp.cpp` | shm size via `map_bytes_for(world, transport)` |
+| `perf_p0.slurm` | gate uses honest `uma64`/pair_section ms (not wall/N) |
+| `perf_p1.slurm` | devices=1→2→4, `RECOMPILE=1`, `UMA_PEER_TRANSPORT=cuda_ipc` |
+
+Force-green regime unchanged (all_reduce bwd + force SUM + escale 1/world). No Ray.

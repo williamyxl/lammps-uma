@@ -1,48 +1,25 @@
 # C++ LibTorch track — blockers
 
-**Stamp:** 2026-08-08 ~01:50 CDT  
+**Stamp:** 2026-08-08 ~08:50 CDT  
 **Track:** `cpp_libtorch`  
-**Status:** Phase 3 **DONE** · Phase 4 report **landed** · Phase 5 multi-node **later / out of scope**
+**Status:** Phase 3 DONE · Phase 4 report landed · **Perf P1 (CUDA IPC) in flight**
 
-## B1 — `model_state.pt` is weights-only (architecture gap)
+## B1 / B2 / B4–B7 — as before (product = C++ LibTorch MP, not Ray)
 
-Product path: export-time FairChem → per-rank TorchScript with `uma_peer` → C++ process-per-rank runtime. **Not Ray / not Python GP as product.**
+## Perf campaign
 
-## B2 — Serial `model_traced.pt` cannot host MP collectives
+Hard gate: `pair_ms(2) < pair_ms(1)` and `pair_ms(4) < pair_ms(2)` on NaCl6 1728 FP64, E+F green vs d1.
 
-Use `model_mp_w{N}_r*` / `model_mp_w{N}_n{NATOMS}_r*`.
+### P0 — DONE (job `20932843`)
 
-## B4 / B5 / B5b / B6 — **resolved**
+CUDA_LAUNCH_BLOCKING off. Honest pair ms: **320.64 / 330.52 / 382.86** @1/2/4. E+F green (max|ΔF|=0). Self-scale **FAIL**.
 
-Process-per-rank + Autograd `uma_peer` + force regime: **all_reduce bwd + force SUM + escale=1/world**.
+### P1 — CUDA IPC device payloads (in flight)
 
-## B7 — MP TorchScript is **n_atoms-specific** (baked `gp_node_offset`)
-
-**Mitigation:** `model_mp_w{W}_n{N}_r{R}.pt` + `UMA_MP_NATOMS=N`. Legacy `model_mp_w{W}_r*.pt` = n=64. Unbake deferred (not required for green gates).
-
-## Phase 2b — engine/CLI E+F **GREEN**
-
-| Structure | devices | Job | dE_d1 | max\|ΔF\| | dE_ase |
-|-----------|---------|-----|-------|----------|--------|
-| nacl64 | 2 | `20925398` | 0 | 5.3e-16 | — |
-| NaCl6 1728 | 2 | `20925457` | 1.8e-12 | 5.3e-16 | ≈1.2e-10 |
-| nacl64 | 4 | `20925504` | 0 | 6.7e-16 | — |
-| NaCl6 1728 | 4 | `20925506` | 1.8e-12 | 5.8e-16 | 1.2e-10 |
-
-## Phase 3 — LAMMPS end-to-end **GREEN** (DONE)
-
-`lmp -k on g N -sf kk` + `pair_style uma/kk … devices N` (1 MPI), FP64, `gp=kokkos_libtorch_vesin`. Commit `5513482e9b`.
-
-| devices | Job | dE_d1 | max\|ΔF\| | dE_ase | pair ms |
-|---------|-----|-------|----------|--------|---------|
-| 2 | `20925747` | 9.1e-13 | 0 | 1.2e-10 | ≈361 |
-| 4 | `20925801` | 2.7e-12 | 0 | 1.2e-10 | ≈473 |
-
-## Phase 4 — report **landed**
-
-Canonical: `examples/multi_gpu_nacl6/results/RESULTS.md` (+ `SUMMARY.md` / `SUMMARY.json`).  
-Product backend line: **Kokkos+LibTorch** / `kokkos_libtorch_vesin` (not Ray / FairChem GP).
+Replace host-staged `SharedPeerGatherSlot` payload with `cudaIpcMemHandle_t` device buffers; shm keeps mutex/cond/gen + handles + nbytes.  
+Env: `UMA_PEER_TRANSPORT=shm|cuda_ipc` (default `cuda_ipc` when CUDA available).  
+Script: `perf_p1.slurm` · stamps under `agent_stamps/cpp_libtorch/perf/`.
 
 ## Phase 5 — multi-node
 
-**Out of scope** for this campaign close-out. Same-node GP is scientifically green; multi-node MPI-GP is a later track.
+Out of scope for this perf track.

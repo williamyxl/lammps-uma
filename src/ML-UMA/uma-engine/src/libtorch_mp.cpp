@@ -141,9 +141,9 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
       "/dev/shm/uma_mp_" + std::to_string(static_cast<int>(getpid())) + "_" +
       std::to_string(num_devices);
   {
-    const size_t trail = static_cast<size_t>(num_devices) *
-                         (sizeof(int64_t) + kokkos_peer::SharedPeerGatherSlot::kMaxBytesPerRank);
-    const size_t bytes = sizeof(kokkos_peer::SharedPeerGatherSlot::Shm) + trail;
+    const int transport = kokkos_peer::SharedPeerGatherSlot::select_transport();
+    const size_t bytes =
+        kokkos_peer::SharedPeerGatherSlot::map_bytes_for(num_devices, transport);
     int fd = ::open(rt->impl_->shm_path.c_str(), O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0) {
       throw std::runtime_error(std::string("shm open: ") + std::strerror(errno));
@@ -160,6 +160,7 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
     auto* shm = static_cast<kokkos_peer::SharedPeerGatherSlot::Shm*>(mem);
     std::memset(shm, 0, bytes);
     shm->world = num_devices;
+    shm->transport = transport;
     pthread_mutexattr_t mattr;
     pthread_condattr_t cattr;
     pthread_mutexattr_init(&mattr);
@@ -171,9 +172,10 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
     pthread_mutexattr_destroy(&mattr);
     pthread_condattr_destroy(&cattr);
     rt->impl_->shared =
-        kokkos_peer::SharedPeerGatherSlot::attach(shm, bytes);  // parent unmaps on destroy via owns=false
-    // Parent should own unmap — mark owns by recreating with owns true.
-    // attach sets owns=false; for parent we munmap in destructor via path unlink + remount.
+        kokkos_peer::SharedPeerGatherSlot::attach(shm, bytes);  // parent unmaps on destroy
+    std::cerr << "uma LibtorchMpRuntime: peer_transport="
+              << kokkos_peer::SharedPeerGatherSlot::transport_name(transport)
+              << " shm_bytes=" << bytes << "\n";
   }
   PeerContext::instance().reset_shared(rt->impl_->shared);
 
@@ -215,8 +217,18 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
           std::to_string(rt->impl_->shared->map_bytes());
       // Each worker sees a single GPU as cuda:0 (matches export bake).
       ::setenv("CUDA_VISIBLE_DEVICES", rank_s.c_str(), 1);
-      // Force synchronous CUDA so device asserts appear in worker logs.
-      ::setenv("CUDA_LAUNCH_BLOCKING", "1", 1);
+      // CUDA_LAUNCH_BLOCKING is a large N>1 tax; opt-in for assert debug only.
+      // UMA_CUDA_LAUNCH_BLOCKING=1 → force "1"; =0 → unset; unset → leave env as-is
+      // (default: do NOT force on — required for multi-GPU self-scaling).
+      if (const char* blk = std::getenv("UMA_CUDA_LAUNCH_BLOCKING")) {
+        if (blk[0] == '1' && blk[1] == '\0') {
+          ::setenv("CUDA_LAUNCH_BLOCKING", "1", 1);
+        } else if (blk[0] == '0' && blk[1] == '\0') {
+          ::unsetenv("CUDA_LAUNCH_BLOCKING");
+        }
+      } else {
+        ::unsetenv("CUDA_LAUNCH_BLOCKING");
+      }
       // Per-rank stderr log (CUDA asserts / TORCH errors).
       std::string log_dir = "/tmp/uma_mp_logs";
       if (const char* e = std::getenv("UMA_MP_LOG_DIR")) {

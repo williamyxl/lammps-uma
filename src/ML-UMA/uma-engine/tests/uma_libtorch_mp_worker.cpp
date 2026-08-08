@@ -2,6 +2,7 @@
 // argv: uma_libtorch_mp_worker <rank> <world> <artifact_dir> <shm_path> <shm_bytes>
 // stdin/stdout = parent pipes
 
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -111,6 +112,8 @@ int main(int argc, char** argv) {
     // Parent sets CUDA_VISIBLE_DEVICES=<rank> before exec; only cuda:0 is visible.
     cudaSetDevice(0);
 #endif
+    // CUDA IPC device buffers (UMA_PEER_TRANSPORT=cuda_ipc); no-op for shm.
+    slot->init_cuda_ipc(rank);
     torch::Device dev(torch::kCUDA, 0);
     // Prefer n-specific export (partition offsets baked at trace time).
     std::string path;
@@ -141,6 +144,7 @@ int main(int argc, char** argv) {
       read_all(STDIN_FILENO, &cmd, sizeof(cmd));
       if (cmd == 0) {
         std::cerr << "uma_libtorch_mp_worker rank=" << rank << " shutdown\n" << std::flush;
+        slot->release_cuda_ipc();
         break;
       }
       int32_t n = 0;
@@ -180,6 +184,8 @@ int main(int argc, char** argv) {
       auto ch = torch::tensor(charge, torch::TensorOptions().dtype(torch::kLong).device(dev));
       auto sp = torch::tensor(spin, torch::TensorOptions().dtype(torch::kLong).device(dev));
 
+      using clock = std::chrono::steady_clock;
+      const auto t_fwd0 = clock::now();
       std::cerr << "uma_libtorch_mp_worker rank=" << rank
                 << " edges=" << nedges << " starting module.forward\n"
                 << std::flush;
@@ -189,7 +195,14 @@ int main(int argc, char** argv) {
         torch::autograd::AutoGradMode guard(true);
         normed = module.forward(args).toTensor().to(torch::kFloat64);
       }
+#if defined(UMA_ENGINE_USE_CUDA)
+      cudaDeviceSynchronize();
+#endif
+      const auto t_fwd1 = clock::now();
+      const double ms_fwd =
+          std::chrono::duration<double, std::milli>(t_fwd1 - t_fwd0).count();
       std::cerr << "uma_libtorch_mp_worker rank=" << rank << " forward done"
+                << " ms_fwd=" << ms_fwd
                 << " normed.shape=" << normed.sizes()
                 << " requires_grad=" << normed.requires_grad()
                 << " grad_fn=" << (normed.grad_fn() ? "yes" : "no")
@@ -229,28 +242,51 @@ int main(int argc, char** argv) {
                 << " grad_fn=" << (e_for_grad.grad_fn() ? "yes" : "no")
                 << " starting autograd::grad\n"
                 << std::flush;
+      const auto t_bwd0 = clock::now();
       auto grads = torch::autograd::grad({e_for_grad}, {pos_t}, {}, false, false, false);
       auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
+#if defined(UMA_ENGINE_USE_CUDA)
+      cudaDeviceSynchronize();
+#endif
+      const auto t_bwd1 = clock::now();
+      const double ms_bwd =
+          std::chrono::duration<double, std::milli>(t_bwd1 - t_bwd0).count();
       // Each rank backprops E_full through its local energy shard (identity bwd
       // on mid-graph all_reduce). Forces are therefore PARTIAL and must be
       // summed. Gather sum_grad only totals embedding grads on local shards —
       // it does not assemble full dE/dpos across edge partitions.
       // UMA_SKIP_FORCE_GP_REDUCE=1: skip sum (diag / over-count experiments).
       const char* skip_fred = std::getenv("UMA_SKIP_FORCE_GP_REDUCE");
+      double ms_fred = 0.0;
       if (skip_fred && std::string(skip_fred) == "1") {
         uma::PeerContext::instance().slot().barrier(rank);
         std::cerr << "uma_libtorch_mp_worker rank=" << rank
                   << " force_reduce=SKIP fmax="
-                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>() << "\n"
+                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>()
+                  << " ms_bwd=" << ms_bwd << "\n"
                   << std::flush;
       } else {
         const double fmax_pre =
             forces.norm(/*p=*/2, /*dim=*/1).max().item<double>();
+        const auto t_fred0 = clock::now();
         forces = uma::PeerContext::instance().slot().all_reduce(
             rank, forces.contiguous());
+#if defined(UMA_ENGINE_USE_CUDA)
+        cudaDeviceSynchronize();
+#endif
+        ms_fred =
+            std::chrono::duration<double, std::milli>(clock::now() - t_fred0).count();
         std::cerr << "uma_libtorch_mp_worker rank=" << rank
                   << " force_reduce=SUM fmax_pre=" << fmax_pre << " fmax_post="
-                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>() << "\n"
+                  << forces.norm(/*p=*/2, /*dim=*/1).max().item<double>()
+                  << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
+                  << " ms_fwd=" << ms_fwd << "\n"
+                  << std::flush;
+      }
+      if (rank == 0) {
+        std::cerr << "PERF_TICK rank=0 world=" << world << " ms_fwd=" << ms_fwd
+                  << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
+                  << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred) << "\n"
                   << std::flush;
       }
 
