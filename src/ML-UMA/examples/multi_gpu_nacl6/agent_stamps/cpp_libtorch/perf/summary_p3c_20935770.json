@@ -1,0 +1,29 @@
+{
+  "phase": "P3c_perf",
+  "jobid": "20935770",
+  "peer_transport": "nccl",
+  "status": "FAILED",
+  "exit_code": "1:0",
+  "ms": null,
+  "E_F_green": null,
+  "self_scale_green": null,
+  "beat_p3a_green": null,
+  "hard_ase_fc_green": false,
+  "campaign_pass": false,
+  "p3a_baseline_ms": {
+    "1": 320.6,
+    "2": 183.57,
+    "4": 117.63
+  },
+  "ase_ms": {
+    "2": 193.9,
+    "4": 115.2
+  },
+  "fc_ms": {
+    "2": 193.2,
+    "4": 118.0
+  },
+  "failure": "false_FAIL_sanity: pipefail+grep -q SIGPIPE after nccl_init_refs=3; NCCL was linked (libnccl.so.2, ncclCommInitRank undefined\u2192dyn)",
+  "fix": "perf_p3c.slurm sanity uses grep -c count check",
+  "note": "No honest ms; resubmit after fix"
+}

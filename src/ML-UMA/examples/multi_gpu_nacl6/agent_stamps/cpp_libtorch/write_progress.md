@@ -311,3 +311,11 @@ Goal: cut last ~2.4 ms @4 so uma ≤ ASE 115.2 and ≤ FC 118. Keep Kokkos `uma/
 Prior “in flight” stamp was **wrong** — earlier `sbatch` never landed (approval interrupt); `active_jobid` stayed `20934280` (P3a); no `perf_p3c-*.out`.
 
 Re-ran: `sbatch --export=ALL,RECOMPILE=1,UMA_PEER_TRANSPORT=nccl,N_TIMING=5 perf_p3c.slurm` → **JobID `20935770`** (PENDING Priority). `active_jobid.txt` updated.
+
+## Burst 19 — P3c job 20935770 FAILED (false sanity) → resubmit (2026-08-08 ~12:18 CDT)
+
+REPORT_OWNER=parent (no RESULTS/SUMMARY/MULTIGPU/canvas edits).
+
+Job `20935770` FAILED at pre-run sanity: `nccl_init_refs=3` then `FAIL: worker missing ncclCommInitRank` — **false negative** from `set -o pipefail` + `grep -q` (SIGPIPE). Worker actually links `libnccl.so.2` and has `ncclCommInitRank`.
+
+Fix: count-based sanity in `perf_p3c.slurm`. Resubmitting RECOMPILE=1 / `UMA_PEER_TRANSPORT=nccl`.

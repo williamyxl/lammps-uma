@@ -69,10 +69,13 @@ export LMP_UMA="${ROOT}/build-uma/lmp"
 test -x "${LMP_UMA}"
 test -x "${UMA_LIBTORCH_MP_WORKER}"
 export RECOMPILE=0
-# Sanity: payload shm + NCCL symbols in worker
-strings "${UMA_LIBTORCH_MP_WORKER}" | grep -c UMA_MP_PAYLOAD_SHM | awk '{print "payload_env_refs="$1}'
-strings "${UMA_LIBTORCH_MP_WORKER}" | grep -c ncclCommInitRank | awk '{print "nccl_init_refs="$1}'
-if ! strings "${UMA_LIBTORCH_MP_WORKER}" | grep -q ncclCommInitRank; then
+# Sanity: payload shm + NCCL symbols in worker.
+# Avoid `grep -q` under pipefail (SIGPIPE from strings → false FAIL).
+payload_refs=$(strings "${UMA_LIBTORCH_MP_WORKER}" | grep -c UMA_MP_PAYLOAD_SHM || true)
+nccl_refs=$(strings "${UMA_LIBTORCH_MP_WORKER}" | grep -c ncclCommInitRank || true)
+echo "payload_env_refs=${payload_refs}"
+echo "nccl_init_refs=${nccl_refs}"
+if [[ "${nccl_refs}" -lt 1 ]]; then
   echo "FAIL: worker missing ncclCommInitRank (build without NCCL?)"
   exit 1
 fi
