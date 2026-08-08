@@ -1,6 +1,6 @@
 # Multi-GPU NaCl 6×6×6 — graph-parallel uma campaign (`gp_round`)
 
-> **Superseded for timing:** path-isolated batch in [`../RESULTS.md`](../RESULTS.md) (stamp ~18:00 CDT; uma_double **320.4 / 192.0 / 112.6** ms via jobs `20910346/50/54`). This folder keeps the earlier GP campaign + ASE oracle artifacts.
+> **Canonical product timings:** [`../RESULTS.md`](../RESULTS.md) Phase 3 — uma/kk Kokkos+LibTorch **≈320 / ≈361 / ≈473** ms @ devices=1/2/4. Numbers in this folder (including ~192 / ~113 @2/@4) are historical Ray/Python-GP era; keep for ASE oracle artifacts only.
 
 > **Note (2026-08-07):** Mixed precision (`uma/kk mixed`) is **disabled**. Mixed rows below are commented out (historical only).
 
