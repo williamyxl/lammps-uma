@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T15:31:53 CDT · Loop **armed** · **Tier1 E/F retarget: PASS vs merge_mole ASE**
+**Stamp:** 2026-08-09T16:07:47 CDT · Loop **armed** · **Tier1 COMPLETE — turbo PASS vs merge ASE (NaCl+water)**
 **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Dual-oracle policy
@@ -25,13 +25,13 @@
 |-------|------:|------:|:------------:|
 | NaCl6 (fast+merge) | **161** | **92** | **PASS** (retarget; NaCl@2 probe) |
 | NaCl6 (merge-only) | **170** | — | **PASS** dE~1.7e-10, fmax=5.00e-07 |
-| water888 (fast+merge) | **173** | **96** | speed PASS; E matches merge class (~2.1e-5 vs general) |
+| water888 (fast+merge) | **173** | **96** | **PASS** vs merge ASE (job 20984160; |ΔE|~1e-11) |
 
 ASE@1 merge oracle ms: general+merge **367**, umas_fast+merge **350** (single GPU).
 
 ## Next
 
-1. Document dual-oracle in plan/STATUS; optionally re-gate water vs merge ASE forces.
+1. **DONE:** water merge-ASE force gate PASS @2/@4.
 2. Keep pushing speed (W5 / Tier2) with merge-ASE as E/F bar for turbo path.
 3. devices=1 fast re-export still optional.
 

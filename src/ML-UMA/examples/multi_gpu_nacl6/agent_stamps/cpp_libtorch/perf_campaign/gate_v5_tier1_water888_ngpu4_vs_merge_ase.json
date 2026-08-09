@@ -1,0 +1,14 @@
+{
+  "ver": "v5_tier1_water_vs_merge_ase",
+  "sys": "water888",
+  "ngpu": 4,
+  "job": "20982814",
+  "ase_oracle_job": "20984160",
+  "ms": 96.13,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "dE_vs_general_ase": 2.1354077944124583e-05,
+  "force_max_abs_ase_merge": 4.992769293110655e-06,
+  "cosine_ase_merge": 0.9999999999984575,
+  "pass": true,
+  "stamp": "2026-08-09T16:07:47"
+}

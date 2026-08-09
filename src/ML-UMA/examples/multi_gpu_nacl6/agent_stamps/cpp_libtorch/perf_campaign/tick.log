@@ -127,3 +127,8 @@ TICK8 2026-08-09T14:56:12-05:00
 2026-08-09T15:29:55 ASE merge_mole oracle submitted job=20983514
 2026-08-09T15:31:53 ASE merge oracle OK: vs uma dE=1.673e-10 fmax=5.000e-07 pass=True; vs general ASE dE~2.1e-5 expected
 2026-08-09T15:33:38 TICK27 idle after merge-ASE retarget PASS
+2026-08-09T16:05:57 TICK28 water merge ASE oracle submitted 20984161
+2026-08-09T16:05:57 TICK28 water merge ASE oracle submitted 20984160
+2026-08-09T16:06:16 TICK29-43 water merge ASE 20984160 PENDING Priority; scancel dup 20984161
+2026-08-09T16:07:37 TICK44 water merge ASE 20984160 still pending
+2026-08-09T16:07:47 WATER merge ASE 20984160 PASS dE~1e-11 fmax~5e-6 @2/@4; Tier1 dual-oracle COMPLETE

@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-09T15:33:38",
-  "phase": "V5_tier1_EF_retarget_merge_ase",
-  "status": "tier1_turbo_PASS_vs_merge_ase_idle",
+  "stamp": "2026-08-09T16:07:47",
+  "phase": "V5_tier1_COMPLETE_dual_oracle",
+  "status": "tier1_turbo_PASS_nacl_and_water_vs_merge_ase",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Optional: water merge-ASE force gate; W5/Tier2 speed; commit stamps; devices=1 fast export",
+  "next_action": "Tier1 closed on dual-oracle; optional W5/Tier2 speed push",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -507,8 +507,8 @@
   },
   "active_jobid": null,
   "tick": {
-    "last": "2026-08-09T15:33:38",
-    "note": "tick27: Tier1 retarget settled; no active jobs; dual-oracle documented"
+    "last": "2026-08-09T16:07:47",
+    "note": "water merge ASE PASS @2/@4; Tier1 E/F complete"
   },
   "tier1": {
     "export_job": "20982262",
@@ -872,6 +872,40 @@
       "pass": true,
       "note": "Tier1 E/F must gate vs merge_mole ASE, not general ASE; bias vs general is expected MOLE fuse residual",
       "stamp": "2026-08-09T15:31:53"
+    },
+    "water_merge_oracle_job": "20984160",
+    "water_merge_oracle": {
+      "stamp": "2026-08-09T16:07:18",
+      "job": "20984160",
+      "ase_merge_E": -3143.3893774722696,
+      "general_ase_E": -3143.3893561182,
+      "rows": [
+        {
+          "ngpu": 2,
+          "job": "20982812",
+          "uma_E": -3143.3893774722783,
+          "nvt_ms": 173.43,
+          "dE_vs_merge_ase": 8.640199666842818e-12,
+          "dE_vs_general_ase": 2.1354078398871934e-05,
+          "force_max": 4.992769293110655e-06,
+          "force_mae": 7.436870275313855e-07,
+          "cosine": 0.9999999999984575,
+          "ef_pass": true
+        },
+        {
+          "ngpu": 4,
+          "job": "20982814",
+          "uma_E": -3143.389377472278,
+          "nvt_ms": 96.13,
+          "dE_vs_merge_ase": 8.185452315956354e-12,
+          "dE_vs_general_ase": 2.1354077944124583e-05,
+          "force_max": 4.992769293110655e-06,
+          "force_mae": 7.436870275313855e-07,
+          "cosine": 0.9999999999984575,
+          "ef_pass": true
+        }
+      ],
+      "all_ef_pass": true
     }
   }
 }
