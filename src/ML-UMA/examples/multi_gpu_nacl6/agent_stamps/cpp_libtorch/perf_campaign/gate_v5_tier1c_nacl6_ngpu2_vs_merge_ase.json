@@ -1,0 +1,22 @@
+{
+  "ver": "v5_tier1c_retarget",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "uma_job": "20983451",
+  "ase_oracle_job": "20983514",
+  "oracle": "ase_fp64_w1_merge_mole_general",
+  "dE_vs_merge_ase": 1.673470251262188e-10,
+  "dE_vs_umas_fast_merge_ase": 1.7007550923153758e-10,
+  "dE_vs_general_ase": 2.1171312255319208e-05,
+  "force_max_abs_vs_merge_ase": 4.999896874441356e-07,
+  "force_mae_vs_merge_ase": 1.5176819870818822e-07,
+  "cosine_vs_merge_ase": 0.99999999999906,
+  "thresholds": {
+    "abs_dE_max": 1e-08,
+    "force_max_abs_max": 1e-06,
+    "cosine_min": 0.999999999999
+  },
+  "pass": true,
+  "note": "Tier1 E/F must gate vs merge_mole ASE, not general ASE; bias vs general is expected MOLE fuse residual",
+  "stamp": "2026-08-09T15:31:53"
+}

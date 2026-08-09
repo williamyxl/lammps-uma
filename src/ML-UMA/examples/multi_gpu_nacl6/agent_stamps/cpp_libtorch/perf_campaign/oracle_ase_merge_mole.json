@@ -1,0 +1,32 @@
+{
+  "stamp": "2026-08-09T15:30:47",
+  "job": "20983514",
+  "uma_merge_E": -5830.9237413382,
+  "general_ase_E": -5830.92372016672,
+  "rows": [
+    {
+      "name": "general_merge",
+      "execution_mode": "general",
+      "merge_mole": true,
+      "energy_eV": -5830.923741338032,
+      "ms_per_eval": 367.3443403483058,
+      "dE_vs_general_ase": 2.1171312255319208e-05,
+      "dE_vs_uma_merge": 1.673470251262188e-10,
+      "force_rms": 0.15896871142260077
+    },
+    {
+      "name": "umas_fast_merge",
+      "execution_mode": "umas_fast_pytorch",
+      "merge_mole": true,
+      "energy_eV": -5830.92374133803,
+      "ms_per_eval": 349.5199086610228,
+      "dE_vs_general_ase": 2.1171309526835103e-05,
+      "dE_vs_uma_merge": 1.7007550923153758e-10,
+      "force_rms": 0.1589687114226008
+    }
+  ],
+  "verdict": {
+    "merge_matches_uma": true,
+    "merge_matches_general_ase": false
+  }
+}

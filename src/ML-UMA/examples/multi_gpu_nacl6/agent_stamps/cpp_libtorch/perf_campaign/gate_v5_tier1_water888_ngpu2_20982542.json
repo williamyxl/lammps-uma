@@ -1,0 +1,23 @@
+{
+  "ver": "v5_tier1_fast",
+  "sys": "water888",
+  "ngpu": 2,
+  "job": "20982542",
+  "ms": 165.38,
+  "sp_ms": 167.74,
+  "ase": 198.19,
+  "fc": 200.54,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "energy_eV": -3143.3893774722783,
+  "dE_ase": 2.1354078398871934e-05,
+  "force_max_abs_ase": 6.538752888474164e-06,
+  "force_mae_ase": 1.1100601074684164e-06,
+  "cosine_ase": 0.9999999999983759,
+  "parity_energy_pass": false,
+  "pass": false,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "stamp": "2026-08-09T15:05:57",
+  "note": "same ~2e-5 energy bias as NaCl if FAIL"
+}

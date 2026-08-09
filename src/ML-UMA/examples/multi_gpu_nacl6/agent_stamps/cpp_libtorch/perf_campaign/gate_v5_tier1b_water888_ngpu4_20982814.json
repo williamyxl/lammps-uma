@@ -1,0 +1,20 @@
+{
+  "ver": "v5_tier1b",
+  "sys": "water888",
+  "ngpu": 4,
+  "job": "20982814",
+  "ms": 96.13,
+  "sp_ms": 95.46499999999999,
+  "ase": 117.98,
+  "fc": 118.94,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "energy_eV": -3143.389377472278,
+  "dE_ase": 2.1354077944124583e-05,
+  "force_max_abs_ase": 6.538752888474164e-06,
+  "cosine_ase": 0.9999999999983759,
+  "pass": false,
+  "stamp": "2026-08-09T15:17:51",
+  "art": "uma-s-1p2-omat-f64-fast"
+}

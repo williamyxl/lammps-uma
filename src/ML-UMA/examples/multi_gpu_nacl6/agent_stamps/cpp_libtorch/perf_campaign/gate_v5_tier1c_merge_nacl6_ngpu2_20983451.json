@@ -1,0 +1,21 @@
+{
+  "ver": "v5_tier1c_merge",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "20983451",
+  "ms": 169.854,
+  "ase": 193.9,
+  "fc": 193.2,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "dE_ase": 2.1171557818888687e-05,
+  "dE_d1": 2.1171432308619842e-05,
+  "force_max_d1": 1.0000000000287557e-06,
+  "energy_eV": -5830.9237413382,
+  "parity_gate_passed": false,
+  "pass": false,
+  "art": "uma-s-1p2-omat-f64-merge",
+  "note": "general+merge_mole isolate; compare dE to Tier1b ~2.1e-5",
+  "stamp": "2026-08-09T15:29:25"
+}

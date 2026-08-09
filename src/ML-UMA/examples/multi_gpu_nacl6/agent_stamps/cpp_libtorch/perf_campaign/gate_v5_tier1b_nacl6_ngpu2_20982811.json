@@ -1,0 +1,21 @@
+{
+  "ver": "v5_tier1b",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "20982811",
+  "ms": 161.152,
+  "ase": 193.9,
+  "fc": 193.2,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "dE_ase": 2.1171556909393985e-05,
+  "dE_d1": 2.117143139912514e-05,
+  "force_max_d1": 1.0000000000287557e-06,
+  "energy_eV": -5830.923741338153,
+  "parity_gate_passed": false,
+  "pass": false,
+  "note": "IDENTICAL dE~2.1e-5 as Tier1a \u2014 skip state_dict did NOT fix; bias is merge_mole/fast vs general ASE",
+  "stamp": "2026-08-09T15:16:00",
+  "art": "uma-s-1p2-omat-f64-fast"
+}

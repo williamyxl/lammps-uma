@@ -1,0 +1,23 @@
+{
+  "ver": "v5_tier1_fast",
+  "sys": "nacl6",
+  "ngpu": 4,
+  "job": "20982543",
+  "ms": 91.13799999999999,
+  "ase": 115.2,
+  "fc": 118.0,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "dE_ase": 2.1171556909393985e-05,
+  "dE_d1": 2.117143048963044e-05,
+  "force_max_ase": 5.881311022359892e-07,
+  "force_max_d1": 1.0000000000287557e-06,
+  "cosine_ase": 0.9999999999990398,
+  "cosine_d1": 0.999999999999616,
+  "energy_eV": -5830.9237413381525,
+  "parity_gate_passed": false,
+  "pass": false,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "stamp": "2026-08-09T15:05:57"
+}

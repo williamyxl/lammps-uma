@@ -1,0 +1,5 @@
+nacl6_@2=20982541
+water888_@2=20982542
+nacl6_@4=20982543
+water888_@4=20982544
+art=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64-fast

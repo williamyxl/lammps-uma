@@ -105,3 +105,25 @@ TICK7 2026-08-09T14:53:37-05:00
 TICK8 2026-08-09T14:56:12-05:00
 2026-08-09T14:56:17 Tier1 water w2 MP exported; w4 in progress
 2026-08-09T14:57:23 Documented Tier0 E+F parity in STATUS.md + gate_v5_tier0_parity_summary.json
+2026-08-09T14:57:59 TICK9 Tier1 export RUNNING; water w2+w4 MP done; nacl w2 r0 present; pts=7
+2026-08-09T15:00:43 TIER1_EXPORT_OK; gates submitted {'nacl6_@2': '20982541', 'water888_@2': '20982542', 'nacl6_@4': '20982543', 'water888_@4': '20982544', 'art': '/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64-fast'}
+2026-08-09T15:01:36 TICK11 Tier1 gates pending 20982541-44
+2026-08-09T15:03:35 TICK12 Tier1 nacl@2 RUNNING rebuild
+2026-08-09T15:03:47 GATE tier1 nacl@2 SPEED_PASS ms=161.386 EF_FAIL dE=2.117e-05
+2026-08-09T15:05:57 TIER1 gates done: speed OK, E/F FAIL dE~2e-5 all
+2026-08-09T15:09:41 TIER1b fix queued export=20982810 gates afterok
+2026-08-09T15:10:02 TICK14/15 tier1b poll
+2026-08-09T15:11:37 TICK16 tier1b export RUNNING
+2026-08-09T15:13:38 TICK17 tier1b poll
+2026-08-09T15:16:00 TIER1b nacl@2 ms=161.2 EF_FAIL dE=2.1e-5 (same as 1a); water@2 ms=173.43 EF_FAIL; nacl@4 running
+2026-08-09T15:17:51 TIER1b COMPLETE nacl 161/92 water 173/96.13 speed PASS EF FAIL dE~2.1e-5
+2026-08-09T15:18:57 TIER1c AB export=20983191 probes {'export': '20983191', 'nacl_merge_@2': '20983192', 'nacl_fastnomole_@2': '20983193'}
+2026-08-09T15:19:36 TICK20 tier1c AB export RUNNING
+2026-08-09T15:21:37 TICK21 tier1c AB poll
+2026-08-09T15:23:41 TICK22 tier1c AB poll
+2026-08-09T15:25:37 TICK23 tier1c AB poll
+2026-08-09T15:28:13 TIER1c export FAIL on fastnomole; merge probe 20983451
+2026-08-09T15:29:25 TIER1c merge NaCl@2 ms=169.854 dE=2.1171557818888687e-05 ef_pass=False
+2026-08-09T15:29:55 ASE merge_mole oracle submitted job=20983514
+2026-08-09T15:31:53 ASE merge oracle OK: vs uma dE=1.673e-10 fmax=5.000e-07 pass=True; vs general ASE dE~2.1e-5 expected
+2026-08-09T15:33:38 TICK27 idle after merge-ASE retarget PASS

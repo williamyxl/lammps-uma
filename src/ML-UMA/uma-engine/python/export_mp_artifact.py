@@ -106,6 +106,8 @@ def export_mp_rank(
     device: str,
     state_path: Path | None,
     atoms_path: Path | None = None,
+    execution_mode: str = "general",
+    merge_mole: bool = False,
 ) -> dict:
     import os
 
@@ -124,7 +126,9 @@ def export_mp_rank(
     # External graph: vesin will supply edges at C++ runtime; match devices=1 contract.
     settings.external_graph_gen = True
     settings.activation_checkpointing = False
-    settings.execution_mode = "general"
+    # Tier1: umas_fast_pytorch + merge_mole for fixed-composition MD.
+    settings.execution_mode = execution_mode
+    settings.merge_mole = merge_mole
 
     atoms = _load_atoms(atoms_path)
     n_atoms = len(atoms)
@@ -133,9 +137,22 @@ def export_mp_rank(
         str(checkpoint), sample, settings=settings, device="cpu"
     )
     model = model.to(dtype=torch_dtype)
+    # model_state.pt is from general-mode export (merge_mole=False). Loading it
+    # into umas_fast_pytorch / merge_mole architectures leaves ~37 keys missing
+    # (so2_conv remap) and ~34 unexpected (routing_mlp) → ~2e-5 eV E bias.
+    # Checkpoint + prepare_for_inference already applied the correct weights.
     if state_path is not None and state_path.is_file():
-        _load_state_dict_into(model, state_path)
-        logger.info("Loaded eager weights from %s", state_path)
+        if merge_mole or (execution_mode and execution_mode != "general"):
+            logger.info(
+                "Skip general state_dict %s (execution_mode=%s merge_mole=%s); "
+                "using checkpoint-prepared weights",
+                state_path,
+                execution_mode,
+                merge_mole,
+            )
+        else:
+            _load_state_dict_into(model, state_path)
+            logger.info("Loaded eager weights from %s", state_path)
 
     wrapper = make_traced_export_wrapper(model, task)
     wrapper.eval()
@@ -219,6 +236,17 @@ def main(argv: list[str] | None = None) -> int:
         help="ASE-readable structure for trace (default: perturbed NaCl 2x2x2 = 64). "
         "MP TS bakes partition offsets → re-export per n_atoms.",
     )
+    p.add_argument(
+        "--execution-mode",
+        default="general",
+        choices=("general", "umas_fast_pytorch"),
+        help="FairChem execution backend baked into the traced module (Tier1: umas_fast_pytorch).",
+    )
+    p.add_argument(
+        "--merge-mole",
+        action="store_true",
+        help="Fuse MOLE experts (fixed composition/charge/spin — required for umas_fast_pytorch).",
+    )
     args = p.parse_args(argv)
 
     if args.dtype != "float64":
@@ -261,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
                 device=device,
                 state_path=state_path,
                 atoms_path=args.atoms.expanduser().resolve() if args.atoms else None,
+                execution_mode=args.execution_mode,
+                merge_mole=bool(args.merge_mole),
             )
         )
 
@@ -273,6 +303,8 @@ def main(argv: list[str] | None = None) -> int:
         "state_dict": str(state_path) if state_path else None,
         "ranks": results,
         "backend": "Kokkos+LibTorch+vesin",
+        "execution_mode": args.execution_mode,
+        "merge_mole": bool(args.merge_mole),
         "notes": [
             "Per-rank TorchScript with uma_peer ops; C++ runtime owns collectives.",
             "Not Ray / not FairChem process-GP.",

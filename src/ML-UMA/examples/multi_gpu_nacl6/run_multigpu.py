@@ -129,7 +129,12 @@ from common import inference_settings_with_dtype  # noqa: E402
 OUT = Path(__file__).resolve().parent
 RESULTS = OUT / "results"
 
-ART_F64 = ENGINE / "artifacts" / "uma-s-1p2-omat-f64"
+ART_F64 = Path(
+    os.environ.get(
+        "UMA_ARTIFACT_DIR",
+        str(ENGINE / "artifacts" / "uma-s-1p2-omat-f64"),
+    )
+)
 ART_MIX = ENGINE / "artifacts" / "uma-s-1p2-omat"
 
 ALL_PATHS = ("ase", "fc", "uma_double", "uma_mixed")

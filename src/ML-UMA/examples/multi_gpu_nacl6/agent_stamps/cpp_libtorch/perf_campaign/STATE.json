@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-09T14:57:23",
-  "phase": "V5_tier1_export",
-  "status": "tier1_export_running",
+  "stamp": "2026-08-09T15:33:38",
+  "phase": "V5_tier1_EF_retarget_merge_ase",
+  "status": "tier1_turbo_PASS_vs_merge_ase_idle",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Await Tier1 export; then parity vs ASE; point UMA artifact dir and re-gate",
+  "next_action": "Optional: water merge-ASE force gate; W5/Tier2 speed; commit stamps; devices=1 fast export",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,15 +505,373 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "20982262",
+  "active_jobid": null,
   "tick": {
-    "last": "2026-08-09T14:57:23",
-    "note": "documented Tier0 E+F parity in STATUS + gate stamps"
+    "last": "2026-08-09T15:33:38",
+    "note": "tick27: Tier1 retarget settled; no active jobs; dual-oracle documented"
   },
   "tier1": {
     "export_job": "20982262",
     "art": "artifacts/uma-s-1p2-omat-f64-fast",
     "mode": "umas_fast_pytorch+merge_mole",
-    "water_w2_pts": true
+    "pts": [
+      "model_mp_w2_n1728_r0.pt",
+      "model_mp_w2_n648_r0.pt",
+      "model_mp_w2_n648_r1.pt",
+      "model_mp_w4_n648_r0.pt",
+      "model_mp_w4_n648_r1.pt",
+      "model_mp_w4_n648_r2.pt",
+      "model_mp_w4_n648_r3.pt"
+    ],
+    "water_w2": true,
+    "water_w4": true,
+    "nacl_w2_r0": true,
+    "status": "ef_fail_speed_ok",
+    "export_status": "COMPLETED",
+    "nacl_w2": true,
+    "nacl_w4": true,
+    "jobs": {
+      "nacl6_@2": "20982541",
+      "water888_@2": "20982542",
+      "nacl6_@4": "20982543",
+      "water888_@4": "20982544"
+    },
+    "gates": {
+      "nacl6_@2": {
+        "ver": "v5_tier1_fast",
+        "sys": "nacl6",
+        "ngpu": 2,
+        "job": "20982541",
+        "ms": 161.386,
+        "ase": 193.9,
+        "fc": 193.2,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "dE_ase": 2.117155509040458e-05,
+        "dE_d1": 2.1171429580135737e-05,
+        "force_max_ase": 5.881311022082336e-07,
+        "force_max_d1": 1.0000000000287557e-06,
+        "cosine_ase": 0.9999999999990395,
+        "cosine_d1": 0.999999999999616,
+        "energy_eV": -5830.923741338152,
+        "parity_gate_passed": false,
+        "pass": false,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "stamp": "2026-08-09T15:05:57"
+      },
+      "water888_@2": {
+        "ver": "v5_tier1_fast",
+        "sys": "water888",
+        "ngpu": 2,
+        "job": "20982542",
+        "ms": 165.38,
+        "sp_ms": 167.74,
+        "ase": 198.19,
+        "fc": 200.54,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.3893774722783,
+        "dE_ase": 2.1354078398871934e-05,
+        "force_max_abs_ase": 6.538752888474164e-06,
+        "force_mae_ase": 1.1100601074684164e-06,
+        "cosine_ase": 0.9999999999983759,
+        "parity_energy_pass": false,
+        "pass": false,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "stamp": "2026-08-09T15:05:57",
+        "note": "same ~2e-5 energy bias as NaCl if FAIL"
+      },
+      "nacl6_@4": {
+        "ver": "v5_tier1_fast",
+        "sys": "nacl6",
+        "ngpu": 4,
+        "job": "20982543",
+        "ms": 91.13799999999999,
+        "ase": 115.2,
+        "fc": 118.0,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "dE_ase": 2.1171556909393985e-05,
+        "dE_d1": 2.117143048963044e-05,
+        "force_max_ase": 5.881311022359892e-07,
+        "force_max_d1": 1.0000000000287557e-06,
+        "cosine_ase": 0.9999999999990398,
+        "cosine_d1": 0.999999999999616,
+        "energy_eV": -5830.9237413381525,
+        "parity_gate_passed": false,
+        "pass": false,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "stamp": "2026-08-09T15:05:57"
+      },
+      "water888_@4": {
+        "ver": "v5_tier1_fast",
+        "sys": "water888",
+        "ngpu": 4,
+        "job": "20982544",
+        "ms": 96.798,
+        "sp_ms": 99.74,
+        "ase": 117.98,
+        "fc": 118.94,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.389377472278,
+        "dE_ase": 2.1354077944124583e-05,
+        "force_max_abs_ase": 6.538752888474164e-06,
+        "force_mae_ase": 1.1100601074684164e-06,
+        "cosine_ase": 0.9999999999983759,
+        "parity_energy_pass": false,
+        "pass": false,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "stamp": "2026-08-09T15:05:57",
+        "note": "same ~2e-5 energy bias as NaCl if FAIL"
+      }
+    },
+    "summary": {
+      "all_speed_pass": true,
+      "all_ef_pass": false,
+      "all_pass": false,
+      "rows": [
+        {
+          "sys": "nacl6",
+          "ngpu": 2,
+          "job": "20982541",
+          "ms": 161.386,
+          "dE": 2.117155509040458e-05,
+          "fmax": 1.0000000000287557e-06,
+          "speed": true,
+          "ef": false,
+          "pass": false
+        },
+        {
+          "sys": "water888",
+          "ngpu": 2,
+          "job": "20982542",
+          "ms": 165.38,
+          "dE": 2.1354078398871934e-05,
+          "fmax": 6.538752888474164e-06,
+          "speed": true,
+          "ef": false,
+          "pass": false
+        },
+        {
+          "sys": "nacl6",
+          "ngpu": 4,
+          "job": "20982543",
+          "ms": 91.13799999999999,
+          "dE": 2.1171556909393985e-05,
+          "fmax": 1.0000000000287557e-06,
+          "speed": true,
+          "ef": false,
+          "pass": false
+        },
+        {
+          "sys": "water888",
+          "ngpu": 4,
+          "job": "20982544",
+          "ms": 96.798,
+          "dE": 2.1354077944124583e-05,
+          "fmax": 6.538752888474164e-06,
+          "speed": true,
+          "ef": false,
+          "pass": false
+        }
+      ]
+    }
+  },
+  "tier1b": {
+    "fix": "skip general model_state.pt when merge_mole/umas_fast",
+    "export_job": "20982810",
+    "jobs": {
+      "export": "20982810",
+      "nacl6_@2": "20982811",
+      "water888_@2": "20982812",
+      "nacl6_@4": "20982813",
+      "water888_@4": "20982814"
+    },
+    "note": "Tier1a had systematic dE~2e-5 from strict=False weight clobber",
+    "gates": {
+      "nacl6_@2": {
+        "ver": "v5_tier1b",
+        "sys": "nacl6",
+        "ngpu": 2,
+        "job": "20982811",
+        "ms": 161.152,
+        "ase": 193.9,
+        "fc": 193.2,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "dE_ase": 2.1171556909393985e-05,
+        "dE_d1": 2.117143139912514e-05,
+        "force_max_d1": 1.0000000000287557e-06,
+        "energy_eV": -5830.923741338153,
+        "parity_gate_passed": false,
+        "pass": false,
+        "note": "IDENTICAL dE~2.1e-5 as Tier1a \u2014 skip state_dict did NOT fix; bias is merge_mole/fast vs general ASE",
+        "stamp": "2026-08-09T15:16:00",
+        "art": "uma-s-1p2-omat-f64-fast"
+      },
+      "water888_@2": {
+        "ver": "v5_tier1b",
+        "sys": "water888",
+        "ngpu": 2,
+        "job": "20982812",
+        "ms": 173.43,
+        "sp_ms": 169.05,
+        "ase": 198.19,
+        "fc": 200.54,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.3893774722783,
+        "dE_ase": 2.1354078398871934e-05,
+        "force_max_abs_ase": 6.538752888474164e-06,
+        "cosine_ase": 0.9999999999983759,
+        "pass": false,
+        "note": "same ~2e-5 E bias as Tier1a",
+        "stamp": "2026-08-09T15:16:00",
+        "art": "uma-s-1p2-omat-f64-fast"
+      },
+      "nacl6_@4": {
+        "ver": "v5_tier1b",
+        "sys": "nacl6",
+        "ngpu": 4,
+        "job": "20982813",
+        "ms": 92.116,
+        "ase": 115.2,
+        "fc": 118.0,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "dE_ase": 2.1171556909393985e-05,
+        "dE_d1": 2.117143048963044e-05,
+        "force_max_d1": 1.0000000000287557e-06,
+        "energy_eV": -5830.9237413381525,
+        "parity_gate_passed": false,
+        "pass": false,
+        "stamp": "2026-08-09T15:17:51",
+        "art": "uma-s-1p2-omat-f64-fast"
+      },
+      "water888_@4": {
+        "ver": "v5_tier1b",
+        "sys": "water888",
+        "ngpu": 4,
+        "job": "20982814",
+        "ms": 96.13,
+        "sp_ms": 95.46499999999999,
+        "ase": 117.98,
+        "fc": 118.94,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.389377472278,
+        "dE_ase": 2.1354077944124583e-05,
+        "force_max_abs_ase": 6.538752888474164e-06,
+        "cosine_ase": 0.9999999999983759,
+        "pass": false,
+        "stamp": "2026-08-09T15:17:51",
+        "art": "uma-s-1p2-omat-f64-fast"
+      }
+    },
+    "diagnosis": "checkpoint-prepared merge_mole/fast still dE~2e-5 vs general ASE; not state_dict clobber alone",
+    "summary": {
+      "nacl": {
+        "2": 161.152,
+        "4": 92.116
+      },
+      "water": {
+        "2": 173.43,
+        "4": 96.13
+      },
+      "dE_ase": 2.12e-05,
+      "all_speed_pass": true,
+      "all_ef_pass": false
+    }
+  },
+  "tier1c": {
+    "export": "20983191",
+    "A_merge": "OK 12 shards",
+    "B_fastnomole": "FAILED: umas_fast requires merge_mole (MOLE has no .weight)",
+    "probe_nacl_merge_@2": "20983451",
+    "probe_result": {
+      "ver": "v5_tier1c_merge",
+      "sys": "nacl6",
+      "ngpu": 2,
+      "job": "20983451",
+      "ms": 169.854,
+      "ase": 193.9,
+      "fc": 193.2,
+      "le_ase": true,
+      "le_fc": true,
+      "speed_pass": true,
+      "dE_ase": 2.1171557818888687e-05,
+      "dE_d1": 2.1171432308619842e-05,
+      "force_max_d1": 1.0000000000287557e-06,
+      "energy_eV": -5830.9237413382,
+      "parity_gate_passed": false,
+      "pass": false,
+      "art": "uma-s-1p2-omat-f64-merge",
+      "note": "general+merge_mole isolate; compare dE to Tier1b ~2.1e-5",
+      "stamp": "2026-08-09T15:29:25"
+    },
+    "ase_merge_oracle_job": "20983514",
+    "ase_merge_oracle": {
+      "stamp": "2026-08-09T15:30:47",
+      "job": "20983514",
+      "uma_merge_E": -5830.9237413382,
+      "general_ase_E": -5830.92372016672,
+      "rows": [
+        {
+          "name": "general_merge",
+          "execution_mode": "general",
+          "merge_mole": true,
+          "energy_eV": -5830.923741338032,
+          "ms_per_eval": 367.3443403483058,
+          "dE_vs_general_ase": 2.1171312255319208e-05,
+          "dE_vs_uma_merge": 1.673470251262188e-10,
+          "force_rms": 0.15896871142260077
+        },
+        {
+          "name": "umas_fast_merge",
+          "execution_mode": "umas_fast_pytorch",
+          "merge_mole": true,
+          "energy_eV": -5830.92374133803,
+          "ms_per_eval": 349.5199086610228,
+          "dE_vs_general_ase": 2.1171309526835103e-05,
+          "dE_vs_uma_merge": 1.7007550923153758e-10,
+          "force_rms": 0.1589687114226008
+        }
+      ],
+      "verdict": {
+        "merge_matches_uma": true,
+        "merge_matches_general_ase": false
+      }
+    },
+    "retarget_gate": {
+      "ver": "v5_tier1c_retarget",
+      "sys": "nacl6",
+      "ngpu": 2,
+      "uma_job": "20983451",
+      "ase_oracle_job": "20983514",
+      "oracle": "ase_fp64_w1_merge_mole_general",
+      "dE_vs_merge_ase": 1.673470251262188e-10,
+      "dE_vs_umas_fast_merge_ase": 1.7007550923153758e-10,
+      "dE_vs_general_ase": 2.1171312255319208e-05,
+      "force_max_abs_vs_merge_ase": 4.999896874441356e-07,
+      "force_mae_vs_merge_ase": 1.5176819870818822e-07,
+      "cosine_vs_merge_ase": 0.99999999999906,
+      "thresholds": {
+        "abs_dE_max": 1e-08,
+        "force_max_abs_max": 1e-06,
+        "cosine_min": 0.999999999999
+      },
+      "pass": true,
+      "note": "Tier1 E/F must gate vs merge_mole ASE, not general ASE; bias vs general is expected MOLE fuse residual",
+      "stamp": "2026-08-09T15:31:53"
+    }
   }
 }
