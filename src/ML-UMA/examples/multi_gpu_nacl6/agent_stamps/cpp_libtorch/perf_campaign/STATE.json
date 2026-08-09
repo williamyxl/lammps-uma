@@ -1,6 +1,6 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-09T16:07:47",
+  "stamp": "2026-08-09T16:08:12",
   "phase": "V5_tier1_COMPLETE_dual_oracle",
   "status": "tier1_turbo_PASS_nacl_and_water_vs_merge_ase",
   "gates": {
@@ -507,8 +507,8 @@
   },
   "active_jobid": null,
   "tick": {
-    "last": "2026-08-09T16:07:47",
-    "note": "water merge ASE PASS @2/@4; Tier1 E/F complete"
+    "last": "2026-08-09T16:08:12",
+    "note": "locked ASE/FC baselines; no re-run"
   },
   "tier1": {
     "export_job": "20982262",
@@ -907,5 +907,39 @@
       ],
       "all_ef_pass": true
     }
+  },
+  "baselines_locked": {
+    "policy": "Do not re-run ASE FairChem FP64 or FC LAMMPS for speed gates; reuse v0 / COMPARE.md",
+    "nacl6_ase_ms": {
+      "1": 396.5,
+      "2": 193.9,
+      "4": 115.2
+    },
+    "nacl6_fc_ms": {
+      "1": 345.5,
+      "2": 193.2,
+      "4": 118.0
+    },
+    "water888_ase_ms": {
+      "1": 382.09,
+      "2": 198.19,
+      "4": 117.98
+    },
+    "water888_fc_ms": {
+      "1": 359.4,
+      "2": 200.54,
+      "4": 118.94
+    },
+    "water888_ase_jobs": {
+      "1": "20948821",
+      "2": "20949177",
+      "4": "20949180"
+    },
+    "water888_fc_jobs": {
+      "1": "20949064",
+      "2": "20949178",
+      "4": "20949181"
+    },
+    "water888_doc": "water888/results/COMPARE.md"
   }
 }

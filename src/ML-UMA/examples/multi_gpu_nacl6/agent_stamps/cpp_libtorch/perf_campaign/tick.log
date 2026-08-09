@@ -132,3 +132,4 @@ TICK8 2026-08-09T14:56:12-05:00
 2026-08-09T16:06:16 TICK29-43 water merge ASE 20984160 PENDING Priority; scancel dup 20984161
 2026-08-09T16:07:37 TICK44 water merge ASE 20984160 still pending
 2026-08-09T16:07:47 WATER merge ASE 20984160 PASS dE~1e-11 fmax~5e-6 @2/@4; Tier1 dual-oracle COMPLETE
+2026-08-09T16:08:12 POLICY: reuse locked ASE/FC @1/2/4 baselines; uma-only for perf iters
