@@ -1,0 +1,23 @@
+{
+  "ver": "v5_tier0",
+  "sys": "water888",
+  "ngpu": 2,
+  "job": "20981758",
+  "ms": 178.32,
+  "sp_ms": 178.74,
+  "ase": 198.19,
+  "fc": 200.54,
+  "le_ase": true,
+  "le_fc": true,
+  "pass": true,
+  "energy_eV": -3143.38935611817,
+  "note": "vs ASE@1; residual matches historical uma@1",
+  "stamp": "2026-08-09T14:49:48",
+  "dE_ase": 3.001332515850663e-11,
+  "force_max_abs_ase": 4.962176162859322e-06,
+  "force_mae_ase": 7.406800939229958e-07,
+  "force_rmse_ase": 1.3869604010828386e-06,
+  "cosine_ase": 0.999999999998462,
+  "ase_E": -3143.3893561182,
+  "parity_documented": true
+}

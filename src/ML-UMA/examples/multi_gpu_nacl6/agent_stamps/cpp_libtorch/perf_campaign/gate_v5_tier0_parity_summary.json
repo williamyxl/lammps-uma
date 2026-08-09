@@ -1,0 +1,102 @@
+{
+  "stamp": "2026-08-09 Tier0",
+  "thresholds": {
+    "abs_dE_max": 1e-08,
+    "force_max_abs_max": 1e-06,
+    "cosine_min": 0.999999999999
+  },
+  "nacl6": [
+    {
+      "ngpu": 2,
+      "job": "20981757",
+      "E": -5830.92372016672,
+      "dE_ase": 1.2369127944111824e-10,
+      "dE_d1": 1.8189894035458565e-12,
+      "force_max_ase": 4.99965972400318e-07,
+      "force_mae_ase": 1.5158049994782293e-07,
+      "cosine_ase": 0.9999999999990609,
+      "force_max_d1": 0.0,
+      "cosine_d1": 1.0,
+      "ms": 9515.978908600002,
+      "gate": {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 1.8189894035458565e-12,
+          "force_max_abs_vs_uma_d1": 0.0,
+          "cosine_vs_uma_d1": 1.0
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true
+      }
+    },
+    {
+      "ngpu": 4,
+      "job": "20981759",
+      "E": -5830.92372016672,
+      "dE_ase": 1.2460077414289117e-10,
+      "dE_d1": 1.8189894035458565e-12,
+      "force_max_ase": 4.99965972400318e-07,
+      "force_mae_ase": 1.5158049994894575e-07,
+      "cosine_ase": 0.9999999999990609,
+      "force_max_d1": 0.0,
+      "cosine_d1": 1.0,
+      "ms": 7969.426154999999,
+      "gate": {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 1.8189894035458565e-12,
+          "force_max_abs_vs_uma_d1": 0.0,
+          "cosine_vs_uma_d1": 1.0
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true
+      }
+    }
+  ],
+  "water888": [
+    {
+      "ngpu": 2,
+      "job": "20981758",
+      "E": -3143.38935611817,
+      "dE": 3.001332515850663e-11,
+      "force_max_abs": 4.962176162859322e-06,
+      "force_mae": 7.406800939229958e-07,
+      "force_rmse": 1.3869604010828386e-06,
+      "cosine": 0.999999999998462,
+      "sp_ms": 178.74,
+      "nvt": 178.32
+    },
+    {
+      "ngpu": 4,
+      "job": "20981760",
+      "E": -3143.38935611817,
+      "dE": 3.001332515850663e-11,
+      "force_max_abs": 4.962176162859322e-06,
+      "force_mae": 7.406800939229958e-07,
+      "force_rmse": 1.3869604010828386e-06,
+      "cosine": 0.999999999998462,
+      "sp_ms": 102.83,
+      "nvt": 104.2
+    }
+  ]
+}

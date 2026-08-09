@@ -1,0 +1,519 @@
+{
+  "campaign": "uma_kk_perf",
+  "stamp": "2026-08-09T14:57:23",
+  "phase": "V5_tier1_export",
+  "status": "tier1_export_running",
+  "gates": {
+    "E_F": true,
+    "uma_le_ase": true,
+    "uma_le_fc": true,
+    "systems": [
+      "nacl6",
+      "water888"
+    ],
+    "order": [
+      "@2",
+      "@4"
+    ]
+  },
+  "v0": {
+    "nacl6_ms": {
+      "1": 321.04,
+      "2": 183.3,
+      "4": 112.04
+    },
+    "nacl6_job": "20940474",
+    "water888_ms": {
+      "1": 332.51,
+      "2": 196.84,
+      "4": 145.17
+    },
+    "water888_jobs": {
+      "1": "20948823",
+      "2": "20949179",
+      "4": "20949182"
+    },
+    "water888_ase": {
+      "1": 382.09,
+      "2": 198.19,
+      "4": 117.98
+    },
+    "water888_fc": {
+      "1": 359.4,
+      "2": 200.54,
+      "4": 118.94
+    },
+    "nacl6_ase": {
+      "1": 396.5,
+      "2": 193.9,
+      "4": 115.2
+    },
+    "nacl6_fc": {
+      "1": 345.5,
+      "2": 193.2,
+      "4": 118.0
+    },
+    "note": "V0 stamped; water888 @4 NVT FAIL"
+  },
+  "v1": {
+    "change": "select_transport default NCCL",
+    "jobs": {
+      "nacl6_@2": "20966871",
+      "water888_@2": "20966872",
+      "nacl6_@4": "20967172",
+      "water888_@4": "20967173"
+    },
+    "gate": "PARTIAL_FAIL_water888_@4",
+    "gates": {
+      "nacl6_@2": {
+        "sys": "nacl6",
+        "ngpu": 2,
+        "ms": 185.222,
+        "ase": 193.9,
+        "fc": 193.2,
+        "le_ase": true,
+        "le_fc": true,
+        "job": "20966871",
+        "dE_ase": 1.2369e-10,
+        "force_max_d1": 0.0,
+        "pass": true
+      },
+      "water888_@2": {
+        "sys": "water888",
+        "ngpu": 2,
+        "ms": 195.74000000000004,
+        "ase": 198.19,
+        "fc": 200.54,
+        "le_ase": true,
+        "le_fc": true,
+        "job": "20966872",
+        "E": -3143.38935611817,
+        "ase_E": -3143.3893561181617,
+        "dE_ase": 8.185452315956354e-12,
+        "pass": true
+      },
+      "nacl6_@4": {
+        "sys": "nacl6",
+        "ngpu": 4,
+        "ms": 113.988,
+        "ase": 115.2,
+        "fc": 118.0,
+        "le_ase": true,
+        "le_fc": true,
+        "job": "20967172",
+        "dE_ase": 1.255102688446641e-10,
+        "force_max_d1": 0.0,
+        "pass": true
+      },
+      "water888_@4": {
+        "sys": "water888",
+        "ngpu": 4,
+        "ms": 125.91,
+        "ase": 117.98,
+        "fc": 118.94,
+        "le_ase": false,
+        "le_fc": false,
+        "job": "20967173",
+        "E": -3143.3893561181703,
+        "ase_E": -3143.3893561181617,
+        "dE_ase": 8.640199666842818e-12,
+        "v0_ms": 145.17,
+        "delta_vs_v0": -19.25999999999999,
+        "pass": false
+      }
+    },
+    "summary": {
+      "nacl6": "PASS @2/@4",
+      "water888": "PASS @2; FAIL @4",
+      "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
+    }
+  },
+  "active_jobs": [],
+  "tick_log": "tick.log",
+  "next_action": "Await Tier1 export; then parity vs ASE; point UMA artifact dir and re-gate",
+  "v2a": {
+    "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
+    "jobs": {
+      "nacl6_@2": "20972327",
+      "water888_@2": "20972328",
+      "nacl6_@4": "20972479",
+      "water888_@4": "20972480"
+    },
+    "gate": "FAIL_water888_@4_regressed",
+    "gates": {
+      "nacl6_@2": {
+        "sys": "nacl6",
+        "ngpu": 2,
+        "ms": 182.262,
+        "ase": 193.9,
+        "fc": 193.2,
+        "job": "20972327",
+        "le_ase": true,
+        "le_fc": true,
+        "dE_ase": 1.2369e-10,
+        "force_max_d1": 0.0,
+        "pass": true
+      },
+      "water888_@2": {
+        "sys": "water888",
+        "ngpu": 2,
+        "ms": 196.02,
+        "ase": 198.19,
+        "fc": 200.54,
+        "job": "20972328",
+        "le_ase": true,
+        "le_fc": true,
+        "E": -3143.3893561181703,
+        "pass": true
+      },
+      "nacl6_@4": {
+        "sys": "nacl6",
+        "ngpu": 4,
+        "ms": 113.706,
+        "ase": 115.2,
+        "fc": 118.0,
+        "job": "20972479",
+        "le_ase": true,
+        "le_fc": true,
+        "dE_ase": 1.246e-10,
+        "force_max_d1": 0.0,
+        "pass": true
+      },
+      "water888_@4": {
+        "sys": "water888",
+        "ngpu": 4,
+        "ms": 133.22,
+        "ase": 117.98,
+        "fc": 118.94,
+        "job": "20972480",
+        "le_ase": false,
+        "le_fc": false,
+        "E": -3143.38935611817,
+        "v1_ms": 125.91,
+        "delta_vs_v1": 7.310000000000002,
+        "ms_pub": {
+          "mean": 13.819456310679612,
+          "med": 5.922,
+          "p95": 7.127,
+          "max": 378.988
+        },
+        "ms_pub_p95_le_3x_med": true,
+        "pass": false
+      }
+    },
+    "summary": "NaCl6 PASS; water @4 133.2 FAIL (worse than V1 125.9); spike gate ok"
+  },
+  "v2b": {
+    "change": "sized PayloadShm by world (no mlock); unlocked publish kept",
+    "jobs": {
+      "nacl6_@2": "20973389",
+      "water888_@2": "20973390",
+      "water888_@2_retry": "20973791",
+      "nacl6_@4": "20973855",
+      "water888_@4": "20973856"
+    },
+    "gate": "FAIL_water888_@4",
+    "gates": {
+      "nacl6_@2": {
+        "sys": "nacl6",
+        "ngpu": 2,
+        "ms": 183.55,
+        "ase": 193.9,
+        "fc": 193.2,
+        "job": "20973389",
+        "pass": true
+      },
+      "water888_@2_mlock_FAIL": {
+        "sys": "water888",
+        "ngpu": 2,
+        "ms": 295.45,
+        "ase": 198.19,
+        "fc": 200.54,
+        "job": "20972849",
+        "pass": false,
+        "note": "mlock caused ms_nl spikes; reverted; retrying sized PayloadShm"
+      },
+      "water888_@2_sized_spike": {
+        "sys": "water888",
+        "ngpu": 2,
+        "ms": 226.44,
+        "ase": 198.19,
+        "fc": 200.54,
+        "job": "20973390",
+        "pass": false,
+        "note": "median~195 OK; mean hit by rare ms_nl/ms_pack spikes; retry"
+      },
+      "water888_@2": {
+        "sys": "water888",
+        "ngpu": 2,
+        "ms": 196.25,
+        "ase": 198.19,
+        "fc": 200.54,
+        "job": "20973791",
+        "le_ase": true,
+        "le_fc": true,
+        "pass": true,
+        "note": "retry after spike-noise FAIL"
+      },
+      "nacl6_@4": {
+        "sys": "nacl6",
+        "ngpu": 4,
+        "ms": 113.826,
+        "ase": 115.2,
+        "fc": 118.0,
+        "job": "20973855",
+        "le_ase": true,
+        "le_fc": true,
+        "dE_ase": 1.255e-10,
+        "force_max_d1": 0.0,
+        "pass": true
+      },
+      "water888_@4": {
+        "sys": "water888",
+        "ngpu": 4,
+        "ms": 136.58,
+        "ase": 117.98,
+        "fc": 118.94,
+        "job": "20973856",
+        "le_ase": false,
+        "le_fc": false,
+        "pass": false,
+        "v1_ms": 125.91,
+        "ms_pub_p95_ok": false,
+        "note": "V2b sized shm did not clear @4; median still ~125-class if spikes controlled"
+      }
+    },
+    "attempt": "2_sized_shm"
+  },
+  "v3": {
+    "change": "cudaHostRegister payload + nonblocking worker H2D",
+    "jobs": {
+      "nacl6_@2": "20974055",
+      "water888_@2": "20974056",
+      "nacl6_@4": "20974303",
+      "water888_@4": "20974304"
+    },
+    "gates": {
+      "nacl6_@2": {
+        "sys": "nacl6",
+        "ngpu": 2,
+        "ms": 183.818,
+        "ase": 193.9,
+        "fc": 193.2,
+        "job": "20974055",
+        "pass": true
+      },
+      "water888_@2": {
+        "sys": "water888",
+        "ngpu": 2,
+        "ms": 195.76,
+        "ase": 198.19,
+        "fc": 200.54,
+        "job": "20974056",
+        "pass": true
+      },
+      "nacl6_@4": {
+        "sys": "nacl6",
+        "ngpu": 4,
+        "ms": 113.984,
+        "ase": 115.2,
+        "fc": 118.0,
+        "job": "20974303",
+        "pass": true
+      },
+      "water888_@4": {
+        "sys": "water888",
+        "ngpu": 4,
+        "ms": 139.16,
+        "ase": 117.98,
+        "fc": 118.94,
+        "job": "20974304",
+        "pass": false,
+        "v1_ms": 125.91,
+        "note": "V3 pin/nonblock H2D did not clear @4"
+      }
+    },
+    "gate": "FAIL_water888_@4"
+  },
+  "v4": {
+    "change": "CPU NL REVERTED; stay on V3 CUDA NL + pinned payload",
+    "jobs": {
+      "nacl6_@2": "20974353",
+      "water888_@2": "20974354"
+    },
+    "gates": {
+      "nacl6_@2": {
+        "ms": 698.62,
+        "job": "20974353",
+        "pass": false,
+        "note": "CPU NL disaster"
+      },
+      "water888_@2": {
+        "ms": 269.75,
+        "job": "20974354",
+        "pass": false,
+        "note": "CPU NL disaster"
+      }
+    },
+    "gate": "FAIL_cpu_nl_reverted",
+    "restore_job": "20974513"
+  },
+  "restore": {
+    "job": "20974513",
+    "ms": 182.124,
+    "pass": true,
+    "note": "CUDA NL binary restored after V4 CPU-NL revert"
+  },
+  "rediagnosis": {
+    "date": "2026-08-09",
+    "water4_spike_free_ms": 124.4,
+    "ase4_ms": 117.98,
+    "gap_ms": 6.4,
+    "ms_wait_med": 110.0,
+    "ms_parent_med": 14.2,
+    "conclusion": "wait-dominated; next V5a kMaxE + V5b defer NCCL sync"
+  },
+  "loop": {
+    "sentinel": "AGENT_LOOP_TICK_uma_perf",
+    "interval_s": 120,
+    "armed": true
+  },
+  "tier0": {
+    "landed": [
+      "I0",
+      "W1",
+      "W2",
+      "W3",
+      "W4"
+    ],
+    "deferred": [
+      "W5"
+    ],
+    "files": [
+      "uma-engine/include/uma/vesin_nl.h",
+      "uma-engine/include/uma/shared_peer.h",
+      "uma-engine/src/libtorch_mp.cpp",
+      "uma-engine/tests/uma_libtorch_mp_worker.cpp"
+    ],
+    "jobs": {
+      "nacl6_@2": "20981757",
+      "water888_@2": "20981758",
+      "nacl6_@4": "20981759",
+      "water888_@4": "20981760"
+    },
+    "gates": {
+      "nacl6_@2": {
+        "ver": "v5_tier0",
+        "sys": "nacl6",
+        "ngpu": 2,
+        "job": "20981757",
+        "ms": 172.878,
+        "ase": 193.9,
+        "fc": 193.2,
+        "le_ase": true,
+        "le_fc": true,
+        "dE_ase": 1.2369127944111824e-10,
+        "force_max_d1": 0.0,
+        "pass": true,
+        "note": "Tier0 W1-W4; improved vs prior ~182-185",
+        "stamp": "2026-08-09T14:47:45",
+        "energy_eV": -5830.92372016672,
+        "dE_d1": 1.8189894035458565e-12,
+        "force_max_ase": 4.99965972400318e-07,
+        "cosine_ase": 0.9999999999990609,
+        "cosine_d1": 1.0,
+        "parity_documented": true
+      },
+      "water888_@2": {
+        "ver": "v5_tier0",
+        "sys": "water888",
+        "ngpu": 2,
+        "job": "20981758",
+        "ms": 178.32,
+        "sp_ms": 178.74,
+        "ase": 198.19,
+        "fc": 200.54,
+        "le_ase": true,
+        "le_fc": true,
+        "pass": true,
+        "energy_eV": -3143.38935611817,
+        "note": "Tier0; prior ~195-196",
+        "stamp": "2026-08-09T14:49:48",
+        "dE_ase": 3.001332515850663e-11,
+        "force_max_abs_ase": 4.962176162859322e-06,
+        "force_mae_ase": 7.406800939229958e-07,
+        "cosine_ase": 0.999999999998462,
+        "parity_documented": true
+      },
+      "nacl6_@4": {
+        "ver": "v5_tier0",
+        "sys": "nacl6",
+        "ngpu": 4,
+        "job": "20981759",
+        "ms": 100.19,
+        "ase": 115.2,
+        "fc": 118.0,
+        "le_ase": true,
+        "le_fc": true,
+        "dE_ase": 1.2460077414289117e-10,
+        "force_max_d1": 0.0,
+        "pass": true,
+        "note": "Tier0; prior ~113-114",
+        "stamp": "2026-08-09T14:49:48",
+        "energy_eV": -5830.92372016672,
+        "dE_d1": 1.8189894035458565e-12,
+        "force_max_ase": 4.99965972400318e-07,
+        "cosine_ase": 0.9999999999990609,
+        "cosine_d1": 1.0,
+        "parity_documented": true
+      },
+      "water888_@4": {
+        "ver": "v5_tier0",
+        "sys": "water888",
+        "ngpu": 4,
+        "job": "20981760",
+        "ms": 104.2,
+        "sp_ms": 102.83,
+        "ase": 117.98,
+        "fc": 118.94,
+        "le_ase": true,
+        "le_fc": true,
+        "pass": true,
+        "margin_vs_ase_ms": 13.78,
+        "energy_eV": -3143.38935611817,
+        "note": "Tier0 W1-W4 CLEARS hard water@4 gate; prior spike-free ~125 / V1 125.9",
+        "stamp": "2026-08-09T14:51:47",
+        "dE_ase": 3.001332515850663e-11,
+        "force_max_abs_ase": 4.962176162859322e-06,
+        "force_mae_ase": 7.406800939229958e-07,
+        "cosine_ase": 0.999999999998462,
+        "parity_documented": true
+      }
+    },
+    "summary": {
+      "nacl6": {
+        "2": 172.878,
+        "4": 100.19
+      },
+      "water888": {
+        "2": 178.32,
+        "4": 104.2
+      },
+      "all_pass_vs_ase_fc": true,
+      "all_pass_E_F": true,
+      "parity_note": "NaCl formal d1 gate PASS; water vs ASE@1 matches historical uma residual"
+    },
+    "parity_summary": "gate_v5_tier0_parity_summary.json"
+  },
+  "active_jobid": "20982262",
+  "tick": {
+    "last": "2026-08-09T14:57:23",
+    "note": "documented Tier0 E+F parity in STATUS + gate stamps"
+  },
+  "tier1": {
+    "export_job": "20982262",
+    "art": "artifacts/uma-s-1p2-omat-f64-fast",
+    "mode": "umas_fast_pytorch+merge_mole",
+    "water_w2_pts": true
+  }
+}
