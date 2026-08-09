@@ -50,7 +50,7 @@ Artifacts (export with `python/export_mp_artifact.py` / `export_artifact.py --dt
 - double / active: `artifacts/uma-s-1p2-omat-f64/` (`model_mp_w{N}_n{NATOMS}_r{R}.pt`)
 - mixed: `artifacts/uma-s-1p2-omat/` — **disabled** for campaigns
 
-**Landed (2026-08-08):** devices=2/4 E+F green · self-scale **≈320 / ≈265 / ≈193 ms** (job `20932975`). See `examples/multi_gpu_nacl6/results/RESULTS.md`.
+**Landed (2026-08-08):** devices=2/4 E+F green · campaign **PASS** with NCCL peer · honest **321.04 / 183.30 / 112.04 ms** @1/2/4 (job `20940474`). See `examples/multi_gpu_nacl6/results/RESULTS.md`. P1 cuda_ipc self-scale milestone was ≈320 / ≈265 / ≈193 (job `20932975`).
 
 ## Parity thresholds (`devices=N` vs oracle)
 

@@ -353,3 +353,7 @@ Honest `uma64` ms (`UMA_PEER_TRANSPORT=nccl`): **321.04 / 183.30 / 112.04**
 | HARD_ASE_FC | **OK** → campaign **PASS** |
 
 Teardown fix verified: all ranks logged `shutdown` @2 and @4 (no repeat of `20940376` deadlock).
+
+## Burst 23 — Parent doc sync to P3c PASS (2026-08-08 ~19:00 CDT)
+
+Synced RESULTS/SUMMARY/MULTIGPU/SUMMARY.json + engine docs + canvases to honest **321.04 / 183.30 / 112.04** (job `20940474`, NCCL). Stale P1/P2 “current” language removed from Findings / MULTI_GPU_API_NOTES / native_kokkos / gp_round pointer / COORD_ANALYSIS.

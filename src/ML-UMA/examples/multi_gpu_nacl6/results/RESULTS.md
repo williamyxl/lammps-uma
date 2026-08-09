@@ -1,22 +1,22 @@
 # Multi-GPU NaCl 6×6×6 — results (canonical)
 
-**Phase 4 + Perf P2** · Stamp: 2026-08-08 ~09:50 CDT · Branch `uma-kokkos-mlip` @ `1a5f8a06c0`  
-**Suite:** `src/ML-UMA/examples/multi_gpu_nacl6/`  
-**Status:** same-node GP **E+F GREEN** · **self-scale GREEN** · P2 pipe-tax cut **PASS**
+**Phase 4 + Perf P3c** · Stamp: 2026-08-08 ~19:00 CDT · Branch `uma-kokkos-mlip` · P3c `20940474`  
+**Campaign bar:** uma ≤ ASE **and** ≤ FC · **PASS** · honest **321.04 / 183.30 / 112.04** (NCCL) · E+F green · @4 −3.2 ms vs ASE / −6.0 ms vs FC
 
 ## Product backend (uma/kk)
 
 | Field | Value |
 |-------|--------|
 | Backend | **Kokkos + LibTorch** (`gp=kokkos_libtorch_vesin`) |
-| Runtime | C++ `LibtorchMpRuntime` — process-per-rank + **CUDA IPC** peers + **payload shm** fan-out + vesin NL |
+| Runtime | C++ `LibtorchMpRuntime` — process-per-rank + **NCCL** peer (`UMA_PEER_TRANSPORT=nccl`) + **payload shm** + P3a pack/sync + vesin NL |
 | Launch | `lmp -k on g N -sf kk` · `pair_style uma/kk precision double devices N` · **1 MPI rank** |
 | Precision | **FP64 only** |
 | Artifacts | `model_mp_w{N}_n{NATOMS}_r{R}.pt` (+ legacy `model_mp_w{N}_r*` for n=64) |
-| Current pair ms | **≈322 / ≈191 / ≈141** @ devices=1/2/4 (job `20933393`) |
+| Current pair ms | **321.04 / 183.30 / 112.04** @ devices=1/2/4 (job `20940474`, NCCL) |
+| Prior P3a (cuda_ipc) | 320.6 / 183.57 / 117.63 (`20934280`) |
 | **Not** product | Ray · FairChem `ParallelMLIPPredictUnit` · Python GP worker (env opt-in only) |
 
-ASE FairChem / FC rows below are **reference baselines**; uma/kk is the product path. ASE/FC timing: path-isolated batch (`20910344`–`20910354`); uma/kk: Perf P2 (`20933393`).
+ASE FairChem / FC rows below are **reference baselines**; uma/kk is the product path. ASE/FC timing: path-isolated batch (`20910344`–`20910354`); uma/kk: Perf P3c (`20940474`).
 
 ---
 
@@ -30,9 +30,9 @@ Same frozen geometry. Oracle = ASE FairChem FP64 `workers=1` (−5830.9237201666
 |------|------:|------:|------:|----:|----:|---------|
 | ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | 2.04× | 3.44× | Ray ParallelMLIP (`workers=N`) |
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | 1.79× | 2.93× | Ray ParallelMLIP in FC |
-| **uma/kk double (product)** | **321.54** | **190.80** | **140.90** | **1.69×** | **2.28×** | Kokkos+LibTorch + CUDA IPC + payload shm |
+| **uma/kk double (product)** | **321.04** | **183.30** | **112.04** | **1.75×** | **2.87×** | Kokkos+LibTorch + **NCCL** (P3c) |
 
-Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma P2 `20933393` (P1 was 320.34 / 264.96 / 193.32).
+Jobs: ASE `20910344/48/52` · FC `20910345/49/53` · uma P3c `20940474` (P3a cuda_ipc was 320.60 / 183.57 / 117.63).
 
 ### Energy vs ASE FP64@1
 
@@ -53,18 +53,19 @@ FC energy offset is consistent with FC cell build in FP32 (documented). uma/kk s
 | FairChem FC LAMMPS | 1 / 2 / 4 | **7.12×10⁻⁶** | **7.13×10⁻⁶** | 1.000000 |
 | **uma/kk double** | 1 / 2 / 4 | **5.00×10⁻⁷** | **7.67×10⁻⁷** | 1.000000 |
 
-uma/kk forces are identical across devices=1/2/4 to numerical noise vs each other (max\|ΔF\| vs uma d1 = **0** on P2); residual vs ASE is ~5×10⁻⁷ eV/Å (well under the 1×10⁻⁶ gate). FC is ~14× larger force error vs ASE than uma/kk.
+uma/kk forces identical across devices=1/2/4 vs each other (max|ΔF| vs uma d1 = **0** on P3c); residual vs ASE ~5×10⁻⁷ eV/Å.
 
 ### Readout
 
 | Metric | Winner @1 GPU | Winner @2 GPU | Winner @4 GPU | Notes |
 |--------|---------------|---------------|---------------|-------|
-| Timing | **uma/kk** (322 vs 397/346) | **uma/kk** (191 vs 194/193) | ASE/FC (~115–118) | P2 beats ASE/FC @2; ~26 ms behind ASE @4 |
+| Timing | **uma/kk** | **uma/kk** | **uma/kk** (−3.2 vs ASE, −6.0 vs FC) | Campaign **PASS** |
 | Energy vs ASE | **uma/kk** (~1e-10) | **uma/kk** | **uma/kk** | FC stuck at ~5e-6 |
 | Forces vs ASE | **uma/kk** (~5e-7) | **uma/kk** | **uma/kk** | FC ~7e-6 |
 
----
+P3b: residual vs ASE was in worker collectives. P3c NCCL (`20940474`) closed it: @4 **112.04** ≤ ASE **115.2** and ≤ FC **118**. Hang `20940376` was teardown deadlock (fixed: broadcast shutdown + destroy rendezvous).
 
+---
 ## Geometry (immutable)
 
 | Field | Value |
@@ -127,11 +128,19 @@ Stamp gates:
 | 4 | **193.32** | **0.60×** | 1.8×10⁻¹² | **0** |
 
 **Hard gate PASS:** `ms(2)<ms(1)` and `ms(4)<ms(2)`.  
-vs P0 host-shm (320.6 / 330.5 / 382.9) and Phase-3 pre-IPC (~361 / ~473). Soft gap vs ASE/FC Ray (~194 / ~115 @2/@4) remains; further wins are P2 pipe tax / optional.
+vs P0 host-shm (320.6 / 330.5 / 382.9) and Phase-3 pre-IPC (~361 / ~473). Historical milestone only — **current product = P3c NCCL** below.
+
+### Perf P3a → P3c (campaign close)
+
+| Phase | Job | Transport | pair ms @1/2/4 | Notes |
+|-------|-----|-----------|----------------:|-------|
+| P3a | `20934280` | cuda_ipc | 320.6 / 183.57 / 117.63 | Beat FC @4; **+2.4 vs ASE** → OPEN |
+| P3c hang | `20940376` | nccl | 321.6 / — / — | Teardown deadlock (fixed) |
+| **P3c** | **`20940474`** | **nccl** | **321.04 / 183.30 / 112.04** | **PASS** ≤ASE/FC @1/2/4 |
 
 ### Timing note (honest)
 
-Product path now **self-scales** with CUDA IPC collectives. Quote P1 job `20932975` numbers above — not Phase-3 host-shm (~361 / ~473) and not Ray/Python GP (~192 / ~113).
+Quote **`uma64 E=… XXX ms`** from `run_multigpu` / PERF gates — **not** SLURM `wall/N_TIMING`. Canonical product numbers are P3c NCCL job `20940474`.
 
 ---
 
@@ -144,7 +153,7 @@ Historical FairChem timings (jobs `20910344`–`20910354`). ASE/FC scaling conte
 | ASE FairChem FP64 | 396.5 | 193.9 | 115.2 | `workers=N` → Ray ParallelMLIP |
 | FairChem FC LAMMPS | 345.5 | 193.2 | 118.0 | FC cell FP32 → \|ΔE\|≈4.9×10⁻⁶ vs ASE |
 
-**Current uma/kk pair ms** (product, Kokkos+LibTorch + CUDA IPC): **≈320 / ≈265 / ≈193** at devices=1/2/4 — job `20932975`. Do not quote Ray/Python GP or pre-IPC host-shm multi-GPU rows as the product backend.
+**Current uma/kk pair ms** (product, Kokkos+LibTorch + **NCCL**): **321.04 / 183.30 / 112.04** at devices=1/2/4 — job `20940474`. Opt-in via `UMA_PEER_TRANSPORT=nccl` (code default remains cuda_ipc fallback). Do not quote Ray/Python GP, pre-IPC host-shm, or P1-only rows as the current product backend.
 
 ---
 
@@ -153,9 +162,10 @@ Historical FairChem timings (jobs `20910344`–`20910354`). ASE/FC scaling conte
 1. **Product path is Kokkos+LibTorch** (`kokkos_libtorch_vesin`), not Ray / FairChem eager GP / Python workers.
 2. Engine CLI and LAMMPS agree: devices=2 and devices=4 E+F match devices=1 to numerical noise; forces vs d1 are exact (max\|ΔF\|=0) on the LAMMPS path.
 3. Energy vs ASE FP64@1 stays ~10⁻¹⁰ eV on NaCl6.
-4. **Self-scale green** after CUDA IPC (P1): pair ms falls 320 → 265 → 193 at devices=1/2/4 with E+F still PASS.
-5. ASE/FC Ray still faster at 4 GPUs (~115 ms); further uma/kk wins are optional P2 (parent↔worker IPC).
-6. **Phase 5 (multi-node MPI-GP)** is out of scope for this report.
+4. **Self-scale green** from P1 onward; P3c NCCL reaches **321 → 183 → 112** ms @1/2/4 with E+F still PASS.
+5. **Campaign PASS:** uma beats ASE and FC at every GPU count (hard bar). Margin @4 vs ASE is −3.2 ms.
+6. Remaining headroom: default NCCL (still opt-in), parent NL+publish (~8–10 ms @4), scaling efficiency (1→4 = 2.87× vs ASE 3.44×).
+7. **Phase 5 (multi-node MPI-GP)** is out of scope for this report.
 
 ---
 

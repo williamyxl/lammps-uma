@@ -1,6 +1,6 @@
 # Native Kokkos + LibTorch multi-GPU (no Ray)
 
-**Stamp:** 2026-08-08 ~09:00 CDT  
+**Stamp:** 2026-08-08 ~19:00 CDT  
 **Plan:** `.cursor/plans/libtorch_multi-gpu_kokkos_20de0136.plan.md`  
 **Perf plan:** `.cursor/plans/mp_performance_campaign_e2397088.plan.md`  
 **Agent stamps:** `examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/`  
@@ -15,9 +15,9 @@ Ship as same-node `pair_style uma/kk precision double devices N` with:
 - `--ntasks=1`, `lmp -k on g N -sf kk` on Delta **`gpuA100x4`**
 - Full scientific UMA (no smaller cutoff / fewer neighbors / skipped layers)
 - **Vesin** full NL → FairChem partition **key** → LibTorch shards
-- Inter-GPU traffic via **CUDA IPC** device payloads + process-shared control (default `UMA_PEER_TRANSPORT=cuda_ipc`); host `/dev/shm` payload remains as `shm` fallback — not MPI, not Ray, not c10d-torchrun
-- Gates: energy + per-atom forces vs ASE FP64@1 / devices=1; honest pair ms from `uma64 E=…`
-- **Landed:** devices=2 and devices=4 E+F green · **self-scale green** (320 / 265 / 193 ms @1/2/4, job `20932975`)
+- Inter-GPU traffic via **`uma_peer`** collectives: default `UMA_PEER_TRANSPORT=cuda_ipc`; **campaign PASS path** uses opt-in **`nccl`**; host `/dev/shm` remains as `shm` fallback — not MPI, not Ray, not c10d-torchrun
+- Gates: energy + per-atom forces vs ASE FP64@1 / devices=1; honest pair ms from `uma64 E=…` (not SLURM wall)
+- **Landed:** devices=2/4 E+F green · self-scale green · **hard ≤ASE/FC PASS** — honest **321.04 / 183.30 / 112.04** ms @1/2/4 (NCCL, job `20940474`)
 
 ## Status (2026-08-08)
 
@@ -26,7 +26,9 @@ Ship as same-node `pair_style uma/kk precision double devices N` with:
 | Phase 2b engine CLI E+F @2/@4 | GREEN |
 | Phase 3 LAMMPS `uma/kk` E+F @2/@4 | GREEN (max\|ΔF\|=0) |
 | Perf P0 (drop `CUDA_LAUNCH_BLOCKING`) | DONE — still no self-scale |
-| Perf P1 (CUDA IPC collectives) | **DONE — self-scale PASS** |
+| Perf P1 (CUDA IPC collectives) | **DONE — self-scale PASS** (320 / 265 / 193) |
+| Perf P3a pack/sync (cuda_ipc) | DONE — 320.6 / 183.6 / 117.6 (FAIL vs ASE @4 +2.4) |
+| Perf P3c NCCL | **DONE — campaign PASS** (321.0 / 183.3 / 112.0) |
 | Phase 5 multi-node | out of scope |
 
 ## Current vs target load path
@@ -34,9 +36,9 @@ Ship as same-node `pair_style uma/kk precision double devices N` with:
 | `devices` | **Legacy (opt-in)** | **Default (product)** |
 |-----------|--------------------|------------------------|
 | `1` | TorchScript `model_traced.pt` + vesin CUDA NL | unchanged |
-| `N>1` | `UMA_PYTHON_GP_WORKER=1` → Python; `UMA_ALLOW_RAY_GP=1` → Ray | **C++** `LibtorchMpRuntime`: `model_mp_wN_n*_r*.pt` + `uma_peer` + CUDA IPC + vesin; `uma/kk` + `-k on g N` |
+| `N>1` | `UMA_PYTHON_GP_WORKER=1` → Python; `UMA_ALLOW_RAY_GP=1` → Ray | **C++** `LibtorchMpRuntime`: `model_mp_wN_n*_r*.pt` + `uma_peer` + cuda_ipc (default) / **nccl** (PASS) + vesin; `uma/kk` + `-k on g N` |
 
-Env: `UMA_FORBID_RAY_GP=1` rejects Ray; `UMA_PYTHON_GP_WORKER=1` opt-in Python only; `UMA_PEER_TRANSPORT=shm|cuda_ipc`.
+Env: `UMA_FORBID_RAY_GP=1` rejects Ray; `UMA_PYTHON_GP_WORKER=1` opt-in Python only; `UMA_PEER_TRANSPORT=shm|cuda_ipc|nccl`.
 
 ## Why an earlier plan “succeeded” but failed
 
