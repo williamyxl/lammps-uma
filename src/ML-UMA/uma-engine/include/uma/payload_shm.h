@@ -15,6 +15,8 @@
 namespace uma {
 
 struct PayloadShm {
+  // LIM (perf campaign): single-node product caps. Raising either requires
+  // resizing the fixed mmap layout + revalidation. Multi-node is out of scope.
   static constexpr int kMaxWorld = 8;
   static constexpr int64_t kMaxN = 8192;
   static constexpr int64_t kMaxE = 512 * 1024;  // edges per rank
@@ -33,31 +35,36 @@ struct PayloadShm {
     int32_t nedges[kMaxWorld];
   };
 
-  // Layout after Header:
+  // Layout after Header (world_slots = actual GPU count, ≤ kMaxWorld):
   //   double pos[kMaxN * 3]
   //   int64_t z[kMaxN]
-  //   per rank r:
+  //   per rank r < world_slots:
   //     int64_t eidx[kMaxE * 2]
   //     double  coff[kMaxE * 3]
   //   double forces[kMaxN * 3]
 
-  static size_t map_bytes() {
+  static size_t map_bytes(int world_slots) {
+    if (world_slots < 1 || world_slots > kMaxWorld) {
+      throw std::runtime_error("PayloadShm: world_slots out of range");
+    }
     size_t n = sizeof(Header);
     n += sizeof(double) * static_cast<size_t>(kMaxN) * 3;
     n += sizeof(int64_t) * static_cast<size_t>(kMaxN);
-    n += static_cast<size_t>(kMaxWorld) *
-         (sizeof(int64_t) * static_cast<size_t>(kMaxE) * 2 +
-          sizeof(double) * static_cast<size_t>(kMaxE) * 3);
+    n += static_cast<size_t>(world_slots) * rank_edge_stride();
     n += sizeof(double) * static_cast<size_t>(kMaxN) * 3;
     return n;
   }
 
+  // Back-compat helper (full kMaxWorld footprint).
+  static size_t map_bytes() { return map_bytes(kMaxWorld); }
+
   Header* hdr = nullptr;
   size_t bytes = 0;
+  int world_slots = kMaxWorld;
   bool owns = false;
 
-  static PayloadShm* create_file(const char* path) {
-    const size_t nbytes = map_bytes();
+  static PayloadShm* create_file(const char* path, int world_slots) {
+    const size_t nbytes = map_bytes(world_slots);
     int fd = ::open(path, O_RDWR | O_CREAT | O_EXCL, 0600);
     if (fd < 0) throw std::runtime_error("PayloadShm: open failed");
     if (ftruncate(fd, static_cast<off_t>(nbytes)) != 0) {
@@ -77,11 +84,17 @@ struct PayloadShm {
     auto* p = new PayloadShm;
     p->hdr = h;
     p->bytes = nbytes;
+    p->world_slots = world_slots;
     p->owns = true;
     return p;
   }
 
-  static PayloadShm* attach_file(const char* path, size_t expect_bytes) {
+  static PayloadShm* create_file(const char* path) {
+    return create_file(path, kMaxWorld);
+  }
+
+  static PayloadShm* attach_file(const char* path, size_t expect_bytes,
+                                 int world_slots) {
     int fd = ::open(path, O_RDWR);
     if (fd < 0) throw std::runtime_error("PayloadShm: attach open failed");
     void* mem = mmap(nullptr, expect_bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -90,8 +103,21 @@ struct PayloadShm {
     auto* p = new PayloadShm;
     p->hdr = static_cast<Header*>(mem);
     p->bytes = expect_bytes;
+    p->world_slots = world_slots;
     p->owns = false;
     return p;
+  }
+
+  static PayloadShm* attach_file(const char* path, size_t expect_bytes) {
+    // Infer world_slots from byte size (V2b sized maps).
+    int slots = kMaxWorld;
+    for (int w = 1; w <= kMaxWorld; ++w) {
+      if (map_bytes(w) == expect_bytes) {
+        slots = w;
+        break;
+      }
+    }
+    return attach_file(path, expect_bytes, slots);
   }
 
   void destroy() {
@@ -129,8 +155,8 @@ struct PayloadShm {
                                      sizeof(int64_t) * static_cast<size_t>(kMaxE) * 2);
   }
   double* forces_ptr() {
-    return reinterpret_cast<double*>(edges_base() +
-                                     static_cast<size_t>(kMaxWorld) * rank_edge_stride());
+    return reinterpret_cast<double*>(
+        edges_base() + static_cast<size_t>(world_slots) * rank_edge_stride());
   }
 };
 

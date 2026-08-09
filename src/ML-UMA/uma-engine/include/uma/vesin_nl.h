@@ -167,10 +167,17 @@ inline VesinGraphDevice vesin_build_graph_cuda_impl(torch::Tensor pos_cuda,
     // Re-index i/j after possible dim fix; use current edge_index rows.
     i = edge_index.index({0});
     j = edge_index.index({1});
-    auto pi = wrapped_pos.index_select(0, i);
-    auto pj = wrapped_pos.index_select(0, j) + shifts_cart;
-    auto dist = (pj - pi).norm(2, /*dim=*/1);
-    cap_edges_per_center(edge_index, shifts, shifts_cart, dist, max_neighbors);
+    // Tier0/W2: skip expensive CPU cap when every center already has ≤K edges
+    // (common for water/NaCl at 6Å). Bit-identical to running the no-op cap.
+    const int64_t n_atoms = wrapped_pos.size(0);
+    auto counts = torch::bincount(i, /*weights=*/{}, /*minlength=*/n_atoms);
+    const int64_t max_degree = counts.max().item<int64_t>();
+    if (max_degree > max_neighbors) {
+      auto pi = wrapped_pos.index_select(0, i);
+      auto pj = wrapped_pos.index_select(0, j) + shifts_cart;
+      auto dist = (pj - pi).norm(2, /*dim=*/1);
+      cap_edges_per_center(edge_index, shifts, shifts_cart, dist, max_neighbors);
+    }
   }
 
   VesinGraphDevice graph;

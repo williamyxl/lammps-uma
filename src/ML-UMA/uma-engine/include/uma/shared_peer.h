@@ -7,9 +7,9 @@
 // Transports (UMA_PEER_TRANSPORT=shm|cuda_ipc|nccl):
 //   shm      — host-staged payload in mmap (legacy / fallback)
 //   cuda_ipc — device payload via cudaIpcMemHandle_t; shm holds only control +
-//              handles + nbytes. Default when CUDA is available.
-//   nccl     — opt-in raw libnccl AllGather/AllReduce; shm holds control +
-//              ncclUniqueId. Falls back unavailable if built without NCCL.
+//              handles + nbytes. Explicit fallback when NCCL unavailable / forced.
+//   nccl     — raw libnccl AllGather/AllReduce (product default when built with
+//              UMA_ENGINE_USE_NCCL + CUDA). shm holds control + ncclUniqueId.
 
 #include <cstdint>
 #include <cstdlib>
@@ -82,6 +82,10 @@ class SharedPeerGatherSlot {
 #endif
       }
     }
+    // Product default: NCCL when built; else CUDA IPC; else host shm.
+#if defined(UMA_ENGINE_USE_NCCL) && defined(UMA_ENGINE_USE_CUDA)
+    if (torch::cuda::is_available()) return kTransportNccl;
+#endif
 #if defined(UMA_ENGINE_USE_CUDA)
     if (torch::cuda::is_available()) return kTransportCudaIpc;
 #endif
@@ -473,16 +477,23 @@ class SharedPeerGatherSlot {
       throw std::runtime_error(std::string("ncclAllGather: ") +
                                ncclGetErrorString(nr));
     }
-    cudaError_t st = cudaDeviceSynchronize();
-    if (st != cudaSuccess) {
-      throw std::runtime_error(std::string("cudaDeviceSynchronize after AllGather: ") +
-                               cudaGetErrorString(st));
-    }
+    // Tier0/W4: no host sync — same default stream orders NCCL then Torch.
     if (gpu.dim() == 0) {
       // Not used for node gather; return raw concat.
       return gathered;
     }
     auto sizes = size_list(n_atoms, world);
+    // Tier0/W3: equal shards → pad==want for every rank; gathered is final.
+    bool equal = true;
+    for (int r = 1; r < world; ++r) {
+      if (sizes[static_cast<size_t>(r)] != sizes[0]) {
+        equal = false;
+        break;
+      }
+    }
+    if (equal && sizes[0] == n_local0) {
+      return gathered;
+    }
     std::vector<torch::Tensor> parts;
     parts.reserve(static_cast<size_t>(world));
     for (int r = 0; r < world; ++r) {
@@ -511,7 +522,7 @@ class SharedPeerGatherSlot {
         throw std::runtime_error(std::string("ncclAllReduce(empty sync): ") +
                                  ncclGetErrorString(nr));
       }
-      cudaDeviceSynchronize();
+      // Tier0/W4: device-ordered; host sync only at worker result publish.
       return gpu;
     }
     auto out = torch::empty_like(gpu);
@@ -524,11 +535,7 @@ class SharedPeerGatherSlot {
       throw std::runtime_error(std::string("ncclAllReduce: ") +
                                ncclGetErrorString(nr));
     }
-    cudaError_t st = cudaDeviceSynchronize();
-    if (st != cudaSuccess) {
-      throw std::runtime_error(std::string("cudaDeviceSynchronize after AllReduce: ") +
-                               cudaGetErrorString(st));
-    }
+    // Tier0/W4: no host sync after AR.
     return out;
   }
 #endif  // UMA_ENGINE_USE_NCCL

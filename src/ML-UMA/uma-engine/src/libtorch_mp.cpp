@@ -8,6 +8,7 @@
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 #include <fcntl.h>
@@ -116,9 +117,10 @@ struct LibtorchMpRuntime::Impl {
   std::string payload_path;
   kokkos_peer::SharedPeerGatherSlot* shared = nullptr;
   PayloadShm* payload = nullptr;
+  bool payload_host_registered = false;
   std::vector<Worker> workers;
   int64_t part_check_n = -1;
-  int64_t part_check_e = -1;
+  bool partition_checked = false;
 };
 
 std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
@@ -186,8 +188,25 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
   // Geometry/edge payload shm (pipe-tax cut).
   {
     rt->impl_->payload_path = rt->impl_->shm_path + "_payload";
-    rt->impl_->payload = PayloadShm::create_file(rt->impl_->payload_path.c_str());
+    rt->impl_->payload =
+        PayloadShm::create_file(rt->impl_->payload_path.c_str(), num_devices);
     rt->impl_->payload->hdr->world = num_devices;
+#if defined(UMA_ENGINE_USE_CUDA)
+    // V3: pin payload for faster worker H2D (pageable→device was part of wait).
+    {
+      const cudaError_t st = cudaHostRegister(
+          rt->impl_->payload->hdr, rt->impl_->payload->bytes,
+          cudaHostRegisterPortable);
+      if (st != cudaSuccess) {
+        std::cerr << "uma LibtorchMpRuntime: cudaHostRegister payload failed: "
+                  << cudaGetErrorString(st) << "\n";
+      } else {
+        rt->impl_->payload_host_registered = true;
+        std::cerr << "uma LibtorchMpRuntime: payload cudaHostRegister ok bytes="
+                  << rt->impl_->payload->bytes << "\n";
+      }
+    }
+#endif
     std::cerr << "uma LibtorchMpRuntime: payload_shm_bytes="
               << rt->impl_->payload->bytes << "\n";
   }
@@ -369,6 +388,12 @@ LibtorchMpRuntime::~LibtorchMpRuntime() {
     impl_->shared = nullptr;
   }
   if (impl_->payload) {
+#if defined(UMA_ENGINE_USE_CUDA)
+    if (impl_->payload_host_registered) {
+      cudaHostUnregister(impl_->payload->hdr);
+      impl_->payload_host_registered = false;
+    }
+#endif
     impl_->payload->destroy();
     impl_->payload = nullptr;
   }
@@ -432,18 +457,38 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   const auto t0 = clock::now();
 
   pos0_ = wrap_positions_to_cell(pos0_, cell0_, pbc0_);
+  const auto t_wrap = clock::now();
   rebuild_neighbors_full(build_dev);
   const auto t_nl = clock::now();
 
+  // V2a: D2H + pack outside the payload mutex. Workers only read after pipe
+  // wake once gen is published; holding mu across pack/memcpy caused multi-10ms
+  // ms_pub stalls under MD (water888 @4). Mutex unlock = release fence for gen.
   auto eidx_full = edge_index_.to(torch::kCPU).contiguous();
   auto coff_full = cell_offsets_.to(torch::kCPU, torch::kFloat64).contiguous();
-  if (n != impl_->part_check_n || eidx_full.size(1) != impl_->part_check_e) {
+  auto pos_cpu = pos0_.to(torch::kCPU, torch::kFloat64).contiguous();
+  auto z_cpu = z0_.to(torch::kCPU, torch::kLong).contiguous();
+  auto cell_cpu = cell0_.to(torch::kCPU, torch::kFloat64).contiguous();
+  const auto t_d2h = clock::now();
+  // Tier0/W1: coverage check once per (n, world), or every step if
+  // UMA_DEBUG_PARTITION_CHECK=1. pack_shards_cpu already assigns every edge.
+  const bool debug_part = [] {
+    const char* e = std::getenv("UMA_DEBUG_PARTITION_CHECK");
+    return e && e[0] == '1' && e[1] == '\0';
+  }();
+  const bool need_cover =
+      debug_part || !impl_->partition_checked || n != impl_->part_check_n;
+  double ms_cover = 0.0;
+  if (need_cover) {
+    const auto t_c0 = clock::now();
     if (!graph_shard::partitions_cover_all_edges(eidx_full, n, num_devices_)) {
       throw std::runtime_error(
           "LibtorchMpRuntime: edge partitions do not cover graph");
     }
+    ms_cover =
+        std::chrono::duration<double, std::milli>(clock::now() - t_c0).count();
     impl_->part_check_n = n;
-    impl_->part_check_e = eidx_full.size(1);
+    impl_->partition_checked = true;
   }
 
   if (n > PayloadShm::kMaxN) {
@@ -456,9 +501,6 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
     throw std::runtime_error("LibtorchMpRuntime: payload shm missing");
   }
 
-  auto pos_cpu = pos0_.to(torch::kCPU, torch::kFloat64).contiguous();
-  auto z_cpu = z0_.to(torch::kCPU, torch::kLong).contiguous();
-  auto cell_cpu = cell0_.to(torch::kCPU, torch::kFloat64).contiguous();
   int32_t pbc32[3] = {pbc0_[0].item<bool>() ? 1 : 0, pbc0_[1].item<bool>() ? 1 : 0,
                       pbc0_[2].item<bool>() ? 1 : 0};
 
@@ -470,7 +512,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
     eidx_ptrs[static_cast<size_t>(r)] = pay->eidx_ptr(r);
     coff_ptrs[static_cast<size_t>(r)] = pay->coff_ptr(r);
   }
-  pthread_mutex_lock(&pay->hdr->mu);
+  // Fill shm buffers unlocked; publish gen under a short critical section.
   pay->hdr->n = static_cast<int32_t>(n);
   pay->hdr->world = num_devices_;
   pay->hdr->charge = charge;
@@ -485,13 +527,15 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   const double* coff_ptr =
       (coff_full.defined() && coff_full.numel() > 0) ? coff_full.data_ptr<double>()
                                                      : nullptr;
+  const auto t_pack0 = clock::now();
   if (!graph_shard::pack_shards_cpu(eidx_full.data_ptr<int64_t>(), coff_ptr, n_edges, n,
                                     num_devices_, PayloadShm::kMaxE, pay->hdr->nedges,
                                     eidx_ptrs.data(), coff_ptrs.data())) {
-    pthread_mutex_unlock(&pay->hdr->mu);
     throw std::runtime_error(
         "LibtorchMpRuntime: pack_shards_cpu failed (nedges > kMaxE?)");
   }
+  const auto t_pack1 = clock::now();
+  pthread_mutex_lock(&pay->hdr->mu);
   pay->hdr->result_gen = -1;
   const int32_t gen = ++pay->hdr->gen;
   pthread_mutex_unlock(&pay->hdr->mu);
@@ -531,8 +575,18 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   auto forces = torch::from_blob(pay->forces_ptr(), {n, 3}, torch::kFloat64).clone();
   pthread_mutex_unlock(&pay->hdr->mu);
 
+  const double ms_wrap =
+      std::chrono::duration<double, std::milli>(t_wrap - t0).count();
+  const double ms_vesin =
+      std::chrono::duration<double, std::milli>(t_nl - t_wrap).count();
   const double ms_nl =
       std::chrono::duration<double, std::milli>(t_nl - t0).count();
+  const double ms_d2h =
+      std::chrono::duration<double, std::milli>(t_d2h - t_nl).count();
+  const double ms_shard =
+      std::chrono::duration<double, std::milli>(t_pack1 - t_pack0).count();
+  const double ms_pack =
+      std::chrono::duration<double, std::milli>(t_pub - t_d2h).count();
   const double ms_pub =
       std::chrono::duration<double, std::milli>(t_pub - t_nl).count();
   const double ms_wait =
@@ -540,19 +594,28 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   const double ms_tot =
       std::chrono::duration<double, std::milli>(clock::now() - t0).count();
   {
-    char line[256];
-    std::snprintf(line, sizeof(line),
-                  "PERF_PARENT world=%d ms_nl=%.3f ms_pub=%.3f ms_wait_workers=%.3f "
-                  "ms_total=%.3f gen=%d n_edges=%lld\n",
-                  num_devices_, ms_nl, ms_pub, ms_wait, ms_tot, gen,
-                  static_cast<long long>(n_edges));
-    std::cerr << line;
+    char line[480];
+    std::snprintf(
+        line, sizeof(line),
+        "PERF_PARENT world=%d ms_wrap=%.3f ms_vesin=%.3f ms_nl=%.3f "
+        "ms_d2h=%.3f ms_cover=%.3f ms_shard=%.3f ms_pack=%.3f ms_pub=%.3f "
+        "ms_wait_workers=%.3f ms_total=%.3f gen=%d n_edges=%lld "
+        "nedges=[%d",
+        num_devices_, ms_wrap, ms_vesin, ms_nl, ms_d2h, ms_cover, ms_shard,
+        ms_pack, ms_pub, ms_wait, ms_tot, gen, static_cast<long long>(n_edges),
+        pay->hdr->nedges[0]);
+    std::string line_s(line);
+    for (int r = 1; r < num_devices_; ++r) {
+      line_s += "," + std::to_string(pay->hdr->nedges[r]);
+    }
+    line_s += "]\n";
+    std::cerr << line_s;
     if (const char* log_dir = std::getenv("UMA_MP_LOG_DIR")) {
       if (*log_dir) {
         const std::string path = std::string(log_dir) + "/parent.log";
         FILE* fp = std::fopen(path.c_str(), "a");
         if (fp) {
-          std::fputs(line, fp);
+          std::fputs(line_s.c_str(), fp);
           std::fclose(fp);
         }
       }

@@ -55,7 +55,11 @@ def load_prepared_hydra_model(
         settings = phase0_inference_settings()
 
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
-    overrides = _build_overrides(checkpoint, settings, {"backbone": {"execution_mode": "general"}})
+    overrides = _build_overrides(
+        checkpoint,
+        settings,
+        {"backbone": {"execution_mode": settings.execution_mode or "general"}},
+    )
 
     prev_dtype = torch.get_default_dtype()
     torch.set_default_dtype(settings.base_precision_dtype)

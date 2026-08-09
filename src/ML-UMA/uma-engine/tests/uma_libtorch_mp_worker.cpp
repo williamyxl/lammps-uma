@@ -128,6 +128,19 @@ int main(int argc, char** argv) {
     }
     auto* payload =
         uma::PayloadShm::attach_file(pay_path, static_cast<size_t>(std::stoull(pay_bytes_e)));
+    bool payload_pinned = false;
+#if defined(UMA_ENGINE_USE_CUDA)
+    // Match parent pin so H2D from shm is not pageable (V3).
+    const cudaError_t reg = cudaHostRegister(
+        payload->hdr, payload->bytes, cudaHostRegisterPortable);
+    if (reg != cudaSuccess) {
+      std::cerr << "worker: cudaHostRegister failed: " << cudaGetErrorString(reg)
+                << "\n"
+                << std::flush;
+    } else {
+      payload_pinned = true;
+    }
+#endif
     std::cerr << "uma_libtorch_mp_worker rank=" << rank
               << " payload_shm=" << pay_path << "\n"
               << std::flush;
@@ -168,6 +181,12 @@ int main(int argc, char** argv) {
         std::cerr << "uma_libtorch_mp_worker rank=" << rank << " shutdown\n" << std::flush;
         slot->release_nccl();
         slot->release_cuda_ipc();
+#if defined(UMA_ENGINE_USE_CUDA)
+        if (payload_pinned) {
+          cudaHostUnregister(payload->hdr);
+          payload_pinned = false;
+        }
+#endif
         payload->destroy();
         break;
       }
@@ -192,23 +211,31 @@ int main(int argc, char** argv) {
       std::memcpy(pbc, payload->hdr->pbc, sizeof(pbc));
       pthread_mutex_unlock(&payload->hdr->mu);
 
+      // V3: non-blocking H2D from pinned payload, one sync before forward.
       auto pos_t =
-          torch::from_blob(payload->pos_ptr(), {n, 3}, torch::kFloat64).to(dev).contiguous();
-      auto z_t = torch::from_blob(payload->z_ptr(), {n}, torch::kLong).to(dev).contiguous();
-      auto cell_t = torch::from_blob(cell, {3, 3}, torch::kFloat64).to(dev).contiguous();
+          torch::from_blob(payload->pos_ptr(), {n, 3}, torch::kFloat64)
+              .to(dev, /*non_blocking=*/true)
+              .contiguous();
+      auto z_t = torch::from_blob(payload->z_ptr(), {n}, torch::kLong)
+                     .to(dev, /*non_blocking=*/true)
+                     .contiguous();
+      auto cell_t = torch::from_blob(cell, {3, 3}, torch::kFloat64)
+                        .to(dev, /*non_blocking=*/true)
+                        .contiguous();
       auto eidx_t =
           (nedges > 0)
               ? torch::from_blob(payload->eidx_ptr(rank), {2, nedges}, torch::kLong)
-                    .to(dev)
+                    .to(dev, /*non_blocking=*/true)
                     .contiguous()
               : torch::empty({2, 0}, torch::TensorOptions().dtype(torch::kLong).device(dev));
       auto coff_t =
           (nedges > 0)
               ? torch::from_blob(payload->coff_ptr(rank), {nedges, 3}, torch::kFloat64)
-                    .to(dev)
+                    .to(dev, /*non_blocking=*/true)
                     .contiguous()
               : torch::empty({0, 3},
                              torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+      // Tier0/W4: same-stream H2D is ordered before forward; no host sync here.
 
       pos_t = pos_t.set_requires_grad(true);
       auto pbc_t = torch::tensor({pbc[0] != 0, pbc[1] != 0, pbc[2] != 0},
@@ -268,12 +295,11 @@ int main(int argc, char** argv) {
       // One sync before D2H / result publish.
       cudaDeviceSynchronize();
 #endif
-      if (rank == 0) {
-        std::cerr << "PERF_TICK rank=0 world=" << world << " ms_fwd=" << ms_fwd
-                  << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
-                  << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred) << "\n"
-                  << std::flush;
-      }
+      std::cerr << "PERF_TICK rank=" << rank << " world=" << world
+                << " nedges=" << nedges << " ms_fwd=" << ms_fwd
+                << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
+                << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred) << "\n"
+                << std::flush;
 
       // Rank0 publishes E+F into payload shm; pipe returns ok only (pipe-tax cut).
       const double e = energy.reshape({-1})[0].item<double>();

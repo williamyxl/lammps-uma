@@ -9,10 +9,12 @@
 |-------|-------------------|------------------|
 | Parallelism | Ray `ParallelMLIPPredictUnit` + `torch.distributed` NCCL | Fork workers under one LAMMPS rank |
 | Neighbor list | Inside FairChem / Ray path | Parent vesin full NL, then shard fan-out |
-| Peer transport | NCCL in Ray workers | Default CUDA IPC; **opt-in NCCL** (`UMA_PEER_TRANSPORT=nccl`) behind `uma_peer` |
+| Peer transport | NCCL in Ray workers | **NCCL product default** (`select_transport`); override `UMA_PEER_TRANSPORT=cuda_ipc\|shm` |
 | Kokkos | N/A | Kept (`-sf kk`); NCCL replaces peer IPC only |
 
 NCCL does **not** drop Kokkos — it only swaps the collective transport under `uma_peer`.
+
+**LIM:** `PayloadShm` fixed mmap caps `kMaxN=8192`, `kMaxWorld=8` (single-node). Multi-node out of scope.
 
 ## Attribution path (why @4 lagged ASE)
 
@@ -28,8 +30,9 @@ NCCL does **not** drop Kokkos — it only swaps the collective transport under `
 ## Product stance
 
 - Hard campaign success = honest pair ms **≤ ASE and ≤ FC** at every GPU count **and** E+F accuracy. Soft ≤150 alone is not enough.
-- Keep Ray out of product. Prefer `UMA_PEER_TRANSPORT=nccl` for multi-GPU perf; cuda_ipc remains fallback.
-- P4b parent NL/publish cuts deferred — NCCL closed the campaign gap.
+- Keep Ray out of product. NCCL is the product default for peer collectives; cuda_ipc/shm remain fallbacks.
+- Water888 @4: spike-free ~**125** vs ASE **118** (~+7). Residual is **worker wait (~110)** + serial parent NL+pub (~15). Next V5: defer NCCL `cudaDeviceSynchronize`, right-size `kMaxE`, stream overlap — `examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/STATUS.md`.
+- **LIM:** `PayloadShm` `kMaxN=8192` / `kMaxWorld=8`; world-sized maps; `kMaxE=512k` oversized for water (V5a).
 
 ## Canonical numbers
 
