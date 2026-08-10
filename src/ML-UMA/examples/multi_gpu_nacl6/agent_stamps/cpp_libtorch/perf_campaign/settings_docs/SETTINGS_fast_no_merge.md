@@ -1,6 +1,6 @@
 # Settings: fast, no merge (`umas_fast_pytorch`, `merge_mole=False`)
 
-**Stamp:** 2026-08-09T20:38  
+**Stamp:** 2026-08-09T20:41  
 **FairChem:** `execution_mode=umas_fast_pytorch`, `merge_mole=False`  
 **uma artifact:** `n/a (illegal)`  
 **E/F reference:** n/a  
@@ -68,7 +68,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 - `SKIP_ILLEGAL` — FairChem rejects this settings combo
 - `SKIP_KNOWN_CRASH` — FC+`merge_mole`+FP64 crashes in FairChem MOLE merge (not fixed here)
 - `REUSED` / `REUSED_Tier0` — locked campaign baseline
+- `INVALID_FORCE` probe — timing recorded but E/F not trusted (e.g. W8 NCCL stream race); primary row stays prior valid gate
 - Force self-parity for ASE vs its own oracle is ~1e-16 (numerical noise)
 
 See also [`MATRIX.md`](../MATRIX.md), [`GLOSSARY.md`](../GLOSSARY.md).
-

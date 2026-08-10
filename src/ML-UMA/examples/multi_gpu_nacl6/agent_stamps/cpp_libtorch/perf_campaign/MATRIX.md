@@ -1,7 +1,7 @@
 # Settings matrix + BEST_BARS (living)
 
 **Plan:** ASE/FC best bars = **minimum floor**; uma max-push continues to hard ceiling.
-**Stamp:** 2026-08-09T20:26 CDT
+**Stamp:** 2026-08-09T20:41 CDT
 
 ## Policy
 
@@ -33,11 +33,15 @@ FC+`merge_mole`+FP64: FairChem Float/Double crash — do not fix.
 | NaCl6 | 1 | ufast **350.3** | gen **345.5** | gen **315.6** (ufast 533 FAIL) | 34.7 | 29.9 | **PASS** (gen) |
 | NaCl6 | 2 | ufast **191.6** | gen **193.2** | ufast **159.4** (W7) | 32.2 | 33.8 | **PASS** |
 | NaCl6 | 4 | ufast **164.5** | gen **118.0** | ufast **92.4** (W7) | 72.1 | 25.6 | **PASS** |
-| water888 | 1 | ufast **337.6** | gen **359.4** (locked) | — | — | — | TBD (uma@1) |
+| water888 | 1 | ufast **337.6** | gen **359.4** | ufast **337.7** (E~gen) | −0.1 | 21.7 | **FAIL**/suspect @1 |
 | water888 | 2 | ufast **165.5** | gen **200.5** | ufast **165.1** (W7) | 0.4 | 35.4 | **PASS** (thin) |
 | water888 | 4 | ufast **94.5** | gen **118.9** | ufast **96.8** (W7) | **-2.3** | 22.1 | **FAIL** |
 
-\*Water ASE `gmerge`/`ufast` not locked yet — floor vs locked `gen` until those land; re-lock BEST_ASE if ufast is faster.
+Living E/F/timing tables: [`settings_docs/`](settings_docs/README.md) — refresh with `python regenerate_settings_docs.py --ingest-matrix`.
+
+### W8 probe (not promoted)
+
+NaCl ufast W8 (`20989797`/`20989798`): timing ~160.2 / 90.5 ms but **INVALID_FORCE** (absmax ~1e11 / 5e6) — NCCL on dedicated stream raced Torch default producers. Stream-order fix in `shared_peer.h`; re-gate before promoting over W7.
 
 ## Grid (seed / live)
 
@@ -45,7 +49,6 @@ See `MATRIX.json`. Illegal and FC-merge crashes stamped there.
 
 ## Next
 
-1. Four settings docs: [`settings_docs/`](settings_docs/README.md) (gen / gmerge / ufast_nomole / ufast).
-2. Fix water EX (absolute) → measure water ASE gmerge/ufast @1/@2/@4; NaCl ASE @1 gmerge/ufast.
-3. Fill missing uma `gen`/`gmerge`/`ufast` @1 and water/NaCl gaps.
-4. Recompute BEST_BARS; then Tier2 **W8** max-push (floor already green on NaCl @2/@4 and water vs gen).
+1. Keep [`settings_docs/`](settings_docs/README.md) regenerated after every gather.
+2. Re-gate W8 after stream fix; beat water ASE ufast @4 (94.5).
+3. Fill remaining water uma gmerge / devices=1 product gaps.

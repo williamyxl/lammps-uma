@@ -1,7 +1,7 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T20:28 CDT · Loop **armed** · **MATRIX+W8 in flight**
-**Matrix:** [`MATRIX.md`](MATRIX.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
+**Stamp:** 2026-08-09T20:41 CDT · Loop **armed** · **W8 INVALID_FORCE; docs regenerator live**
+**Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
 
@@ -86,7 +86,8 @@ FP64 · `uma/kk` + Kokkos · 1 MPI · no Ray · full parent NL · no force-reduc
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W7 done. NaCl FC matching + water resubmit in flight.
+- W7 = canonical ufast @2/@4. W8 NaCl landed **INVALID_FORCE** (stream race); water W8 pending cancel/resubmit after fix.
+- Settings docs: `python regenerate_settings_docs.py --ingest-matrix` after each gather.
 
 ## Tier2 W6 (COMPLETE PASS)
 | Suite | @2 | @4 | Δ vs Wave A @2/@4 |

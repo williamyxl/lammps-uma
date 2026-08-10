@@ -295,6 +295,10 @@ class SharedPeerGatherSlot {
         cudaSuccess) {
       throw std::runtime_error("cudaEventCreate(nccl_done_evt) failed");
     }
+    if (cudaEventCreateWithFlags(&torch_done_evt_, cudaEventDisableTiming) !=
+        cudaSuccess) {
+      throw std::runtime_error("cudaEventCreate(torch_done_evt) failed");
+    }
 #endif
     nccl_ready_ = true;
     std::cerr << "SharedPeerGatherSlot: nccl ready rank=" << rank
@@ -338,6 +342,10 @@ class SharedPeerGatherSlot {
     if (nccl_done_evt_) {
       cudaEventDestroy(nccl_done_evt_);
       nccl_done_evt_ = nullptr;
+    }
+    if (torch_done_evt_) {
+      cudaEventDestroy(torch_done_evt_);
+      torch_done_evt_ = nullptr;
     }
     if (nccl_stream_) {
       cudaStreamSynchronize(nccl_stream_);
@@ -464,7 +472,15 @@ class SharedPeerGatherSlot {
     return gpu.contiguous();
   }
 
-  // Tier2/W8: NCCL on dedicated stream; make results visible to Torch default.
+  // Tier2/W8: NCCL on dedicated stream. Order: Torch default → NCCL → Torch.
+  void nccl_precede_from_default_() {
+#if defined(UMA_ENGINE_USE_CUDA)
+    if (!nccl_stream_ || !torch_done_evt_) return;
+    cudaEventRecord(torch_done_evt_, cudaStreamDefault);
+    cudaStreamWaitEvent(nccl_stream_, torch_done_evt_, 0);
+#endif
+  }
+
   void nccl_join_default_stream_() {
 #if defined(UMA_ENGINE_USE_CUDA)
     if (!nccl_stream_ || !nccl_done_evt_) return;
@@ -509,6 +525,7 @@ class SharedPeerGatherSlot {
     }
     auto gathered = torch::empty(out_sizes, gpu.options());
     const size_t sendcount = static_cast<size_t>(gpu.numel());
+    nccl_precede_from_default_();
     ncclResult_t nr =
         ncclAllGather(gpu.data_ptr(), gathered.data_ptr(), sendcount,
                       nccl_dtype_(gpu.scalar_type()), comm_, nccl_cuda_stream_());
@@ -551,6 +568,7 @@ class SharedPeerGatherSlot {
     if (gpu.numel() == 0) {
       auto t = torch::zeros({1}, torch::dtype(torch::kFloat64).device(gpu.device()));
       auto out = torch::empty_like(t);
+      nccl_precede_from_default_();
       ncclResult_t nr =
           ncclAllReduce(t.data_ptr(), out.data_ptr(), 1, ncclDouble, ncclSum,
                         comm_, nccl_cuda_stream_());
@@ -562,6 +580,7 @@ class SharedPeerGatherSlot {
       return gpu;
     }
     auto out = torch::empty_like(gpu);
+    nccl_precede_from_default_();
     ncclResult_t nr =
         ncclAllReduce(gpu.data_ptr(), out.data_ptr(),
                       static_cast<size_t>(gpu.numel()),
@@ -779,6 +798,7 @@ class SharedPeerGatherSlot {
 #if defined(UMA_ENGINE_USE_CUDA)
   cudaStream_t nccl_stream_ = nullptr;
   cudaEvent_t nccl_done_evt_ = nullptr;
+  cudaEvent_t torch_done_evt_ = nullptr;
 #endif
 #endif
   bool nccl_ready_ = false;

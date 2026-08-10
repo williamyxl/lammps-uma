@@ -1,6 +1,6 @@
 # Settings documents (E / force / timing)
 
-**Stamp:** 2026-08-09T20:38
+**Stamp:** 2026-08-09T20:41
 
 | Document | `execution_mode` | `merge_mole` |
 |----------|------------------|--------------|
@@ -10,3 +10,5 @@
 | [SETTINGS_fast_and_merge.md](SETTINGS_fast_and_merge.md) | `umas_fast_pytorch` | True |
 
 Each doc: ASE · FC · uma/kk × NaCl6 · water888 × @1/@2/@4 — energy, per-atom force parity, timing.
+
+Regenerate: `python ../regenerate_settings_docs.py` (optionally `--ingest-matrix`).

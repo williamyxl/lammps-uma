@@ -1,6 +1,6 @@
 # Settings: no merge, no fast (`general`, `merge_mole=False`)
 
-**Stamp:** 2026-08-09T20:38  
+**Stamp:** 2026-08-09T20:41  
 **FairChem:** `execution_mode=general`, `merge_mole=False`  
 **uma artifact:** `uma-s-1p2-omat-f64`  
 **E/F reference:** ASE `general`  
@@ -27,7 +27,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 1 | DONE | -5830.9237 | 4.916e-06 | 1.002e-06 | 7.123e-06 | 7.127e-06 | 345.5284 |  |
 | fc | 2 | REUSED | -5830.9237 | 4.915e-06 | — | — | — | 193.2000 | FC force vs ASE not re-extracted; E residual ~5e-6 |
 | fc | 4 | REUSED | -5830.9237 | 4.915e-06 | — | — | — | 118.0000 | FC force vs ASE not re-extracted; E residual ~5e-6 |
-| uma | 1 | DONE | -5830.9237 | 1.819e-12 | 1.516e-07 | 5.000e-07 | 7.673e-07 | 320.3800 |  |
+| uma | 1 | DONE | -5830.9237 | 1.819e-12 | 1.516e-07 | 5.000e-07 | 7.673e-07 | 315.5800 | 20989773 |
 | uma | 2 | REUSED_Tier0 | -5830.9237 | 0.000e+00 | ~1.5e-7 | ~5e-7 | ~7.7e-7 | 172.9000 | Tier0 vs ASE general |
 | uma | 4 | REUSED_Tier0 | -5830.9237 | 0.000e+00 | ~1.5e-7 | ~5e-7 | ~7.7e-7 | 100.2000 | Tier0 vs ASE general |
 
@@ -37,7 +37,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 |------|---:|---:|---:|
 | ase | 396.4798 | 193.9000 | 115.2000 |
 | fc | 345.5284 | 193.2000 | 118.0000 |
-| uma | 320.3800 | 172.9000 | 100.2000 |
+| uma | 315.5800 | 172.9000 | 100.2000 |
 
 ## water888 (648 atoms, NVT)
 
@@ -66,7 +66,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 - `SKIP_ILLEGAL` — FairChem rejects this settings combo
 - `SKIP_KNOWN_CRASH` — FC+`merge_mole`+FP64 crashes in FairChem MOLE merge (not fixed here)
 - `REUSED` / `REUSED_Tier0` — locked campaign baseline
+- `INVALID_FORCE` probe — timing recorded but E/F not trusted (e.g. W8 NCCL stream race); primary row stays prior valid gate
 - Force self-parity for ASE vs its own oracle is ~1e-16 (numerical noise)
 
 See also [`MATRIX.md`](../MATRIX.md), [`GLOSSARY.md`](../GLOSSARY.md).
-

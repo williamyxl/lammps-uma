@@ -75,15 +75,16 @@
       },
       "uma": {
         "1": {
-          "E": -5830.923720166722,
+          "E": -5830.923720166724,
           "dE": 1.8189894035458565e-12,
-          "ms": 320.38,
+          "ms": 315.58000000000004,
           "status": "DONE",
           "metric": "ms_per_eval_python",
           "mae": 1.5158049994882126e-07,
           "rmse": 2.1794267593834002e-07,
           "max_abs": 4.99965972469707e-07,
-          "max_norm_atom": 7.673305594281034e-07
+          "max_norm_atom": 7.673305594281034e-07,
+          "job": "20989773"
         },
         "2": {
           "E": -5830.92372016672,
@@ -231,7 +232,7 @@
         "1": {
           "E": -5830.923741338032,
           "dE": 0.0,
-          "ms": 380.7,
+          "ms": 380.7137696072459,
           "status": "DONE",
           "job": "20989758",
           "metric": "ms_per_eval_python",
@@ -307,7 +308,7 @@
         "1": {
           "E": -5830.923720166724,
           "dE": 2.12e-05,
-          "ms": 315.5,
+          "ms": 315.47999999999996,
           "status": "DONE",
           "job": "20989768",
           "metric": "ms_per_eval_python",
@@ -703,7 +704,7 @@
         "1": {
           "E": -5830.92374133803,
           "dE": 0.0,
-          "ms": 350.3,
+          "ms": 350.3438383806497,
           "status": "DONE",
           "job": "20989759",
           "metric": "ms_per_eval_python",
@@ -799,7 +800,17 @@
           "mae": 1.52e-07,
           "rmse": null,
           "max_abs": 5e-07,
-          "max_norm_atom": 7.79e-07
+          "max_norm_atom": 7.79e-07,
+          "probes": [
+            {
+              "label": "W8",
+              "status": "INVALID_FORCE",
+              "ms": 160.19,
+              "job": "20989797",
+              "E": -5830.923741338154,
+              "note": "forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
+            }
+          ]
         },
         "4": {
           "E": -5830.9237413381525,
@@ -811,7 +822,17 @@
           "mae": 1.52e-07,
           "rmse": null,
           "max_abs": 5e-07,
-          "max_norm_atom": 7.79e-07
+          "max_norm_atom": 7.79e-07,
+          "probes": [
+            {
+              "label": "W8",
+              "status": "INVALID_FORCE",
+              "ms": 90.45,
+              "job": "20989798",
+              "E": -5830.923741338152,
+              "note": "forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
+            }
+          ]
         }
       }
     },
@@ -933,5 +954,6 @@
         }
       }
     }
-  }
+  },
+  "stamp": "2026-08-09T20:41"
 }
