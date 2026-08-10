@@ -825,6 +825,14 @@
               "job": "20999254",
               "E": -5830.923741338153,
               "note": "skip pre-bwd barrier; \u0394 vs W8fix +0.11ms"
+            },
+            {
+              "label": "W10",
+              "status": "DONE_AB",
+              "ms": 159.652,
+              "job": "20999998",
+              "E": -5830.923741338155,
+              "note": "edge pad; \u0394 vs W8fix -0.43ms"
             }
           ],
           "note": "W8 stream-ordered NCCL"
@@ -1024,5 +1032,5 @@
       }
     }
   },
-  "stamp": "2026-08-10T00:30"
+  "stamp": "2026-08-10T01:24"
 }

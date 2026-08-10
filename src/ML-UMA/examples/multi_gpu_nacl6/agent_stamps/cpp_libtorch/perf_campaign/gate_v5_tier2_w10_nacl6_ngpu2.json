@@ -1,0 +1,17 @@
+{
+  "ver": "tier2_w10",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "20999998",
+  "ms": 159.652,
+  "baseline_w8fix_ms": 160.08,
+  "delta_vs_w8fix_ms": -0.4280000000000257,
+  "ase_ufast": 191.6,
+  "le_ase": true,
+  "dE_vs_merge_ase": 1.255102688446641e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "UMA_EDGE_PAD": 1,
+  "pass": true,
+  "stamp": "2026-08-10T01:24:22"
+}
