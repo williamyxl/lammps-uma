@@ -1,7 +1,7 @@
 # Settings matrix + BEST_BARS (living)
 
 **Plan:** ASE/FC best bars = **minimum floor**; uma max-push continues to hard ceiling.
-**Stamp:** 2026-08-09T23:11 CDT
+**Stamp:** 2026-08-10T08:45 CDT · W8nk product (`pair_style uma`)
 
 ## Policy
 
@@ -38,6 +38,11 @@ FC+`merge_mole`+FP64: FairChem Float/Double crash — do not fix.
 | water888 | 4 | ufast **94.5** | gen **118.9** | ufast **96.2** (W8-fix) | **-1.7** | 22.7 | **FAIL** |
 
 Living E/F/timing tables: [`settings_docs/`](settings_docs/README.md) — refresh with `python regenerate_settings_docs.py --ingest-matrix`.
+
+
+### W8nk (product — no Kokkos)
+
+`pair_style uma` + W8-fix NCCL. NVT Pair ms: NaCl@2 **161.94**, NaCl@4 **92.10**, water@2 **164.82**, water@4 **95.74** (still FAIL ASE ufast 94.5).
 
 ### W8-fix (promoted where E/F PASS)
 

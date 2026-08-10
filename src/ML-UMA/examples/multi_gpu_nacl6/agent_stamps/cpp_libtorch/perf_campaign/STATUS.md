@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T08:12 CDT · Loop **armed** · **W8nk NaCl@2 PASS** (NVT Pair 161.94 ms; no Kokkos)
+**Stamp:** 2026-08-10T08:45 CDT · Loop **armed** · **W8nk PRODUCT** (`pair_style uma`) · water@4 floor still FAIL vs ASE 94.5
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -68,10 +68,10 @@ FairChem `InferenceSettings` preset **`turbo`** is unused here (≠ `umas_fast_p
 ASE@1 (`merge_mole=True`) ms: `general`+merge **367**, `umas_fast_pytorch`+merge **350** (single GPU).
 
 ## Next
+1. **V6 from W8nk** — plan `v6_w8nk_perf_push_77967fcb`: W13 profile → W14 result-path → floor clear water@4.
+2. devices=1 `umas_fast_pytorch`+`merge_mole` export (W15).
+3. Do **not** retry W11 CUDA graph without FairChem Wigner RNG fix.
 
-1. Finish NaCl FC matching bars; **resubmit water ASE/FC** with `--chdir` to `water888`.
-2. Tier2 **W8** (NCCL stream overlap) — W7 flat (&lt;1 ms / water@4 +1 ms).
-3. devices=1 `umas_fast_pytorch`+`merge_mole` export required for product completeness.
 
 ## Constraints
 
@@ -87,8 +87,12 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W8nk NaCl@2 PASS** (`21010252`): `pair_style uma`, E/F vs ASE merge OK; NVT@10 Pair **161.94** ms (SP proxy 165.76).
-- Waiting: NaCl@4 `21010253`; water@2/`@4` `21010254`/`21010255`.
+- **W8nk COMPLETE / PRODUCT** — E/F PASS all cells; `UMA_USE_KOKKOS=0`.
+  - NaCl@2 NVT **161.94** (`21010252`)
+  - NaCl@4 NVT **92.10** (`21010253`)
+  - water@2 NVT **164.82** (`21010254`)
+  - water@4 NVT **95.74** (`21010255`) — **floor FAIL** vs ASE ufast 94.5 (Δ +1.24 ms)
+- **Next:** V6 Phase1 W13 profile water@4 (`PERF_PARENT`/`PERF_TICK`).
 
 
 ## Tier2 W6 (COMPLETE PASS)
