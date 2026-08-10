@@ -1,6 +1,6 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T07:39:30",
+  "stamp": "2026-08-10T07:46:37",
   "phase": "V5_tier2_W11",
   "status": "w11_gates_pending",
   "gates": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "21009584",
+  "active_jobid": "21009719",
   "tick": {
-    "last": "2026-08-10T07:39:30",
-    "note": "W11 submit {'nacl6_@2': '21009584', 'nacl6_@4': '21009588', 'water888_@2': '21009592', 'water888_@4': '21009596'}"
+    "last": "2026-08-10T07:46:37",
+    "note": "W11 clean resubmit {'nacl6_@2': '21009719', 'nacl6_@4': '21009720', 'water888_@2': '21009721', 'water888_@4': '21009722'}"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1480,11 +1480,12 @@
   "tier2_w11": {
     "change": "UMA_CUDA_GRAPH=1 + UMA_EDGE_PAD=1",
     "jobs": {
-      "nacl6_@2": "21009584",
-      "nacl6_@4": "21009588",
-      "water888_@2": "21009592",
-      "water888_@4": "21009596"
+      "nacl6_@2": "21009719",
+      "nacl6_@4": "21009720",
+      "water888_@2": "21009721",
+      "water888_@4": "21009722"
     },
-    "status": "SUBMITTED"
+    "status": "SUBMITTED",
+    "note": "clean resubmit after duplicate cancel"
   }
 }

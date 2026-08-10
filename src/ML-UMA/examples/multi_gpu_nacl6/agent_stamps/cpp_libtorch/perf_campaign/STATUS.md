@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T03:40 CDT · Loop **armed** · **W11 submitted** (CUDA graph + edge pad)
+**Stamp:** 2026-08-10T03:45 CDT · Loop **armed** · **W11 submitted** (CUDA graph; clean resubmit)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,9 +87,9 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W11 in flight** (`UMA_CUDA_GRAPH=1` + `UMA_EDGE_PAD=1`, ThreadLocal capture, eager fallback):
-  - NaCl@2 `21009584` (RECOMPILE=1) → @4 `21009588`; water@2 `21009592` → @4 `21009596`.
-- Stretch: NCCL-inside-TS may fail capture → document structural floor if so.
+- **W11 in flight** ( + ):
+  - NaCl@2  (RECOMPILE=1) → @4 ; water@2  → @4 .
+- Prior duplicate submits cancelled; single chain only.
 
 
 ## Tier2 W6 (COMPLETE PASS)
