@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T01:00:26",
+  "stamp": "2026-08-10T01:10:19",
   "phase": "V5_tier2_W12",
-  "status": "w12_water4_noise_recheck",
+  "status": "w12_noise_MISS_next_W10W11",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate noise reps; if miss ASE start W10/W11",
+  "next_action": "Implement W10 edge pad then W11 CUDA graph; gate water@4",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,7 +505,7 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "20999831",
+  "active_jobid": null,
   "tick": {
     "last": "2026-08-10T01:00:26",
     "note": "W12 water@4 noise x3 {'water888_@4_rep1': '20999831', 'water888_@4_rep2': '20999832', 'water888_@4_rep3': '20999833'}"
@@ -1346,11 +1346,43 @@
     }
   },
   "tier2_w12_noise": {
-    "jobs": {
-      "water888_@4_rep1": "20999831",
-      "water888_@4_rep2": "20999832",
-      "water888_@4_rep3": "20999833"
-    },
-    "goal": "water@4 \u226494.5"
+    "stamp": "2026-08-10T01:10:18",
+    "sys": "water888",
+    "ngpu": 4,
+    "UMA_SKIP_PRE_BWD_BARRIER": 1,
+    "ase_ufast": 94.5,
+    "prior_w12_ms": 95.276,
+    "reps": [
+      {
+        "job": "20999831",
+        "ms": 96.115,
+        "sp_ms": 104.69000000000001,
+        "dE": 8.185452315956354e-12,
+        "force_max_abs": 4.992769293110655e-06,
+        "le_ase": false
+      },
+      {
+        "job": "20999832",
+        "ms": 96.026,
+        "sp_ms": 95.161,
+        "dE": 8.185452315956354e-12,
+        "force_max_abs": 4.992769293110655e-06,
+        "le_ase": false
+      },
+      {
+        "job": "20999833",
+        "ms": 96.09700000000001,
+        "sp_ms": 94.829,
+        "dE": 8.185452315956354e-12,
+        "force_max_abs": 4.992769293110655e-06,
+        "le_ase": false
+      }
+    ],
+    "ms_min": 96.026,
+    "ms_median": 96.09700000000001,
+    "ms_max": 96.115,
+    "any_le_ase": false,
+    "ef_pass": true,
+    "verdict": "NOISE_MISS \u2014 all reps ~96.1 > ASE 94.5; prior 95.28 was lucky low; do not promote W12; next W10/W11"
   }
 }

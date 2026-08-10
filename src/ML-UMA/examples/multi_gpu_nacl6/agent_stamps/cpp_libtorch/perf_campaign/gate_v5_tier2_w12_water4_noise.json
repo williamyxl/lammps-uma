@@ -1,0 +1,40 @@
+{
+  "stamp": "2026-08-10T01:10:18",
+  "sys": "water888",
+  "ngpu": 4,
+  "UMA_SKIP_PRE_BWD_BARRIER": 1,
+  "ase_ufast": 94.5,
+  "prior_w12_ms": 95.276,
+  "reps": [
+    {
+      "job": "20999831",
+      "ms": 96.115,
+      "sp_ms": 104.69000000000001,
+      "dE": 8.185452315956354e-12,
+      "force_max_abs": 4.992769293110655e-06,
+      "le_ase": false
+    },
+    {
+      "job": "20999832",
+      "ms": 96.026,
+      "sp_ms": 95.161,
+      "dE": 8.185452315956354e-12,
+      "force_max_abs": 4.992769293110655e-06,
+      "le_ase": false
+    },
+    {
+      "job": "20999833",
+      "ms": 96.09700000000001,
+      "sp_ms": 94.829,
+      "dE": 8.185452315956354e-12,
+      "force_max_abs": 4.992769293110655e-06,
+      "le_ase": false
+    }
+  ],
+  "ms_min": 96.026,
+  "ms_median": 96.09700000000001,
+  "ms_max": 96.115,
+  "any_le_ase": false,
+  "ef_pass": true,
+  "verdict": "NOISE_MISS \u2014 all reps ~96.1 > ASE 94.5; prior 95.28 was lucky low; do not promote W12; next W10/W11"
+}
