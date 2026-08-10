@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T10:23:18",
+  "stamp": "2026-08-10T10:59:37",
   "phase": "V6_from_W8nk",
-  "status": "w17_await_export_gamma0",
+  "status": "w17_stream_fix_resubmit",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -133,7 +133,7 @@
     "21013150"
   ],
   "tick_log": "tick.log",
-  "next_action": "Gate export verify + NaCl@2 graph; then w17_submit_matrix.sh",
+  "next_action": "Gate resubmitted NaCl@2 for path=graph_capture/replay",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {

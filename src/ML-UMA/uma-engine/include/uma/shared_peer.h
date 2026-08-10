@@ -28,6 +28,7 @@
 #include "uma/kokkos_peer.h"
 
 #if defined(UMA_ENGINE_USE_CUDA)
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime_api.h>
 #endif
 #if defined(UMA_ENGINE_USE_NCCL)
@@ -472,11 +473,22 @@ class SharedPeerGatherSlot {
     return gpu.contiguous();
   }
 
-  // Tier2/W8: NCCL on dedicated stream. Order: Torch default → NCCL → Torch.
+  // W17: when UMA_CUDA_GRAPH=1, NCCL runs on Torch's current stream so capture
+  // can include collectives (no side-stream event waits outside the graph).
+  static bool nccl_on_current_stream_() {
+    const char* e = std::getenv("UMA_CUDA_GRAPH");
+    return e && std::string(e) == "1";
+  }
+
+  // Tier2/W8: NCCL on dedicated stream. Order: current Torch stream → NCCL →
+  // current. Uses getCurrentCUDAStream (not cudaStreamDefault) so CUDAStreamGuard
+  // during graph capture/replay stays consistent.
   void nccl_precede_from_default_() {
 #if defined(UMA_ENGINE_USE_CUDA)
     if (!nccl_stream_ || !torch_done_evt_) return;
-    cudaEventRecord(torch_done_evt_, cudaStreamDefault);
+    if (nccl_on_current_stream_()) return;
+    const cudaStream_t s = at::cuda::getCurrentCUDAStream().stream();
+    cudaEventRecord(torch_done_evt_, s);
     cudaStreamWaitEvent(nccl_stream_, torch_done_evt_, 0);
 #endif
   }
@@ -484,13 +496,18 @@ class SharedPeerGatherSlot {
   void nccl_join_default_stream_() {
 #if defined(UMA_ENGINE_USE_CUDA)
     if (!nccl_stream_ || !nccl_done_evt_) return;
+    if (nccl_on_current_stream_()) return;
+    const cudaStream_t s = at::cuda::getCurrentCUDAStream().stream();
     cudaEventRecord(nccl_done_evt_, nccl_stream_);
-    cudaStreamWaitEvent(cudaStreamDefault, nccl_done_evt_, 0);
+    cudaStreamWaitEvent(s, nccl_done_evt_, 0);
 #endif
   }
 
   cudaStream_t nccl_cuda_stream_() const {
 #if defined(UMA_ENGINE_USE_CUDA)
+    if (nccl_on_current_stream_()) {
+      return at::cuda::getCurrentCUDAStream().stream();
+    }
     return nccl_stream_ ? nccl_stream_ : cudaStreamDefault;
 #else
     return cudaStreamDefault;

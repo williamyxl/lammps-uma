@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T10:16 CDT · Loop **re-armed** · W17 γ=0 export `21013149` (Resources) → graph NaCl@2 `21013150`
+**Stamp:** 2026-08-10T10:58 CDT · W17 γ=0 E/F PASS; graph fail non-default stream — fix+resubmit
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W17 unblock:** export-time `gamma=0` (no `aten::rand`) → art `*-f64-fast-cgraph`.
-- Export **21013149**; CUDA graph NaCl@2 **21013150** (`UMA_CUDA_GRAPH=1` `UMA_EDGE_PAD=1`).
+- **W17 smoke:** export `21013149` VERIFY_OK (no `aten::rand`); NaCl@2 `21013150` E/F **PASS** (dE~1e-10, Fmax~5e-7) but **CAPTURE FAIL**: non-default stream required.
+- Fix landed: pool stream + CUDAStreamGuard; NCCL on current stream when `UMA_CUDA_GRAPH=1`. Resubmit NaCl@2 with RECOMPILE=1.
 
 
 ## Tier2 W6 (COMPLETE PASS)

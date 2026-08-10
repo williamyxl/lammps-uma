@@ -18,6 +18,7 @@
 
 #if defined(UMA_ENGINE_USE_CUDA)
 #include <ATen/cuda/CUDAGraph.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime_api.h>
 #endif
@@ -188,6 +189,10 @@ int main(int argc, char** argv) {
     }();
 #if defined(UMA_ENGINE_USE_CUDA)
     at::cuda::CUDAGraph cuda_graph;
+    // Capture/replay require a non-default stream (PyTorch CUDAGraph rule).
+    at::cuda::CUDAStream graph_stream =
+        want_cuda_graph ? at::cuda::getStreamFromPool(/*isHighPriority=*/true)
+                        : at::cuda::getDefaultCUDAStream();
     bool graph_captured = false;
     bool graph_failed = false;
     int graph_step = 0;
@@ -197,7 +202,8 @@ int main(int argc, char** argv) {
 #endif
     if (want_cuda_graph) {
       std::cerr << "uma_libtorch_mp_worker rank=" << rank
-                << " W11 CUDA_GRAPH enabled (warmup=" << graph_warmup << ")\n"
+                << " W11 CUDA_GRAPH enabled (warmup=" << graph_warmup
+                << " stream=pool_nondefault)\n"
                 << std::flush;
     }
     std::cerr << "uma_libtorch_mp_worker rank=" << rank << " module loaded, sending ready\n"
@@ -424,6 +430,8 @@ int main(int argc, char** argv) {
             uma::PeerContext::instance().slot().barrier(rank);
             bool capture_begun = false;
             try {
+              // Must not capture on the default stream.
+              at::cuda::CUDAStreamGuard guard(graph_stream);
               cuda_graph.capture_begin(
                   /*pool=*/{0, 0}, cudaStreamCaptureModeThreadLocal);
               capture_begun = true;
@@ -462,7 +470,10 @@ int main(int argc, char** argv) {
           }
         } else {
           const auto t0 = clock::now();
-          cuda_graph.replay();
+          {
+            at::cuda::CUDAStreamGuard guard(graph_stream);
+            cuda_graph.replay();
+          }
           energy = g_normed;
           forces = g_forces;
           ms_fwd =
