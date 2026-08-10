@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T08:45 CDT · Loop **armed** · **W8nk PRODUCT** (`pair_style uma`) · water@4 floor still FAIL vs ASE 94.5
+**Stamp:** 2026-08-10T08:47 CDT · Loop **armed** · **W8nk PRODUCT** · W13 profile water@4 submitted `21010752`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,12 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W8nk COMPLETE / PRODUCT** — E/F PASS all cells; `UMA_USE_KOKKOS=0`.
-  - NaCl@2 NVT **161.94** (`21010252`)
-  - NaCl@4 NVT **92.10** (`21010253`)
-  - water@2 NVT **164.82** (`21010254`)
-  - water@4 NVT **95.74** (`21010255`) — **floor FAIL** vs ASE ufast 94.5 (Δ +1.24 ms)
-- **Next:** V6 Phase1 W13 profile water@4 (`PERF_PARENT`/`PERF_TICK`).
+- **W8nk PRODUCT** locked (E/F PASS; water@4 floor FAIL 95.74 vs ASE 94.5).
+- **W13** water@4 profile `UMA_MP_LOG_DIR` job **21010752** (RECOMPILE=0).
 
 
 ## Tier2 W6 (COMPLETE PASS)

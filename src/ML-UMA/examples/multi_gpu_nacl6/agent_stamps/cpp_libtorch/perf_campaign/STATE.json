@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T08:45:19",
+  "stamp": "2026-08-10T08:49:50",
   "phase": "V6_from_W8nk",
-  "status": "w8nk_PRODUCT_ef_PASS_water4_floor_FAIL",
+  "status": "w13_profile_submitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,9 +128,11 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [],
+  "active_jobs": [
+    "21010752"
+  ],
   "tick_log": "tick.log",
-  "next_action": "W13 profile water@4 PERF_PARENT+PERF_TICK; then W14 result-path",
+  "next_action": "Harvest W13 PERF_PARENT/PERF_TICK; decide W14",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1748,5 +1750,11 @@
       "stamp": "2026-08-10T08:45:19",
       "pass": true
     }
+  },
+  "w13": {
+    "job": "21010752",
+    "sys": "water888",
+    "ngpu": 4,
+    "UMA_MP_LOG_DIR": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/matrix/water888_uma_ufast_w13_ngpu4/mp_logs"
   }
 }
