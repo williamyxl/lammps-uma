@@ -1,0 +1,19 @@
+{
+  "ver": "tier2_w10",
+  "sys": "water888",
+  "ngpu": 4,
+  "job": "21000001",
+  "ms": 96.923,
+  "sp_ms": 96.789,
+  "baseline_w8fix_ms": 96.21,
+  "delta_vs_w8fix_ms": 0.7130000000000081,
+  "ase_ufast": 94.5,
+  "le_ase": false,
+  "floor_fail_vs_ase": true,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "force_max_abs": 4.992769293110655e-06,
+  "ef_pass": true,
+  "UMA_EDGE_PAD": 1,
+  "pass": true,
+  "stamp": "2026-08-10T03:34:17"
+}

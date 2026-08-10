@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T03:18:14",
+  "stamp": "2026-08-10T03:34:17",
   "phase": "V5_tier2_W10",
-  "status": "w10_nacl_PASS_await_water4",
+  "status": "w10_COMPLETE_ef_pass_next_W11",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate W10 E/F; if PASS proceed W11 CUDA graph",
+  "next_action": "Implement W11 CUDA graph on padded edges; gate water@4",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,7 +505,7 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "20999998",
+  "active_jobid": null,
   "tick": {
     "last": "2026-08-10T01:12:24",
     "note": "W10 submit {'nacl6_@2': '20999998', 'nacl6_@4': '20999999', 'water888_@2': '21000000', 'water888_@4': '21000001'}"
@@ -1393,7 +1393,7 @@
       "water888_@2": "21000000",
       "water888_@4": "21000001"
     },
-    "status": "SUBMITTED",
+    "status": "COMPLETE_EF_PASS",
     "nacl6_@2": {
       "ver": "tier2_w10",
       "sys": "nacl6",
@@ -1445,6 +1445,36 @@
       "UMA_EDGE_PAD": 1,
       "pass": true,
       "stamp": "2026-08-10T03:18:13"
+    },
+    "summary": {
+      "stamp": "2026-08-10T03:34:17",
+      "UMA_EDGE_PAD": 1,
+      "promote_default": false,
+      "ef_all_pass": true,
+      "reason": "E/F PASS unlocks W11; speed flat/regress vs W8-fix \u2014 keep pad opt-in; do not expect ASE win until CUDA graph",
+      "cells": {
+        "nacl6_2": {
+          "ms": 159.652,
+          "delta_w8fix": -0.4280000000000257,
+          "ef": "PASS"
+        },
+        "nacl6_4": {
+          "ms": 93.604,
+          "delta_w8fix": 2.013999999999996,
+          "ef": "PASS"
+        },
+        "water_2": {
+          "ms": 167.18,
+          "delta_w8fix": 2.430000000000007,
+          "ef": "PASS"
+        },
+        "water_4": {
+          "ms": 96.923,
+          "delta_w8fix": 0.7130000000000081,
+          "ef": "PASS",
+          "ase_floor": "FAIL"
+        }
+      }
     }
   }
 }

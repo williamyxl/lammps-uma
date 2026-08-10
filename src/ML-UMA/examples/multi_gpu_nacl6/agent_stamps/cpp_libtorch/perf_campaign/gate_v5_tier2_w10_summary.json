@@ -1,0 +1,30 @@
+{
+  "stamp": "2026-08-10T03:34:17",
+  "UMA_EDGE_PAD": 1,
+  "promote_default": false,
+  "ef_all_pass": true,
+  "reason": "E/F PASS unlocks W11; speed flat/regress vs W8-fix \u2014 keep pad opt-in; do not expect ASE win until CUDA graph",
+  "cells": {
+    "nacl6_2": {
+      "ms": 159.652,
+      "delta_w8fix": -0.4280000000000257,
+      "ef": "PASS"
+    },
+    "nacl6_4": {
+      "ms": 93.604,
+      "delta_w8fix": 2.013999999999996,
+      "ef": "PASS"
+    },
+    "water_2": {
+      "ms": 167.18,
+      "delta_w8fix": 2.430000000000007,
+      "ef": "PASS"
+    },
+    "water_4": {
+      "ms": 96.923,
+      "delta_w8fix": 0.7130000000000081,
+      "ef": "PASS",
+      "ase_floor": "FAIL"
+    }
+  }
+}
