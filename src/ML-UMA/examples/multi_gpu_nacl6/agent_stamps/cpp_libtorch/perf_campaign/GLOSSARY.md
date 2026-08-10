@@ -1,130 +1,84 @@
-# Campaign glossary — artifact modes & E/F oracles
+# Campaign glossary — FairChem knobs only
 
-**Audience:** `STATUS.md`, `STATE.json`, Tier0/Tier1/Wave A/Tier2 gate notes.  
-**Scope:** FairChem UMA-S-1.2 **omat** FP64 only. These terms are **not** interchangeable.
+**Rule:** Prefer writing the FairChem settings and artifact path names below.
+Do **not** invent new campaign synonyms (`turbo`, `fast+merge`, `merge-only`, …)
+in new STATUS/STATE text. If an older stamp used those phrases, decode them
+here; do not extend the vocabulary.
 
----
-
-## Two independent FairChem axes
-
-FairChem inference is configured with (at least) two orthogonal knobs. Campaign
-names combine them.
-
-| Axis | FairChem setting | Values used here |
-|------|------------------|------------------|
-| **Execution backend** | `InferenceSettings.execution_mode` / export `--execution-mode` | `general` · `umas_fast_pytorch` |
-| **MOLE fuse** | `InferenceSettings.merge_mole` / export `--merge-mole` | `False` · `True` |
-
-**Hard constraint:** `umas_fast_pytorch` **requires** `merge_mole=True` (MOLE
-experts have no fused `.weight` otherwise). `umas_fast` + `merge_mole=False`
-is **illegal** for export/trace (Tier1c `fastnomole` failed).
-
-`umas_fast_gpu` (Triton) is **out of scope** — not TorchScript-traceable into
-the C++ `uma/kk` runtime.
+**Scope:** FairChem UMA-S-1.2 **omat** FP64. C++ path: `uma/kk`.
 
 ---
 
-## Named modes (use these spellings)
+## FairChem settings (canonical)
 
-### Product / Tier0 — **general** (not turbo)
+| Setting | Values used | CLI |
+|---------|-------------|-----|
+| `InferenceSettings.execution_mode` | `general` · `umas_fast_pytorch` | `--execution-mode` |
+| `InferenceSettings.merge_mole` | `False` · `True` | `--merge-mole` |
 
-| Field | Value |
-|-------|--------|
-| Also called | product path, Tier0 art, `*-f64` |
-| `execution_mode` | `general` |
-| `merge_mole` | `False` |
-| Artifact dir | `uma-engine/artifacts/uma-s-1p2-omat-f64` |
-| E/F oracle | **general ASE** (below) |
+Constraint from FairChem: `umas_fast_pytorch` requires `merge_mole=True`
+(Tier1c `fastnomole` export failed). `umas_fast_gpu` (Triton) is out of scope
+for TorchScript `uma/kk`.
 
-Default product export in `common.py` / historical multi-GPU parity README.
-
-### **merge-only** (also: **general+merge**)
-
-| Field | Value |
-|-------|--------|
-| `execution_mode` | `general` |
-| `merge_mole` | `True` |
-| Artifact dir | `…/uma-s-1p2-omat-f64-merge` |
-| Meaning | Fuse MOLE experts for fixed composition/charge/spin; keep **general** SO2/radial backend |
-| Role | Tier1c isolate — proves ~2×10⁻⁵ eV vs general ASE is from **MOLE fuse**, not from `umas_fast` |
-
-### **fast+merge** (also: **umas_fast+merge**, campaign **turbo** path)
-
-| Field | Value |
-|-------|--------|
-| `execution_mode` | `umas_fast_pytorch` |
-| `merge_mole` | `True` |
-| Artifact dir | `…/uma-s-1p2-omat-f64-fast` |
-| Meaning | Block-diagonal SO2 GEMM + batched radial MLP (**PyTorch**, TS-traceable) **and** fused MOLE |
-| Role | Tier1+ / Wave A / Tier2 default speed path for `uma/kk` MP shards |
-
-Export: `export_mp_artifact.py --execution-mode umas_fast_pytorch --merge-mole`.
+FairChem also has an **`InferenceSettings` preset named `turbo`**. That preset
+is **not** used in this campaign and is **not** an alias for
+`umas_fast_pytorch`. Product parity README: do not use that preset.
 
 ---
 
-## ASE oracles (E/F only — not speed bars)
+## Artifact combinations (canonical)
 
-Speed gates always use **locked** ASE/FC multi-GPU timings (general FairChem /
-FC LAMMPS). Do **not** re-run those for campaign iterations.
+Name a run by its settings and artifact directory — nothing else.
 
-E/F oracles are **ASE FairChem FP64 @1 worker** on the same frozen geometry,
-with calculator settings matching the uma artifact under test.
+| `execution_mode` | `merge_mole` | Artifact dir | Campaign role |
+|------------------|--------------|--------------|---------------|
+| `general` | `False` | `uma-engine/artifacts/uma-s-1p2-omat-f64` | Tier0 / product |
+| `general` | `True` | `…/uma-s-1p2-omat-f64-merge` | Tier1c isolate (MOLE fuse only) |
+| `umas_fast_pytorch` | `True` | `…/uma-s-1p2-omat-f64-fast` | Tier1+ / Wave A / Tier2 speed path |
 
-### **general ASE**
+Export for the speed path:
 
-- ASE `FAIRChemCalculator` / predict unit: `execution_mode=general`, `merge_mole=False`, dtype float64.
-- Ground truth for **Tier0 / product `*-f64`**.
-- Cached: NaCl6 ASE@1 energy in parity / P3c stamps; water ASE@1 from path jobs.
-
-### **merge ASE** (short for **ASE FP64 with `merge_mole=True`**)
-
-- ASE calculator with **`merge_mole=True`**, dtype float64.
-- Sub-rows (NaCl job `20983514`, water `20984160`):
-  - **`general_merge`:** `execution_mode=general`, `merge_mole=True`
-  - **`umas_fast_merge`:** `execution_mode=umas_fast_pytorch`, `merge_mole=True`
-- On NaCl6 those two ASE energies agree to ~10⁻¹³ eV; both sit ~2.1×10⁻⁵ eV
-  above **general ASE** (expected **MOLE-fuse residual**, not an `uma/kk` bug).
-- Ground truth for **Tier1 turbo / fast+merge / merge-only** uma energies:
-  gate `|ΔE|` / forces vs **merge ASE**, not vs general ASE.
-
-Stamps: `oracle_ase_merge_mole.json`, `oracle_ase_water_merge_mole.json`.
+```bash
+python export_mp_artifact.py --execution-mode umas_fast_pytorch --merge-mole ...
+```
 
 ---
 
-## Campaign slang: **turbo**
+## ASE E/F oracles (canonical)
 
-| Use | Meaning |
-|-----|---------|
-| **Tier1 turbo** / **turbo path** (this campaign) | The **fast+merge** uma artifact + E/F vs **merge ASE**. Synonym for Tier1 speed push. |
-| FairChem **`InferenceSettings` “turbo”** (elsewhere) | A separate FairChem preset (often looser / faster settings). **Not** what STATUS means by turbo. |
+Speed gates reuse **locked** ASE/FC multi-GPU timings; do not re-run for
+iteration. E/F gates use ASE FairChem FP64 @1 on the frozen geometry with the
+**same** `execution_mode` / `merge_mole` as the uma artifact under test.
 
-`examples/multi_gpu_nacl6/README.md` “Do **not** use turbo settings” refers to
-FairChem InferenceSettings turbo for the **product parity** recipe — it does
-**not** ban the campaign Tier1 **fast+merge** path documented here.
+| Gate against | ASE settings | Used for |
+|--------------|--------------|----------|
+| ASE `general` | `execution_mode=general`, `merge_mole=False` | Tier0 `*-f64` |
+| ASE `merge_mole=True` | `merge_mole=True` (dtype float64); see stamps | `*-f64-fast` and `*-f64-merge` |
+
+Oracle stamps (reuse): `oracle_ase_merge_mole.json` (NaCl job `20983514`),
+`oracle_ase_water_merge_mole.json` (water job `20984160`). Rows in those
+stamps are named by settings: `general_merge`, `umas_fast_merge`.
+
+On NaCl6, ASE `general_merge` and ASE `umas_fast_merge` agree to ~10⁻¹³ eV;
+both sit ~2.1×10⁻⁵ eV above ASE `general`. That gap is the expected MOLE-fuse
+residual — gate `*-f64-fast` / `*-f64-merge` against ASE `merge_mole=True`,
+not against ASE `general`.
+
+| Comparison | Typical `\|ΔE\|` |
+|------------|------------------|
+| `*-f64-fast` or `*-f64-merge` vs ASE `general` | ≈ 2×10⁻⁵ eV (expected; do not FAIL) |
+| same vs ASE `merge_mole=True` | ∼ 10⁻¹⁰–10⁻¹¹ eV (PASS bar) |
 
 ---
 
-## Dual-oracle policy (summary)
+## Legacy phrase decode (do not reuse in new prose)
 
-| uma artifact | Gate E/F against | Gate speed against |
-|--------------|------------------|--------------------|
-| `*-f64` (general) | **general ASE** | locked ASE/FC ms (general) |
-| `*-f64-fast` (fast+merge) | **merge ASE** | locked ASE/FC ms (same locked table) |
-| `*-f64-merge` (merge-only) | **merge ASE** | locked ASE/FC ms |
+Older STATUS/STATE lines may contain invented shorthand. Map only:
 
-Typical residuals:
-
-- fast+merge or merge-only vs **general ASE:** `|ΔE| ≈ 2×10⁻⁵` eV → **expected**, do not FAIL.
-- fast+merge or merge-only vs **merge ASE:** `|ΔE| ∼ 10⁻¹⁰`–`10⁻¹¹` eV → PASS bar.
-
----
-
-## Quick decode table
-
-| Phrase in STATUS | Means |
-|------------------|--------|
-| merge ASE | ASE FP64, `merge_mole=True` (oracle jobs above) |
-| general ASE | ASE FP64, `merge_mole=False`, `execution_mode=general` |
-| turbo | Campaign Tier1 **fast+merge** path (not FairChem InferenceSettings.turbo) |
-| fast+merge / umas_fast+merge | `umas_fast_pytorch` + `merge_mole=True` → art `*-f64-fast` |
-| merge-only / general+merge | `general` + `merge_mole=True` → art `*-f64-merge` |
+| Legacy phrase | Means (write this instead) |
+|---------------|----------------------------|
+| turbo / Tier1 turbo / campaign turbo | `execution_mode=umas_fast_pytorch`, `merge_mole=True` (`*-f64-fast`). **Not** FairChem `InferenceSettings` turbo. |
+| fast+merge / umas_fast+merge | same as above |
+| merge-only / general+merge | `execution_mode=general`, `merge_mole=True` (`*-f64-merge`) |
+| general ASE | ASE with `execution_mode=general`, `merge_mole=False` |
+| merge ASE | ASE with `merge_mole=True` (oracle stamps above) |
