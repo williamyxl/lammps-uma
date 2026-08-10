@@ -6,7 +6,10 @@
 #SBATCH --ntasks=1
 #SBATCH --gpus-per-node=4
 #SBATCH --cpus-per-task=32
-#SBATCH --mem=224G
+# 112G matches every proven campaign run. Do not raise toward the 251G node
+# limit: it makes the job fit only on a fully-idle node and start hours later
+# (measured 23:09 -> 18:36 just by dropping 224G -> 112G).
+#SBATCH --mem=112G
 #SBATCH --time=01:30:00
 #SBATCH --output=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/logs/nsweep_n%a-%A.out
 #SBATCH --error=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/logs/nsweep_n%a-%A.out
