@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W11 in flight** ( + ):
-  - NaCl@2  (RECOMPILE=1) → @4 ; water@2  → @4 .
+- **W11 in flight** (`UMA_CUDA_GRAPH=1` + `UMA_EDGE_PAD=1`):
+  - NaCl@2 `21009719` (RECOMPILE=1) → @4 `21009720`; water@2 `21009721` → @4 `21009722`.
 - Prior duplicate submits cancelled; single chain only.
 
 
