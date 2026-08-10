@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:05 CDT · **W14 NO_PROMOTE** · product stays **W8nk** · water@4 95.28 (ΔW8nk -0.46; still +0.78 vs ASE)
+**Stamp:** 2026-08-10T09:08 CDT · W14 NO_PROMOTE · **W15** export `21011053` + gates NaCl@1 `21011054` / water@1 `21011055`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W14 COMPLETE / NO_PROMOTE** — E/F PASS; water@4 NVT **95.28** (W8nk 95.74, ASE 94.5); NaCl@4 NVT **94.23** (W8nk 92.10, +2.14).
-- Product remains **W8nk**. Next: W15 devices=1 ufast export (W16 skip — force_ar ≪1 ms in W13).
+- **W14 NO_PROMOTE** — product **W8nk**.
+- **W15:** root cause = `model_traced.pt` was general f64 copy. Re-export job **21011053**; gates **21011054** / **21011055** (afterok).
 
 
 ## Tier2 W6 (COMPLETE PASS)

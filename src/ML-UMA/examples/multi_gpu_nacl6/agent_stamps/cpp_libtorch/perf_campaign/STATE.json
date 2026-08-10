@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:05:49",
+  "stamp": "2026-08-10T09:08:15",
   "phase": "V6_from_W8nk",
-  "status": "w14_NO_PROMOTE_product_W8nk",
+  "status": "w15_export_submitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,9 +128,13 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [],
+  "active_jobs": [
+    "21011053",
+    "21011054",
+    "21011055"
+  ],
   "tick_log": "tick.log",
-  "next_action": "W15 devices=1 *-f64-fast re-export; W16 skip (force_ar negligible)",
+  "next_action": "Gate W15 devices=1 E/F vs ASE merge + speed vs ASE ufast @1",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1941,5 +1945,11 @@
     "ef_pass": true,
     "stamp": "2026-08-10T09:05:49",
     "pass": true
+  },
+  "w15": {
+    "export": "21011053",
+    "nacl1": "21011054",
+    "water1": "21011055",
+    "root_cause": "model_traced.pt identical to general f64"
   }
 }
