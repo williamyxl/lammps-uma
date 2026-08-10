@@ -35,7 +35,10 @@ SYS = {
     },
     "water888": {
         "xyz": ROOT / "src/ML-UMA/examples/water888/water_nvt_300K.extxyz",
-        "natoms": 2592, "nsteps": 100, "task": "omol",
+        # 648 atoms (216 H2O). task=omat, NOT omol: the campaign's water merge
+        # oracle (job 20984160) uses task_name="omat", and a different task head
+        # gives a different energy, breaking comparability.
+        "natoms": 648, "nsteps": 100, "task": "omat",
     },
 }
 # Campaign merge-oracle energies (ASE FP64 umas_fast_pytorch + merge_mole).
