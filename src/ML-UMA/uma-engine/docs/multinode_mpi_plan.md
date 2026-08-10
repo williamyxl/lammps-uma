@@ -1,0 +1,332 @@
+# MPI-driven multi-node LAMMPS + UMA — architecture plan
+
+**Stamp:** 2026-08-09 · **Status:** PLAN (no code written yet)
+**Supersedes:** [`multi_node_mpi.md`](multi_node_mpi.md) (v1/v2 all-gather/halo sketch — see [§7](#7-why-the-old-v1v2-sketch-does-not-work))
+**Sibling (current, same-node):** `.cursor/plans/v5_max_perf_push_82db7365.plan.md`
+
+---
+
+## 1. Where the code actually is today
+
+### 1.1 What ships
+
+| Component | Path | Role |
+|-----------|------|------|
+| `pair_style uma` | [`src/ML-UMA/pair_uma.cpp`](../../pair_uma.cpp) (318 L) | Host-side pair style; calls `Predictor::predict_host` |
+| `pair_style uma/kk` | [`src/KOKKOS/pair_uma_kokkos.cpp`](../../../KOKKOS/pair_uma_kokkos.cpp) (79 L) | Thin subclass: `atomKK->sync(Host,…)` → `PairUMA::compute` → `sync(Device, F)` |
+| Engine | `uma-engine/src/*.cpp` (~2 kL), `include/uma/*.h` (~2 kL) | LibTorch inference, vesin NL, multi-GPU runtime |
+| MP worker | `uma-engine/tests/uma_libtorch_mp_worker.cpp` | Per-GPU worker binary (fork+exec) for `devices>1` |
+
+### 1.2 Single-GPU path (`devices 1`)
+
+`PairUMA::compute` copies `x`/`type` into host buffers, calls `Predictor::predict_host`, and adds the returned forces. `Predictor::from_artifact` loads `model_traced.pt`; `rebuild_neighbors()` builds the graph **itself** (vesin CUDA when `VESIN_ROOT` is set, else CPU `build_neighbor_graph`). The LAMMPS neighbor list is requested (`NeighConst::REQ_FULL`) but **never read** — the request only registers the cutoff.
+
+Forces come from `torch::autograd::grad(E, pos)` in C++; the traced module is energy-only ([`export_wrapper.py`](../python/export_wrapper.py)).
+
+### 1.3 Multi-GPU path (`devices N`, same node)
+
+```mermaid
+flowchart LR
+  L["LAMMPS rank 0<br/>PairUMA::compute"] --> P["Predictor / LibtorchMpRuntime<br/>vesin CUDA NL on cuda:0"]
+  P --> S["/dev/shm payload<br/>pos, z, cell, full edge graph"]
+  S --> W["N x uma_libtorch_mp_worker<br/>fork+exec, 1 GPU each"]
+  W --> C["uma_peer collectives<br/>NCCL / CUDA IPC / shm"]
+  C --> W
+  W --> S
+  S --> L
+```
+
+- Parent forks/execs `uma_libtorch_mp_worker` **before** any CUDA init (`pair_uma.cpp:247-252`).
+- Geometry + the **full** edge graph go through a shared-memory payload; pipes carry only `cmd`/`gen`/`ok`.
+- Collectives are `uma_peer` TorchScript custom ops with autograd ([`peer_context.cpp:150-168`](../src/peer_context.cpp)), backed by NCCL (default when built), CUDA IPC, or host shm. **NCCL is bootstrapped through `/dev/shm`, not MPI.**
+- Per-rank modules are exported per `(world, natoms)`: `model_mp_w4_n1728_r3.pt`. Changing GPU count or atom count needs a re-export.
+
+### 1.4 Hard constraints in the current code
+
+| Constraint | Where |
+|------------|-------|
+| **Single MPI rank** — hard error | `pair_uma.cpp:94-95` |
+| `newton pair off` required | `pair_uma.cpp:291` |
+| No per-atom energy / no per-atom virial | `pair_uma.cpp:92-93` |
+| **No global virial at all** (`eng_vdwl` only) | `pair_uma.cpp:157` — NPT is not possible today |
+| FP64 only | workspace rule + `libtorch_mp.cpp:132-134` |
+| Zero MPI calls in the engine | grep: no `MPI_`, no `mpi.h` under `uma-engine/` |
+
+### 1.5 Campaign state (from `STATUS.md` / `MATRIX.md`)
+
+Tier 0 + Tier 1 landed; Tier 2 through W8-fix. Best honest FP64 numbers (ms/step):
+
+| Suite | @1 | @2 | @4 | vs best ASE |
+|-------|---:|---:|---:|---|
+| NaCl6 (1728) | 315.6 | 159.4 | 92.4 | PASS at 2/4 |
+| water888 (648) | 337.7 | 164.75 | 96.8 | PASS @2, **FAIL @4** (ASE 94.5) |
+
+All of this is **one node, one MPI rank, ≤4 GPUs, ≤1728 atoms**.
+
+---
+
+## 2. Is Kokkos doing anything? (short answer: almost nothing)
+
+Complete inventory of Kokkos in the UMA stack:
+
+| Site | What Kokkos does |
+|------|------------------|
+| `pair_uma.cpp:236-244` | Reads `lmp->kokkos->ngpus` to auto-set `devices=N` |
+| `pair_uma_kokkos.cpp:55-58` | `atomKK->sync(Host, X\|TYPE\|F)` before, `modified(Host,F)` + `sync(Device,F)` after |
+| `pair_uma_kokkos.cpp:68-71` | Sets `kokkos_host`/`kokkos_device` on the (unused) neighbor request |
+| `uma-engine/**` | **Nothing.** No `Kokkos::`, no Kokkos in `CMakeLists.txt` |
+
+`include/uma/kokkos_peer.h` and `tests/kokkos_peer*.cpp` are named after Kokkos but contain CUDA IPC / NCCL / host-shm code and `cudaDeviceSynchronize` fences. The name is historical.
+
+**So on today's code path Kokkos is a net cost:** every step pulls `x` and `type` device→host and pushes `f` host→device, and then the engine copies host→device again inside LibTorch. Two extra round trips per step buy nothing, because no UMA kernel is a Kokkos kernel.
+
+The reason this has not mattered: at 648–1728 atoms the sync is sub-millisecond against a ~100–340 ms inference. It will matter at 10⁵ atoms.
+
+Whether Kokkos should survive the multi-node redesign is answered in [§8](#8-is-kokkos-still-needed) — the answer is **yes, but for a completely different reason than today**.
+
+---
+
+## 3. Why multi-node at all
+
+The same-node stack has a hard **memory** ceiling, not a speed ceiling.
+
+FairChem graph parallel is *not* spatial decomposition. At the top of every message-passing block it does
+
+```
+x_full = gather_from_model_parallel_region_sum_grad(x, total_atoms)
+```
+
+(`fairchem/core/models/uma/escn_md_block.py:123-128`), so **every rank materializes the full node-embedding tensor every layer**. Memory per GPU stays `O(N_total)` no matter how many GPUs you add.
+
+Measured consequence — the Phase-G OOM sweep in `examples/multi_node_nacl6/results/geom_sweep/` on 4×A100-40GB:
+
+| N | atoms | ase | fc | uma `double` |
+|--:|------:|:---:|:--:|:------------:|
+| 8 | 4096 | PASS | PASS | PASS |
+| 10 | 8000 | PASS | PASS | PASS |
+| 12 | 13824 | **OOM** | PASS | **OOM** |
+
+**N\* = 10 → ~8 000 atoms is the practical ceiling**, and adding GPUs does not raise it. Anything at MD-relevant scale (10⁵–10⁶ atoms) requires real spatial decomposition, which requires MPI.
+
+---
+
+## 4. What UMA-S-1.2 actually requires from a decomposition
+
+Read from the checkpoint config (`uma-cache/uma-s-1p2.pt` → `model_config.backbone`):
+
+| Property | Value | Consequence for decomposition |
+|----------|-------|-------------------------------|
+| `num_layers` | **4** | Receptive field = `4 × 6.0` = **24 Å** |
+| `cutoff` | 6.0 Å | Edge cutoff only |
+| `max_neighbors` | 300 | Per-center cap (a no-op at these densities) |
+| `lmax` / `mmax` | 2 / 2 | 9 spherical components |
+| `sphere_channels` | 128 | Node state = 9 × 128 = 1152 doubles = **9.2 kB/atom** |
+| `direct_forces` | false | Forces via autograd → backward pass mirrors every forward collective |
+| `otf_graph` | false | Model consumes an externally supplied `edge_index` — **good**, LAMMPS can supply it |
+| `num_experts` (MoE) | 64 | Expert mixing coefficients depend on **global composition** |
+| `use_composition_embedding` | true | Same |
+| `charge_balanced_channels` | `[0,1,2]` | **Global all-reduce after every layer** (see below) |
+
+### 4.1 The non-local operations
+
+UMA-S is **not** a strictly local potential. Two whole-system couplings:
+
+1. **`balance_channels` after each of the 4 blocks** (`escn_md.py:795-801`, `balance_channels_batched` at `escn_md.py:143-191`). It sums channels `[0,1,2]` of the `L=0` component over **all atoms in the system**, compares against target charge/spin, and subtracts `(sum − target)/natoms` from every atom. FairChem's GP mode handles this with `torch.distributed.nn.functional.all_reduce` (grad-aware).
+   → In MPI: **4 all-reduces of 3 doubles forward + 4 in backward.** Trivial bandwidth, latency-bound only. But it is *mandatory* — dropping it changes every atom's embedding.
+
+2. **MOLE expert mixing coefficients** derive from the global composition (`escn_moe.py:125-159`). With `merge_mole=True` these are computed once and frozen, and FairChem asserts composition consistency. In a decomposed run each rank's *local* composition differs from global, so **`merge_mole=True` merged on the global composition is mandatory** — otherwise every rank silently uses a different expert mixture.
+
+Both are already satisfied by the campaign's `*-f64-fast` artifact (`execution_mode=umas_fast_pytorch`, `merge_mole=true`).
+
+### 4.2 The energy is decomposable, the export is not
+
+`MLP_EFS_Head` computes node energies and then `reduce_node_to_system` (`escn_md.py:1012-1019`) — per-atom energies exist internally, but [`export_wrapper.py`](../python/export_wrapper.py) returns only the reduced scalar. Post-processing is also per-atom-linear: `denorm_energy` is `E·rmsd + mean` with `mean = 0.0`, and `undo_element_references` is a per-atom `scatter_add`. So `E = Σ_ranks Σ_{i∈local} e_i` is exact **once the wrapper exposes node energies**. That is a small export change and a hard prerequisite for any decomposition.
+
+---
+
+## 5. Three candidate decompositions
+
+### A. Replicated (every rank evaluates the whole system)
+
+All-gather positions by atom tag, every rank runs the full model, each rank keeps forces for its own `nlocal`. Bit-exact by construction.
+
+Memory `O(N)` per rank, compute `O(N)` per rank → **no size scaling and no speedup**. Useful only as a correctness oracle and as an ensemble/replica vehicle.
+
+### B. Fat ghost halo (24 Å), no in-model communication
+
+Each rank builds the 6 Å graph over `local + ghosts within 24 Å`, evaluates `E_local = Σ_{i<nlocal} e_i`, autogrades w.r.t. all extended positions, and reverse-communicates ghost forces. Exact, and requires **no changes inside the model** except node energies + the global all-reduces from §4.1.
+
+The problem is arithmetic. With a cubic subdomain of side `L` and a 24 Å shell the extended set is `((L+48)/L)³ × nlocal`:
+
+| L (Å) | blow-up |
+|------:|--------:|
+| 24 | 27× |
+| 48 | 8× |
+| 96 | 3.4× |
+| 192 | 2.0× |
+
+Per-GPU capacity is ~10⁴ atoms in FP64 (§3). Solving `(L+48)³ ρ ≤ 10⁴` at NaCl density (ρ ≈ 0.0455 Å⁻³) gives `L ≈ 12 Å`, i.e. **~80 local atoms per GPU out of a 10 000-atom working set — under 1 % efficiency.** Scheme B is exact but useless for scaling. Keep it as a small-N oracle only.
+
+### C. Thin halo (6 Å) + per-layer embedding exchange — **recommended**
+
+Standard distributed message passing. Ghost shell = **one** cutoff. Before each block, exchange layer-`ℓ−1` node embeddings for ghost atoms; the owning rank has already computed them exactly, so the result is **bit-comparable to serial**, not an approximation. Backward reverses each exchange with a scatter-add.
+
+The substitution point is a single line — FairChem's own GP hook:
+
+```
+x_full = gather_from_model_parallel_region_sum_grad(x, total_atoms)   # replicated, O(N)
+x_ext  = uma_dist::halo_gather(x, plan)                               # spatial, O(nlocal + nghost)
+```
+
+Halo blow-up at 6 Å:
+
+| L (Å) | blow-up |
+|------:|--------:|
+| 48 | 1.95× |
+| 96 | 1.42× |
+| 192 | 1.19× |
+
+First-order comm model at 8 000 local atoms/rank (`L ≈ 56 Å`, ~6 300 ghosts, 9.2 kB/atom): ≈58 MB per exchange, ×4 layers ×2 directions ≈ **0.46 GB/step/rank**. At ~20 GB/s effective that is ~23 ms/step — same order as the current `ms_wait`, and it overlaps with compute. Plus 8 latency-bound all-reduces of 3 doubles.
+
+### Comparison
+
+| | A replicated | B fat halo | C thin halo + exchange |
+|---|---|---|---|
+| Exact | yes | yes | yes |
+| Memory/rank | `O(N)` | `O(nlocal·27…2)` | `O(nlocal·1.9…1.2)` |
+| Model surgery | none | node energies only | node energies + 1 gather hook |
+| In-model comm | none | 8 scalar all-reduces | 8 halo exchanges + 8 scalar all-reduces |
+| Scales to 10⁵ atoms | no | no | **yes** |
+| Effort | S | M | L |
+
+---
+
+## 6. Target architecture
+
+```mermaid
+flowchart TB
+  subgraph R["MPI rank r (1 GPU, 1 subdomain)"]
+    K["Kokkos: integrate, neighbor, comm<br/>x, f resident on device"]
+    NL["LAMMPS full neigh list<br/>local + ghost, 6 A"]
+    M["Traced UMA-S DD module<br/>node energies out"]
+    K --> NL --> M --> K
+  end
+  M -. "halo_gather x4 (per layer)" .-> H["CommKokkos forward/reverse<br/>CUDA-aware MPI, device buffers"]
+  M -. "all_reduce 3 doubles x4" .-> G["NCCL comm<br/>bootstrapped over MPI"]
+  H -.-> M
+  G -.-> M
+```
+
+Five deliberate departures from the same-node design:
+
+1. **One process per GPU, and that process is the LAMMPS rank.** No fork/exec workers, no `/dev/shm` payload, no pipes. `LibtorchMpRuntime`'s entire publish path disappears — along with `ms_nl`/`ms_pub`/`ms_pack` parent overhead that Tier 0/2 has been fighting.
+2. **LAMMPS owns the neighbor list.** Ghosts carry image-shifted absolute coordinates, so `cell_offsets ≡ 0` and `edge_distance_vec = pos[src] − pos[tgt]` directly. Vesin and the PBC wrap logic are not needed on this path. `edge_index[1] ∈ [0, nlocal)`, `edge_index[0] ∈ [0, nlocal+nghost)` maps exactly onto FairChem's `(neighbor, center)` convention with `node_offset = 0`.
+3. **`newton pair on`** plus `Pair::pack_reverse_comm` to fold ghost forces back — the opposite of today's `newton off`.
+4. **NCCL bootstrapped over MPI** (`ncclGetUniqueId` on rank 0 → `MPI_Bcast` → `ncclCommInitRank`) instead of through `/dev/shm`. Everything downstream in [`shared_peer.h`](../include/uma/shared_peer.h) and the `uma_peer` autograd ops is reused unchanged, including the W1–W8 optimisations.
+5. **Shape-agnostic module.** The current `model_mp_w{W}_n{N}_r{R}.pt` artifacts bake world and atom count at trace time; `nlocal` fluctuates every step under MPI. The DD export must be dynamic — `model_traced.pt` already is (it serves both 648- and 1728-atom systems), so the DD variant must preserve that.
+
+---
+
+## 7. Why the old v1/v2 sketch does not work
+
+[`multi_node_mpi.md`](multi_node_mpi.md) specifies "v1 = tag all-gather (parity only), v2 = halo with `comm_modify cutoff` ≥ 6 Å, bump to 12 Å if parity fails."
+
+- v1 is Scheme A — correct, and correctly labelled parity-only.
+- **v2 as written is wrong.** A 6 Å or 12 Å ghost shell with no in-model communication cannot be exact for a 4-layer model; the exact shell is 24 Å (Scheme B), and 24 Å is memory-infeasible (§5). "Bump to 12 Å if parity fails" cannot converge — the missing piece is per-layer communication, not a thicker shell.
+- Neither v1 nor v2 mentions `balance_channels` or the MOLE global composition, both of which break silently under decomposition.
+- v1/v2 also assume `newton pair off`, which cannot return ghost forces.
+
+None of this was ever executed: the only multi-node work committed is the Phase-G OOM sweep (`git log --all -- '*multi_node*'` → one commit, `6c66370dd2`), `pair_uma.cpp` has rejected `nprocs > 1` since its first commit, and `build-uma-mpi/` has never been built (`scripts/build_lammps_uma_mpi.sh` is untracked).
+
+---
+
+## 8. Is Kokkos still needed?
+
+**Not for the MLIP, and not for correctness. Yes for the halo exchange and for LAMMPS-side scaling.**
+
+| Question | Answer |
+|----------|--------|
+| Does any UMA kernel run in Kokkos? | No. Zero Kokkos in `uma-engine`; CMake has no Kokkos dependency. |
+| Is Kokkos needed for MPI multi-node correctness? | No. A plain `BUILD_MPI=ON`, non-Kokkos LAMMPS with `pair_style uma` and one GPU per rank is functionally equivalent. |
+| Is Kokkos needed for same-node `devices>1`? | No. It only supplies `ngpus` for auto-detection. |
+| Is Kokkos worth keeping under Scheme C? | **Yes — this is the real argument.** |
+
+Scheme C needs to move 9.2 kB/atom of ghost embeddings, four times forward and four times backward, every step. LAMMPS already has exactly the right machinery for that, and only in the KOKKOS package: `KokkosBase` declares `pack_forward_comm_kokkos` / `unpack_forward_comm_kokkos` / `pack_reverse_comm_kokkos` / `unpack_reverse_comm_kokkos` (`src/KOKKOS/kokkos_base.h:29-36`), and `PairUMAKokkos` **already inherits `KokkosBase`**. With `-k on ... cuda/aware on` (`src/KOKKOS/kokkos.cpp:536`) those buffers are device-resident and go straight into CUDA-aware MPI. Routing the halo through the plain `Comm` path would force a host round trip per layer per direction — eight extra device↔host transfers of the largest tensor in the step.
+
+Secondary benefits that only appear at multi-node scale: at 10⁵ atoms/node the integrator, neighbor build, exchange and thermo stop being free, and `-sf kk` keeps them on the GPU with `x`/`f` never leaving the device.
+
+The prerequisite is that today's host round trip in `PairUMAKokkos::compute` must go. The pair style should hand LibTorch a **device** pointer:
+
+```
+auto x_kk = atomKK->k_x.view<DeviceType>();          // device-resident
+auto pos  = torch::from_blob(x_kk.data(), {nall,3}, opts.device(torch::kCUDA));
+```
+
+with an explicit fence between the Kokkos execution space and the Torch stream. That change is what converts Kokkos from overhead into an asset; without it, keeping Kokkos is only justified by the comm hooks.
+
+**Recommendation:** keep `uma/kk` as the multi-node product path, but treat "zero-copy device handoff" (M2 below) as a gate, not an optimisation. Keep the non-Kokkos `pair_style uma` alive as a debugging reference — it costs nothing since `PairUMAKokkos` is a 79-line subclass.
+
+---
+
+## 9. Phased plan
+
+```mermaid
+flowchart TD
+  M0["M0 build + launch scaffold"] --> M1["M1 per-atom energy export"]
+  M1 --> M2["M2 zero-copy device handoff"]
+  M2 --> M3["M3 Scheme A replicated oracle"]
+  M3 --> M4["M4 global all-reduce over MPI"]
+  M4 --> M5["M5 Scheme B fat-halo exactness proof"]
+  M5 --> M6["M6 Scheme C halo exchange"]
+  M6 --> M7["M7 scaling campaign"]
+```
+
+### M0 — Build and launch scaffold
+Build `build-uma-mpi/lmp` (`BUILD_MPI=ON`, `PKG_KOKKOS=ON`). Bind one GPU per rank (`srun --gpus-per-task=1`, `-k on g 1 -sf kk`). Verify a non-UMA Kokkos pair style runs 2 nodes × 4 ranks.
+**Gate:** 8-rank LJ NVT reproduces the serial trajectory.
+
+### M1 — Per-atom energies
+Extend [`export_wrapper.py`](../python/export_wrapper.py) to return `(node_energy[N], total_E)`; carry per-atom element references and `denorm` through `postprocess.cpp`. Export `uma-s-1p2-omat-f64-fast-dd`.
+**Gate:** `|Σ node_e − E_total| ≤ 1e-12` relative, on NaCl6 and water888. Serial forces unchanged.
+
+### M2 — Zero-copy device handoff (Kokkos gate)
+`PairUMAKokkos::compute` passes `atomKK->k_x.view<DeviceType>()` to a new `Predictor::predict_device`, receives device forces, no host staging. Fence Kokkos ↔ Torch stream.
+**Gate:** bit-identical E/F vs the host path; measurable drop in the pair-style prologue. **If this fails, Kokkos loses its main justification — reopen §8.**
+
+### M3 — Scheme A replicated oracle
+Lift `nprocs > 1`. Tag-ordered `MPI_Allgatherv` of positions; every rank evaluates the full system; each keeps `nlocal` forces; energy on rank 0.
+**Gate:** 2/4/8 ranks bit-identical to serial. Explicitly labelled parity-only — **no speedup or scaling claims**.
+
+### M4 — Global reductions over MPI
+Add an MPI/NCCL-backed backend to `SharedPeerGatherSlot` (`ncclGetUniqueId` → `MPI_Bcast` → `ncclCommInitRank`). Replace `balance_channels`' `all_reduce_with_grad` with `uma_dist::all_reduce_sum` (same autograd pattern as `AllReduceSumFn`, `peer_context.cpp:75-95`). Verify `merge_mole=True` is merged on the **global** composition on every rank.
+**Gate:** with the reduction forced through MPI at 1 rank, results are bit-identical to serial; at N ranks under Scheme A, still bit-identical.
+
+### M5 — Scheme B fat-halo exactness proof
+`newton pair on`, `comm_modify cutoff 24.0`, `E_local = Σ_{i<nlocal} e_i`, autograd over the extended set, `Pair::pack_reverse_comm` for ghost forces. Small systems only.
+**Gate:** NaCl6 at 2/4 ranks matches serial to `|ΔE| ≤ 1e-10`, `max|ΔF| ≤ 1e-9`. Record the measured extended/local ratio to confirm the §5 arithmetic. This milestone is a **correctness proof, not a product** — it validates ownership, reverse comm, and the global reductions before adding halo exchange.
+
+### M6 — Scheme C halo exchange
+Shrink to `comm_modify cutoff 6.0`. Register `uma_dist::halo_gather(x, plan) -> x_ext` (forward: owned→ghost; backward: scatter-add ghost grads to owners), routed through `pack_forward_comm_kokkos` / `pack_reverse_comm_kokkos`. Export the DD module with FairChem's `gather_from_model_parallel_region_sum_grad` replaced by the halo op. Rebuild the halo plan on reneighbour only.
+**Gate:** matches M5 to the same bands at identical geometry, with extended/local ≈ 1.2–1.9×. Then and only then, timing.
+
+### M7 — Scaling campaign
+Weak scaling at fixed atoms/rank (target 5–8 k) across 1/2/4/8 nodes; strong scaling at fixed total N. Baselines: serial UMA, same-node `devices=4`, FairChem ASE FP64 where it fits.
+**Gate:** weak-scaling efficiency ≥ 70 % to 8 nodes; total atoms ≥ 10× the current N\* = 8 000 ceiling.
+
+---
+
+## 10. Open risks
+
+| Risk | Impact | Mitigation |
+|------|--------|-----------|
+| TorchScript tracing of a halo op with a dynamic plan | Blocks M6 | The `uma_peer` custom-op + autograd pattern already traces; pass the plan as an integer handle, tensors as arguments |
+| Comm volume dominates at small `nlocal` | Poor strong scaling | Overlap halo exchange with the parts of the block that need only local nodes; set a minimum atoms/rank in the campaign |
+| MoE `merge_mole` composition assert fires per rank | Silent wrong physics or a crash | M4 gate: assert every rank merged on the identical global composition |
+| CUDA-aware MPI unavailable or slow on Delta | M6 falls back to host staging | Measure early in M0; NCCL point-to-point is the fallback for the halo |
+| Torch stream vs Kokkos execution space races | Wrong forces, non-deterministic | Explicit fences in M2; the W8 NCCL-stream race (`MATRIX.md` §W8 probe) is the precedent |
+| No virial anywhere in `pair_uma` | NPT impossible at any rank count | Out of scope here; file separately — UMA has `regress_stress` via autograd on the cell |
+| Same-node `devices>1` and MPI both active | fork/exec before CUDA init breaks under MPI | Forbid `devices>1` when `nprocs>1`; error at `init_style` |
+
+## 11. Explicitly out of scope
+
+Ray · FP32/mixed · `umas_fast_gpu` (Triton, not traceable) · fixing FairChem's FC + `merge_mole` FP64 crash · approximate receptive-field truncation (a 6 Å halo *without* per-layer exchange is not UMA and must not ship) · changing cutoff, `max_neighbors`, or edge orientation · NPT/virial.
