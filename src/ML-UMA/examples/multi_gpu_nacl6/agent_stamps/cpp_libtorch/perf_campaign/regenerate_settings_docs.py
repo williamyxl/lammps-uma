@@ -300,18 +300,18 @@ def ingest_matrix(tables: dict) -> int:
             "primary",
         ),
         (
-            re.compile(r"^nacl6_uma_ufast_w8_ngpu(\d+)$"),
+            re.compile(r"^nacl6_uma_ufast_w8(?:fix)?_ngpu(\d+)$"),
             "ufast",
             "nacl6",
             "uma",
-            "probe_invalid_force",
+            "w8_auto",
         ),
         (
-            re.compile(r"^water888_uma_ufast_w8_ngpu(\d+)$"),
+            re.compile(r"^water888_uma_ufast_w8(?:fix)?_ngpu(\d+)$"),
             "ufast",
             "water888",
             "uma",
-            "probe_invalid_force",
+            "w8_auto",
         ),
     ]
     for d in sorted(matrix.iterdir()):
@@ -344,35 +344,58 @@ def ingest_matrix(tables: dict) -> int:
             .setdefault(path, {})
             .setdefault(str(ngpu), {})
         )
-        if mode == "probe_invalid_force":
-            note = "NCCL dedicated-stream race; forces garbage — do not promote"
-            # confirm from forces.npz if present
+        if mode == "w8_auto":
+            # Promote only when forces look sane vs merge ASE scale; else probe.
+            absmax = None
             fz = d / "forces.npz"
             if fz.is_file():
                 try:
                     import numpy as np
 
                     z = np.load(fz)
-                    key = "forces_uma_double" if "forces_uma_double" in z else None
+                    key = next(
+                        (k for k in z.files if k.startswith("forces_")),
+                        None,
+                    )
                     if key:
                         absmax = float(np.nanmax(np.abs(z[key])))
-                        if absmax > 1.0:
-                            note = f"forces absmax={absmax:.3e}; {note}"
                 except Exception as e:  # noqa: BLE001
-                    note = f"{note} (npz check failed: {e})"
-            _append_probe(
-                cell,
-                {
-                    "label": "W8",
-                    "status": "INVALID_FORCE",
-                    "ms": ms,
-                    "job": job,
-                    "E": r.get("energy_eV"),
-                    "note": note,
-                },
-            )
-            n += 1
-            continue
+                    absmax = None
+                    _append_probe(
+                        cell,
+                        {
+                            "label": "W8",
+                            "status": "INVALID_FORCE",
+                            "ms": ms,
+                            "job": job,
+                            "E": r.get("energy_eV"),
+                            "note": f"npz check failed: {e}",
+                        },
+                    )
+                    n += 1
+                    continue
+            force_bad = absmax is None or absmax > 1.0e3
+            if absmax is None:
+                # incomplete cell — skip until forces.npz lands
+                continue
+            if force_bad:
+                note = "NCCL dedicated-stream race; forces garbage — do not promote"
+                note = f"forces absmax={absmax:.3e}; {note}"
+                _append_probe(
+                    cell,
+                    {
+                        "label": "W8",
+                        "status": "INVALID_FORCE",
+                        "ms": ms,
+                        "job": job,
+                        "E": r.get("energy_eV"),
+                        "note": note,
+                    },
+                )
+                n += 1
+                continue
+            # Valid W8: promote primary row
+            mode = "primary_w8"
         # primary: fill missing timing / refine DONE cells without clobbering
         # richer force stats already present
         if ms is not None:
@@ -388,12 +411,17 @@ def ingest_matrix(tables: dict) -> int:
             ("force_max_norm_per_atom", "max_norm_atom"),
         ):
             if r.get(src) is not None and (
-                cell.get(dst) is None or cell.get(dst) == "—"
+                mode == "primary_w8"
+                or cell.get(dst) is None
+                or cell.get(dst) == "—"
             ):
                 cell[dst] = r[src]
         if job:
             cell["job"] = job
-        if not cell.get("status") or cell["status"] in ("PENDING",):
+        if mode == "primary_w8":
+            cell["status"] = "DONE_W8"
+            cell["note"] = "W8 stream-ordered NCCL"
+        elif not cell.get("status") or cell["status"] in ("PENDING",):
             cell["status"] = "DONE"
         if system == "nacl6":
             cell.setdefault("metric", "ms_per_eval_python")
