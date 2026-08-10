@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:31 CDT · Loop **disarmed** · product **W8nk** · V6 idle (water@4 ~1ms / W17 FairChem-blocked)
+**Stamp:** 2026-08-10T10:06 CDT · **W17** fixed-gamma export `21013149` → graph NaCl@2 `21013150`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,7 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **Idle / loop disarmed.** Product **W8nk**. Open: water@4 ASE gap ~1.2 ms; water@1 NVT floor; W17 needs FairChem Wigner RNG fix.
+- **W17 unblock:** export-time `gamma=0` (no `aten::rand`) → art `*-f64-fast-cgraph`.
+- Export **21013149**; CUDA graph NaCl@2 **21013150** (`UMA_CUDA_GRAPH=1` `UMA_EDGE_PAD=1`).
 
 
 ## Tier2 W6 (COMPLETE PASS)

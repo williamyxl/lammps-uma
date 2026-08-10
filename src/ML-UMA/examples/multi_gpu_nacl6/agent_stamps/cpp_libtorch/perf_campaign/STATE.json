@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:31:48",
+  "stamp": "2026-08-10T10:06:11",
   "phase": "V6_from_W8nk",
-  "status": "v6_idle_loop_disarmed",
+  "status": "w17_export_submitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,9 +128,12 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [],
+  "active_jobs": [
+    "21013149",
+    "21013150"
+  ],
   "tick_log": "tick.log",
-  "next_action": "Manual: water@4 model-side or FairChem RNG for W17",
+  "next_action": "Verify export no aten::rand; gate W17 NaCl@2 E/F + graph path",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2013,5 +2016,11 @@
     },
     "note": "devices=1 composition-specific traced; multi-GPU product remains W8nk",
     "promote_devices1": false
+  },
+  "w17": {
+    "export": "21013149",
+    "nacl2": "21013150",
+    "art": "uma-s-1p2-omat-f64-fast-cgraph",
+    "fix": "fixed_wigner_gamma0"
   }
 }
