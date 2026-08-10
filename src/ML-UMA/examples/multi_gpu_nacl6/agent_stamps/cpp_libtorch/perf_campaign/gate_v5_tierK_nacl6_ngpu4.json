@@ -1,0 +1,19 @@
+{
+  "ver": "tierK",
+  "sys": "nacl6",
+  "ngpu": 4,
+  "job": "20994398",
+  "ms": 92.64,
+  "baseline_w8fix_ms": 91.59,
+  "delta_vs_w8fix_ms": 1.0499999999999972,
+  "ase_ufast": 164.5,
+  "le_ase": true,
+  "dE_vs_merge_ase": 1.227817847393453e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "UMA_USE_KOKKOS": 0,
+  "pair_style": "uma",
+  "pass": true,
+  "note": "~+1ms vs W8-fix; within/near Tier K exit threshold",
+  "stamp": "2026-08-09T23:24:27"
+}

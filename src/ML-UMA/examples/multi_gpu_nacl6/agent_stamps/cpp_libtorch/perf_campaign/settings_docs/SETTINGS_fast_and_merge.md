@@ -1,6 +1,6 @@
 # Settings: fast and merge (`umas_fast_pytorch`, `merge_mole=True`)
 
-**Stamp:** 2026-08-09T23:23  
+**Stamp:** 2026-08-09T23:24  
 **FairChem:** `execution_mode=umas_fast_pytorch`, `merge_mole=True`  
 **uma artifact:** `uma-s-1p2-omat-f64-fast`  
 **E/F reference:** ASE `umas_fast_pytorch`+`merge_mole`  
@@ -29,7 +29,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE_FLOOR_FAIL | -5830.9237 | 2.120e-05 | — | — | — | 533.1000 | 20989766 devices=1: slow + E~general |
 | uma | 2 | DONE_W8 | -5830.9237 | 1.255e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 160.0800 | 20989976 W8 stream-ordered NCCL W8 INVALID_FORCE ms=160.19 (20989797): forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage — do not promote TierK DONE_AB ms=160.51200000000003 (20994397): TierK no-Kokkos; dE=1.237e-10; fmax=5.000e-07 |
-| uma | 4 | DONE_W8 | -5830.9237 | 1.219e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 91.5940 | 20989977 W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5 W8 INVALID_FORCE ms=90.45 (20989798): forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage — do not promote |
+| uma | 4 | DONE_W8 | -5830.9237 | 1.219e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 91.5940 | 20989977 W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5 W8 INVALID_FORCE ms=90.45 (20989798): forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage — do not promote TierK DONE_AB ms=92.64 (20994398): no-Kokkos; Δ vs W8fix +1.05ms |
 
 ### Timing summary (NaCl6)
 

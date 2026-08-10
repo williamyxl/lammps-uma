@@ -840,6 +840,14 @@
               "job": "20989798",
               "E": -5830.923741338152,
               "note": "forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
+            },
+            {
+              "label": "TierK",
+              "status": "DONE_AB",
+              "ms": 92.64,
+              "job": "20994398",
+              "E": -5830.9237413381525,
+              "note": "no-Kokkos; \u0394 vs W8fix +1.05ms"
             }
           ],
           "note": "W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5"
@@ -986,5 +994,5 @@
       }
     }
   },
-  "stamp": "2026-08-09T23:23"
+  "stamp": "2026-08-09T23:24"
 }

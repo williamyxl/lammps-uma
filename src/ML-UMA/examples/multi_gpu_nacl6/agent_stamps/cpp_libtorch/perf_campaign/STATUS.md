@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T23:24 CDT · Loop **armed** · **Tier K water@4 96.09** (E/F PASS; NaCl@4 still running)
+**Stamp:** 2026-08-09T23:24 CDT · Loop **armed** · **Tier K A/B COMPLETE** (E/F PASS all; default stays Kokkos for now)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,10 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- Tier K @2 PASS. Water@4 `20994400` **96.09** ms (E/F PASS; Δ vs W8-fix -0.12; ASE floor still FAIL by +1.59).
-- Waiting: NaCl@4 `20994398` (RUNNING).
+- **Tier K A/B COMPLETE** (`UMA_USE_KOKKOS=0`, `pair_style uma`): E/F PASS @2/@4 both suites.
+  - NaCl 160.5 / **92.64** (Δ vs W8-fix +0.4 / +1.05)
+  - water 165.1 / 96.09 (Δ +0.35 / −0.12); water@4 still fails ASE 94.5
+- **Do not flip default yet** — NaCl@4 ~+1 ms; keep `UMA_USE_KOKKOS=1` default; recipe proven. Next: W9+ toward water ASE@4, or recheck Tier K noise.
 
 
 ## Tier2 W6 (COMPLETE PASS)

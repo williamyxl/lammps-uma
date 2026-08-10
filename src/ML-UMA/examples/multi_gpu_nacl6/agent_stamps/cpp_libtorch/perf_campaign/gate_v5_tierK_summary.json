@@ -1,0 +1,29 @@
+{
+  "stamp": "2026-08-09T23:24:27",
+  "UMA_USE_KOKKOS": 0,
+  "cells": {
+    "nacl6_2": {
+      "ms": 160.51,
+      "delta_w8fix": 0.43,
+      "ef": "PASS"
+    },
+    "nacl6_4": {
+      "ms": 92.64,
+      "delta_w8fix": 1.0499999999999972,
+      "ef": "PASS"
+    },
+    "water_2": {
+      "ms": 165.1,
+      "delta_w8fix": 0.35,
+      "ef": "PASS"
+    },
+    "water_4": {
+      "ms": 96.09,
+      "delta_w8fix": -0.12,
+      "ef": "PASS",
+      "ase_floor": "FAIL still"
+    }
+  },
+  "promote_default": false,
+  "reason": "NaCl@4 ~+1ms vs W8-fix; keep UMA_USE_KOKKOS default=1 until noise recheck or clear win; recipe validated"
+}
