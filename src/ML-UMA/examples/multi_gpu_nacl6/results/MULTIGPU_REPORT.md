@@ -43,8 +43,8 @@ Force metrics vs ASE are secondary oracle. **Primary GP gate:** uma/kk `devices=
 | FairChem FC | 2 | -5830.9237152511 | 10.36 s | 4.915e-06 | — | — | — | — |
 | FairChem FC | 4 | -5830.9237152511 | 9.86 s | 4.915e-06 | — | — | — | — |
 | uma/kk double | 1 | -5830.9237201667 | 6.15 s | 1.228e-10 | 1.516e-07 | 2.179e-07 | 5.000e-07 | 1.000000 |
-| uma/kk double | 2 | -5830.9237413382 | 10.42 s | 2.117e-05 | 1.561e-07 | 2.208e-07 | 5.881e-07 | 1.000000 |
-| uma/kk double | 4 | -5830.9237413382 | 12.65 s | 2.117e-05 | 1.561e-07 | 2.208e-07 | 5.881e-07 | 1.000000 |
+| uma/kk double | 2 | -5830.9237413382 | 9.03 s | 2.117e-05 | 1.561e-07 | 2.208e-07 | 5.881e-07 | 1.000000 |
+| uma/kk double | 4 | -5830.9237413382 | 8.57 s | 2.117e-05 | 1.561e-07 | 2.208e-07 | 5.881e-07 | 1.000000 |
 | uma/kk mixed | 1 | -5830.9824218750 | 5.84 s | 5.870e-02 | 1.055e-06 | 1.397e-06 | 7.243e-06 | 1.000000 |
 | uma/kk mixed | 2 | -5830.9234688666 | 24.28 s | 2.513e-04 | 1.061e-06 | 1.404e-06 | 7.243e-06 | 1.000000 |
 
@@ -54,7 +54,7 @@ Force metrics vs ASE are secondary oracle. **Primary GP gate:** uma/kk `devices=
 |------|------|------|------|
 | ASE FP64 | 8.71 s | 17.55 s | 11.26 s |
 | FairChem FC | 4.65 s | 10.36 s | 9.86 s |
-| uma/kk double | 6.15 s | 10.42 s | 12.65 s |
+| uma/kk double | 6.15 s | 9.03 s | 8.57 s |
 | uma/kk mixed | 5.84 s | 24.28 s | — |
 
 ## Energy |dE| vs ASE@ngpu1 (eV)

@@ -231,3 +231,51 @@ TICK8 2026-08-09T14:56:12-05:00
 2026-08-09T19:43:39 TICK152 W6 @4 poll
 2026-08-09T19:43:50 TICK152 W6 nacl@4 PASS ms=92.934 dE_merge=1.228e-10
 2026-08-09T19:45:51 TICK153 W6 COMPLETE_PASS water@4=95.832 deltas={'nacl6_@2': -0.6539999999999964, 'nacl6_@4': 0.23599999999999, 'water888_@2': 1.1899999999999977, 'water888_@4': -0.41800000000000637}
+2026-08-09T19:49:11 TICK154 W7 submit {'nacl6_@2': '20989184', 'water888_@2': '20989186', 'nacl6_@4': '20989185', 'water888_@4': '20989187'}
+2026-08-09T19:49:39 TICK155 W7 poll
+2026-08-09T19:51:40 TICK156 W7 poll
+2026-08-09T19:53:39 TICK157 W7 poll
+2026-08-09T19:53:47 TICK157 W7 nacl@2 PASS ms=159.362 dW6=-0.886
+2026-08-09T19:55:41 TICK158 W7 poll
+2026-08-09T19:55:49 TICK158 W7 water@2 PASS ms=165.100 dW6=-0.370
+2026-08-09T19:57:40 TICK159 W7 @4 poll
+2026-08-09T19:59:41 TICK160 W7 @4 poll
+2026-08-09T20:01:39 TICK161 W7 @4 poll
+2026-08-09T20:03:48 CDT
+tick162 W7 @2 PASS; @4 still PENDING Resources/Priority (20989185,20989187)
+2026-08-09T20:05:36 CDT
+tick163 W7 @4 poll
+2026-08-09T20:08:58 CDT
+submitted matching ASE/FC bars (16 jobs)
+2026-08-09T20:09:31 CDT
+tick164 poll W7@4 + matching ASE/FC
+2026-08-09T20:09:49 CDT
+tick165 W7@4 + matching bars
+2026-08-09T20:11:39 CDT
+tick166 gate poll
+2026-08-09T20:13:20 CDT
+tick166 W7 COMPLETE PASS @2/@4; NaCl ASE matching locked; water refs resubmitted
+2026-08-09T20:13:43 CDT
+tick167 matching FC/water + W8?
+2026-08-09T20:15:38 CDT
+tick168 matching bars poll
+2026-08-09T20:16:04 CDT
+tick168 NaCl FC merge_mole+FP64 FAIL Float/Double; cancelled hung jobs
+2026-08-09T20:17:53 CDT
+tick169 water ASE matching + W8?
+2026-08-09T20:31:14 CDT
+exec: matrix jobs + W8 NCCL stream submitted
+2026-08-09T20:31:44 CDT
+tick176 matrix+W8 gather
+2026-08-09T20:33:39 CDT
+tick177 gather
+2026-08-09T20:35:41 CDT
+tick178 gather
+2026-08-09T20:43:25 CDT tick: W8-fix resubmit after stream precede
+2026-08-09T20:44:43 CDT tick: W8-fix nacl@2 still rebuilding/running
+2026-08-09T20:52:12 CDT tick: W8-fix nacl@2 E/F PASS ms=160.08
+2026-08-09T20:53:51 CDT tick: W8-fix @4/water still Priority-queued
+2026-08-09T20:55:41 CDT tick: W8-fix still Priority-queued (77-79)
+2026-08-09T20:57:37 CDT tick: W8-fix 77-79 status check
+2026-08-09T20:59:37 CDT tick: still Priority PD 77-79
+2026-08-09T21:01:39 CDT tick: PD Priority ~10m since nacl@2 done

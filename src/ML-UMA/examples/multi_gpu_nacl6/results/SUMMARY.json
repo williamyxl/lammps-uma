@@ -35,7 +35,7 @@
           "cosine_min": 0.999999999999
         },
         "metrics": {
-          "abs_dE_vs_uma_d1": 2.1171432308619842e-05,
+          "abs_dE_vs_uma_d1": 2.1171429580135737e-05,
           "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
           "cosine_vs_uma_d1": 0.999999999999616
         },
@@ -55,7 +55,7 @@
           "cosine_min": 0.999999999999
         },
         "metrics": {
-          "abs_dE_vs_uma_d1": 2.117143139912514e-05,
+          "abs_dE_vs_uma_d1": 2.117143048963044e-05,
           "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
           "cosine_vs_uma_d1": 0.999999999999616
         },
@@ -90,7 +90,7 @@
     ]
   },
   "results_parent": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/results",
-  "created_utc": "2026-08-10T00:27:10.423498+00:00",
+  "created_utc": "2026-08-10T01:50:13.851814+00:00",
   "meta": {
     "ngpus_present": [
       1,
@@ -263,16 +263,16 @@
       "key": "uma_double",
       "ngpu": 2,
       "uma_devices": 2,
-      "energy_eV": -5830.923741338154,
-      "ms_per_eval": 10415.710878400001,
-      "abs_dE_vs_ase_ngpu1": 2.117155509040458e-05,
-      "abs_dE_vs_ase_f64": 2.1171557818888687e-05,
+      "energy_eV": -5830.923741338152,
+      "ms_per_eval": 9031.439494999999,
+      "abs_dE_vs_ase_ngpu1": 2.1171552361920476e-05,
+      "abs_dE_vs_ase_f64": 2.117155509040458e-05,
       "force_mae": 1.5608185680551355e-07,
       "force_rmse": 2.207880509508902e-07,
       "force_max_abs": 5.881311022082336e-07,
       "force_max_norm_per_atom": 7.673305593203198e-07,
       "cosine": 0.9999999999990395,
-      "abs_dE_vs_uma_d1": 2.1171432308619842e-05,
+      "abs_dE_vs_uma_d1": 2.1171429580135737e-05,
       "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
       "cosine_vs_uma_d1": 0.999999999999616,
       "parity_gate": {
@@ -284,7 +284,7 @@
           "cosine_min": 0.999999999999
         },
         "metrics": {
-          "abs_dE_vs_uma_d1": 2.1171432308619842e-05,
+          "abs_dE_vs_uma_d1": 2.1171429580135737e-05,
           "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
           "cosine_vs_uma_d1": 0.999999999999616
         },
@@ -301,16 +301,16 @@
       "key": "uma_double",
       "ngpu": 4,
       "uma_devices": 4,
-      "energy_eV": -5830.923741338153,
-      "ms_per_eval": 12650.997924799998,
-      "abs_dE_vs_ase_ngpu1": 2.117155418090988e-05,
-      "abs_dE_vs_ase_f64": 2.1171557818888687e-05,
+      "energy_eV": -5830.9237413381525,
+      "ms_per_eval": 8574.976110399999,
+      "abs_dE_vs_ase_ngpu1": 2.1171553271415178e-05,
+      "abs_dE_vs_ase_f64": 2.1171556909393985e-05,
       "force_mae": 1.5608185680546466e-07,
       "force_rmse": 2.207880509506993e-07,
       "force_max_abs": 5.881311022359892e-07,
       "force_max_norm_per_atom": 7.673305594008186e-07,
       "cosine": 0.9999999999990398,
-      "abs_dE_vs_uma_d1": 2.117143139912514e-05,
+      "abs_dE_vs_uma_d1": 2.117143048963044e-05,
       "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
       "cosine_vs_uma_d1": 0.999999999999616,
       "parity_gate": {
@@ -322,7 +322,7 @@
           "cosine_min": 0.999999999999
         },
         "metrics": {
-          "abs_dE_vs_uma_d1": 2.117143139912514e-05,
+          "abs_dE_vs_uma_d1": 2.117143048963044e-05,
           "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
           "cosine_vs_uma_d1": 0.999999999999616
         },

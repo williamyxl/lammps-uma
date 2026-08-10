@@ -10,7 +10,7 @@ Canonical numbers: [`results/RESULTS.md`](results/RESULTS.md) — **321.04 / 183
 
 **Timing:** Prefer honest `uma64 E=… XXX ms` / pair timers for scaling reports.
 `stamp_slurm_timing.py` wall/`N_TIMING` is provenance only (often contaminated).  
-Peer transport: `UMA_PEER_TRANSPORT=cuda_ipc` (code default) · **`nccl`** (campaign PASS) · `shm` (fallback).
+Peer transport: **`nccl`** (code/product default) · `cuda_ipc` / `shm` (fallback via `UMA_PEER_TRANSPORT`).
 
 ## FairChem ASE — `workers=` (external oracle / baseline only)
 

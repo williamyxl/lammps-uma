@@ -1,6 +1,6 @@
 # Multi-GPU NaCl 6×6×6 — results (canonical)
 
-**Phase 4 + Perf P3c** · Stamp: 2026-08-08 ~19:00 CDT · Branch `uma-kokkos-mlip` · P3c `20940474`  
+**Phase 4 + Perf P3c** · Stamp: 2026-08-08 ~19:01 CDT · Branch `uma-kokkos-mlip` · P3c `20940474`  
 **Campaign bar:** uma ≤ ASE **and** ≤ FC · **PASS** · honest **321.04 / 183.30 / 112.04** (NCCL) · E+F green · @4 −3.2 ms vs ASE / −6.0 ms vs FC
 
 ## Product backend (uma/kk)
