@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T01:10 CDT · Loop **armed** · **W12 water@4 noise MISS** (median 96.10)
+**Stamp:** 2026-08-10T01:12 CDT · Loop **armed** · **W10 submitted** (edge pad high-water)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,9 +87,9 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W12 water@4 noise ×3 **COMPLETE — MISS ASE 94.5**: ms = [96.11, 96.03, 96.1] (median **96.10**; prior single 95.28 was lucky).
-- E/F PASS. **Do not promote W12.** Best honest water@4 remains ~95–96 ms band.
-- **Next:** W10/W11 (fixed-shape pad → CUDA graph) toward ASE@4.
+- W12 noise MISS ASE. **W10 in flight** (`UMA_EDGE_PAD=1`): high-water fixed-shape edge pad (dummy r≫cutoff).
+  - Jobs: NaCl@2 `20999998` (RECOMPILE=1) → @4 `20999999`; water@2 `21000000` → @4 `21000001`.
+- Goal: E/F PASS + unlock W11; speed may be flat/slightly worse until CUDA graph.
 
 
 ## Tier2 W6 (COMPLETE PASS)

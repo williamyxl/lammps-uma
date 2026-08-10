@@ -60,6 +60,39 @@ inline Shard shard_edges(const torch::Tensor& edge_index,
   return out;
 }
 
+// W10: pad local edges to a fixed capacity for allocator / CUDA-graph stability.
+// Dummy edges are self-edges on atom `pad_atom` with a large lattice shift so
+// |r| ≫ cutoff (FairChem add_n_empty_edges spirit: contribution ~0 via envelope).
+// edge_index: [2, E] int64; cell_offsets: [E, 3] float (or empty → zeros then pad).
+inline void pad_edges_to_capacity(torch::Tensor& edge_index,
+                                  torch::Tensor& cell_offsets, int64_t capacity,
+                                  int64_t pad_atom) {
+  if (capacity < 1) return;
+  const int64_t e = edge_index.defined() ? edge_index.size(1) : 0;
+  if (e >= capacity) return;
+  const auto opts_i =
+      torch::TensorOptions().dtype(torch::kLong).device(edge_index.device());
+  const auto opts_f =
+      cell_offsets.defined() && cell_offsets.numel() > 0
+          ? cell_offsets.options()
+          : torch::TensorOptions().dtype(torch::kFloat64).device(edge_index.device());
+  const int64_t n_pad = capacity - e;
+  auto pad_eidx = torch::full({2, n_pad}, pad_atom, opts_i);
+  // Large integer-like shift in float coff space (model does coff @ cell).
+  auto pad_coff = torch::zeros({n_pad, 3}, opts_f);
+  pad_coff.index_put_({torch::indexing::Slice(), 0}, 2.0);
+  if (e == 0) {
+    edge_index = pad_eidx;
+    cell_offsets = pad_coff;
+    return;
+  }
+  edge_index = torch::cat({pad_eidx, edge_index}, /*dim=*/1).contiguous();
+  if (!cell_offsets.defined() || cell_offsets.numel() == 0) {
+    cell_offsets = torch::zeros({e, 3}, opts_f);
+  }
+  cell_offsets = torch::cat({pad_coff, cell_offsets}, /*dim=*/0).contiguous();
+}
+
 // Coverage check: every edge assigned to exactly one rank (by center).
 inline bool partitions_cover_all_edges(const torch::Tensor& edge_index,
                                        int64_t n_atoms, int world_size) {

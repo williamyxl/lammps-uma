@@ -246,6 +246,26 @@ int main(int argc, char** argv) {
         coff_t = torch::empty({0, 3},
                               torch::TensorOptions().dtype(torch::kFloat64).device(dev));
       }
+      // W10: optional fixed-shape edge pad (high-water; unlocks W11 CUDA graph).
+      {
+        const char* pad_e = std::getenv("UMA_EDGE_PAD");
+        if (pad_e && std::string(pad_e) == "1") {
+          static thread_local int64_t edge_pad_cap = 0;
+          int64_t e_now = eidx_t.size(1);
+          if (const char* pe = std::getenv("UMA_EDGE_PAD_E")) {
+            const int64_t forced = std::strtoll(pe, nullptr, 10);
+            if (forced > edge_pad_cap) edge_pad_cap = forced;
+          }
+          if (e_now > edge_pad_cap) edge_pad_cap = e_now;
+          if (edge_pad_cap < 1) edge_pad_cap = 1;
+          auto nodes = uma::graph_shard::node_partition(n, world, rank).to(dev);
+          const int64_t pad_atom =
+              nodes.numel() > 0 ? nodes[0].item<int64_t>() : int64_t{0};
+          uma::graph_shard::pad_edges_to_capacity(eidx_t, coff_t, edge_pad_cap,
+                                                  pad_atom);
+          nedges = static_cast<int32_t>(eidx_t.size(1));
+        }
+      }
       // Tier0/W4: same-stream H2D is ordered before forward; no host sync here.
 
       pos_t = pos_t.set_requires_grad(true);
