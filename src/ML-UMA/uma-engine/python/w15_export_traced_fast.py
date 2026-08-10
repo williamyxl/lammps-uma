@@ -25,8 +25,9 @@ from common import (
     atoms_to_atomic_data,
     inference_settings_with_dtype,
 )
-from export_wrapper import apply_trace_patches, make_traced_export_wrapper, restore_trace_patches
+from export_wrapper import make_traced_export_wrapper
 from model_loader import load_prepared_hydra_model
+from trace_patch import apply_trace_patches, restore_trace_patches
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("w15_export_traced")
