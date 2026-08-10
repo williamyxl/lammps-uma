@@ -791,16 +791,16 @@
           "max_norm_atom": "\u2014"
         },
         "2": {
-          "E": -5830.923741338152,
-          "dE": 1.22e-10,
-          "ms": 159.4,
-          "status": "DONE_W7",
-          "job": "20989184",
+          "E": -5830.923741338155,
+          "dE": 1.255e-10,
+          "ms": 160.08,
+          "status": "DONE_W8",
+          "job": "20989976",
           "metric": "ms_per_eval_python",
-          "mae": 1.52e-07,
+          "mae": 1.518e-07,
           "rmse": null,
           "max_abs": 5e-07,
-          "max_norm_atom": 7.79e-07,
+          "max_norm_atom": 7.793e-07,
           "probes": [
             {
               "label": "W8",
@@ -810,7 +810,8 @@
               "E": -5830.923741338154,
               "note": "forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
             }
-          ]
+          ],
+          "note": "W8-fix stream-ordered NCCL; E/F PASS; +0.7ms vs W7"
         },
         "4": {
           "E": -5830.9237413381525,
@@ -955,5 +956,5 @@
       }
     }
   },
-  "stamp": "2026-08-09T20:41"
+  "stamp": "2026-08-09T20:52"
 }

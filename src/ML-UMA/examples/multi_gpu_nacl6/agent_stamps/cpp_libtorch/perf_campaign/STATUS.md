@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T20:43 CDT · Loop **armed** · **W8-fix re-gate in flight** (`20989976`–`79`)
+**Stamp:** 2026-08-09T20:51 CDT · Loop **armed** · **W8-fix NaCl@2 E/F PASS** (160.1 ms, ~+0.7 vs W7)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -86,8 +86,9 @@ FP64 · `uma/kk` + Kokkos · 1 MPI · no Ray · full parent NL · no force-reduc
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W8-fix resubmit after default→NCCL event wait: NaCl@2 `20989976` (RECOMPILE=1), @4 `20989977`, water @2/@4 `20989978`/`20989979` (afterok).
-- Prior W8 INVALID_FORCE kept as probes; docs refresh via `python regenerate_settings_docs.py --ingest-matrix` when gates land.
+- W8-fix NaCl@2 `20989976`: **E/F PASS** (dE~1.3e-10, fmax~5e-7); ms **160.08** (ASE ufast 191.6 clear; **+0.7 vs W7** — not a speed win).
+- Waiting: NaCl@4 `20989977`, water @2/@4 `20989978`/`20989979` (queued).
+- Prior broken W8 kept as INVALID_FORCE probes only.
 
 ## Tier2 W6 (COMPLETE PASS)
 | Suite | @2 | @4 | Δ vs Wave A @2/@4 |
