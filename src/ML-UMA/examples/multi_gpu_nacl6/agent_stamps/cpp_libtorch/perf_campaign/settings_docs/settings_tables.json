@@ -811,7 +811,7 @@
               "note": "forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
             }
           ],
-          "note": "W8-fix stream-ordered NCCL; E/F PASS; +0.7ms vs W7"
+          "note": "W8 stream-ordered NCCL"
         },
         "4": {
           "E": -5830.9237413381525,
@@ -956,5 +956,5 @@
       }
     }
   },
-  "stamp": "2026-08-09T20:52"
+  "stamp": "2026-08-09T21:04"
 }

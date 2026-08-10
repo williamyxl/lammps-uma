@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T20:51 CDT · Loop **armed** · **W8-fix NaCl@2 E/F PASS** (160.1 ms, ~+0.7 vs W7)
+**Stamp:** 2026-08-09T21:03 CDT · Loop **armed** · **W8-fix water@2 PASS 164.75** (clears ASE 165.5)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -86,9 +86,10 @@ FP64 · `uma/kk` + Kokkos · 1 MPI · no Ray · full parent NL · no force-reduc
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W8-fix NaCl@2 `20989976`: **E/F PASS** (dE~1.3e-10, fmax~5e-7); ms **160.08** (ASE ufast 191.6 clear; **+0.7 vs W7** — not a speed win).
-- Waiting: NaCl@4 `20989977`, water @2/@4 `20989978`/`20989979` (queued).
-- Prior broken W8 kept as INVALID_FORCE probes only.
+- W8-fix NaCl@2 `20989976`: E/F PASS, **160.08** ms (+0.7 vs W7).
+- W8-fix water@2 `20989978`: E/F PASS, **164.75** ms (ASE ufast 165.5; **−0.35 vs W7**).
+- Waiting: NaCl@4 `20989977`, water@4 `20989979` (Priority).
+
 
 ## Tier2 W6 (COMPLETE PASS)
 | Suite | @2 | @4 | Δ vs Wave A @2/@4 |
