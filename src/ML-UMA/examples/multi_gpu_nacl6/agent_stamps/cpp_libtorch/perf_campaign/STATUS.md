@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:12 CDT · W15 export#1 FAILED (HF/Fe) · resubmit MP-style `21011143` + NaCl@1 `21011144`
+**Stamp:** 2026-08-10T09:14 CDT · W15 export#2 ImportError · fixed → `21011179` + NaCl@1 `21011180`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,7 +87,7 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W15:** first export `21011053` FAILED (HF gated atom_refs / Fe+merge_mole path). Restored `model_traced.pt`. Resubmit **21011143** (NaCl MP-style) → gate **21011144**.
+- **W15:** export#2 `21011143` ImportError (`trace_patch`). Resubmit **21011179** → **21011180**.
 
 
 ## Tier2 W6 (COMPLETE PASS)

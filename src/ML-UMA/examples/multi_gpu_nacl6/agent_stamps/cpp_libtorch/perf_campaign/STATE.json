@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:12:52",
+  "stamp": "2026-08-10T09:14:00",
   "phase": "V6_from_W8nk",
-  "status": "w15_export_resubmitted_mp_style",
+  "status": "w15_export_resubmitted_import_fix",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -129,8 +129,8 @@
     }
   },
   "active_jobs": [
-    "21011143",
-    "21011144"
+    "21011179",
+    "21011180"
   ],
   "tick_log": "tick.log",
   "next_action": "Gate W15 devices=1 E/F vs ASE merge + speed vs ASE ufast @1",
@@ -1946,9 +1946,11 @@
     "pass": true
   },
   "w15": {
-    "export": "21011143",
-    "nacl1": "21011144",
-    "prior_fail": "21011053",
-    "method": "w15_export_traced_fast.py"
+    "export": "21011179",
+    "nacl1": "21011180",
+    "fails": [
+      "21011053",
+      "21011143"
+    ]
   }
 }
