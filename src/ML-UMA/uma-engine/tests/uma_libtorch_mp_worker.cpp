@@ -8,6 +8,7 @@
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <tuple>
 #include <vector>
 
 #include <errno.h>
@@ -16,6 +17,8 @@
 #include <unistd.h>
 
 #if defined(UMA_ENGINE_USE_CUDA)
+#include <ATen/cuda/CUDAGraph.h>
+#include <c10/cuda/CUDAStream.h>
 #include <cuda_runtime_api.h>
 #endif
 
@@ -170,6 +173,33 @@ int main(int argc, char** argv) {
       const char* e = std::getenv("UMA_MP_VERBOSE");
       return e && e[0] == '1' && e[1] == '\0';
     }();
+    // W11: CUDA Graph of fwd+bwd (requires UMA_EDGE_PAD=1 for fixed shapes).
+    // NCCL-inside-TS makes this stretch; capture failure → eager forever.
+    const bool want_cuda_graph = [] {
+      const char* e = std::getenv("UMA_CUDA_GRAPH");
+      const char* p = std::getenv("UMA_EDGE_PAD");
+      return e && std::string(e) == "1" && p && std::string(p) == "1";
+    }();
+    const int graph_warmup = [] {
+      const char* e = std::getenv("UMA_CUDA_GRAPH_WARMUP");
+      if (!e || !*e) return 3;
+      const int v = std::atoi(e);
+      return v > 0 ? v : 3;
+    }();
+#if defined(UMA_ENGINE_USE_CUDA)
+    at::cuda::CUDAGraph cuda_graph;
+    bool graph_captured = false;
+    bool graph_failed = false;
+    int graph_step = 0;
+    int64_t graph_e_cap = -1;
+    torch::Tensor g_pos, g_z, g_cell, g_eidx, g_coff, g_pbc, g_ch, g_sp;
+    torch::Tensor g_normed, g_forces;
+#endif
+    if (want_cuda_graph) {
+      std::cerr << "uma_libtorch_mp_worker rank=" << rank
+                << " W11 CUDA_GRAPH enabled (warmup=" << graph_warmup << ")\n"
+                << std::flush;
+    }
     std::cerr << "uma_libtorch_mp_worker rank=" << rank << " module loaded, sending ready\n"
               << std::flush;
     uint8_t ready = 1;
@@ -275,48 +305,172 @@ int main(int argc, char** argv) {
       auto sp = torch::tensor(spin, torch::TensorOptions().dtype(torch::kLong).device(dev));
 
       using clock = std::chrono::steady_clock;
-      const auto t_fwd0 = clock::now();
-      if (verbose) {
-        std::cerr << "uma_libtorch_mp_worker rank=" << rank << " edges=" << nedges
-                  << " starting module.forward\n"
-                  << std::flush;
-      }
-      std::vector<torch::jit::IValue> args = {pos_t, z_t, cell_t, pbc_t, eidx_t, coff_t, ch, sp};
-      torch::Tensor normed;
-      {
-        torch::autograd::AutoGradMode guard(true);
-        normed = module.forward(args).toTensor().to(torch::kFloat64);
-      }
-      // No explicit sync after forward — peer barrier below drains the device.
-      const double ms_fwd =
-          std::chrono::duration<double, std::milli>(clock::now() - t_fwd0).count();
-      auto energy =
-          uma::denorm_energy(normed, metadata.normalizer_mean, metadata.normalizer_rmsd);
-      if (metadata.element_references.defined()) {
-        auto refs = metadata.element_references.to(dev, torch::kFloat64);
-        auto batch =
-            torch::zeros({n}, torch::TensorOptions().dtype(torch::kLong).device(dev));
-        energy = uma::undo_element_references(energy, z_t, batch, refs);
-      }
-      // TS graph already contains uma_peer::all_reduce_sum on the energy logit.
       double escale = 1.0 / static_cast<double>(world);
       if (const char* es = std::getenv("UMA_GRAD_ENERGY_SCALE")) {
         escale = std::strtod(es, nullptr);
         if (!(escale > 0.0)) escale = 1.0 / static_cast<double>(world);
       }
-      auto e_for_grad = energy.reshape({-1}).sum() * escale;
-      // W12: energy AR inside TS already orders ranks; optional skip of host barrier.
-      {
+      const bool skip_pre_bwd = [] {
         const char* skip_bar = std::getenv("UMA_SKIP_PRE_BWD_BARRIER");
-        if (!(skip_bar && std::string(skip_bar) == "1")) {
+        return skip_bar && std::string(skip_bar) == "1";
+      }();
+
+      // Shared eager body: fwd → denorm → (optional barrier) → bwd.
+      // Used for non-graph path and graph warmup/capture.
+      auto run_eager_fwd_bwd =
+          [&](torch::Tensor& pos_use, torch::Tensor& z_use, torch::Tensor& cell_use,
+              torch::Tensor& pbc_use, torch::Tensor& eidx_use, torch::Tensor& coff_use,
+              torch::Tensor& ch_use, torch::Tensor& sp_use, bool skip_barrier)
+              -> std::tuple<torch::Tensor, torch::Tensor, double, double> {
+        const auto t_fwd0 = clock::now();
+        if (verbose) {
+          std::cerr << "uma_libtorch_mp_worker rank=" << rank << " edges=" << nedges
+                    << " starting module.forward\n"
+                    << std::flush;
+        }
+        std::vector<torch::jit::IValue> args = {pos_use, z_use, cell_use, pbc_use,
+                                                eidx_use, coff_use, ch_use, sp_use};
+        torch::Tensor normed;
+        {
+          torch::autograd::AutoGradMode guard(true);
+          normed = module.forward(args).toTensor().to(torch::kFloat64);
+        }
+        const double ms_fwd_loc =
+            std::chrono::duration<double, std::milli>(clock::now() - t_fwd0).count();
+        auto energy_loc =
+            uma::denorm_energy(normed, metadata.normalizer_mean, metadata.normalizer_rmsd);
+        if (metadata.element_references.defined()) {
+          auto refs = metadata.element_references.to(dev, torch::kFloat64);
+          auto batch =
+              torch::zeros({n}, torch::TensorOptions().dtype(torch::kLong).device(dev));
+          energy_loc = uma::undo_element_references(energy_loc, z_use, batch, refs);
+        }
+        auto e_for_grad = energy_loc.reshape({-1}).sum() * escale;
+        if (!skip_barrier) {
           uma::PeerContext::instance().slot().barrier(rank);
         }
+        const auto t_bwd0 = clock::now();
+        auto grads =
+            torch::autograd::grad({e_for_grad}, {pos_use}, {}, false, false, false);
+        auto forces_loc = (-grads[0]).to(torch::kFloat64).contiguous();
+        const double ms_bwd_loc =
+            std::chrono::duration<double, std::milli>(clock::now() - t_bwd0).count();
+        return {energy_loc, forces_loc, ms_fwd_loc, ms_bwd_loc};
+      };
+
+      torch::Tensor energy;
+      torch::Tensor forces;
+      double ms_fwd = 0.0;
+      double ms_bwd = 0.0;
+      const char* path_tag = "eager";
+
+#if defined(UMA_ENGINE_USE_CUDA)
+      const bool try_graph =
+          want_cuda_graph && !graph_failed && eidx_t.size(1) > 0;
+      if (try_graph) {
+        const int64_t e_cap = eidx_t.size(1);
+        // Rebuild static buffers if N / E capacity changed (invalidates capture).
+        if (!g_pos.defined() || g_pos.size(0) != n || graph_e_cap != e_cap) {
+          if (graph_captured) {
+            cuda_graph.reset();
+            graph_captured = false;
+            graph_step = 0;
+            std::cerr << "uma_libtorch_mp_worker rank=" << rank
+                      << " W11 graph reset (shape change e_cap=" << e_cap << ")\n"
+                      << std::flush;
+          }
+          {
+            torch::NoGradGuard ng;
+            g_pos = torch::empty(
+                {n, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+            g_z = torch::empty({n},
+                              torch::TensorOptions().dtype(torch::kLong).device(dev));
+            g_cell = torch::empty(
+                {3, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+            g_eidx = torch::empty(
+                {2, e_cap}, torch::TensorOptions().dtype(torch::kLong).device(dev));
+            g_coff = torch::empty(
+                {e_cap, 3}, torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+            g_pbc = torch::empty({3},
+                                torch::TensorOptions().dtype(torch::kBool).device(dev));
+            g_ch = torch::empty({},
+                               torch::TensorOptions().dtype(torch::kLong).device(dev));
+            g_sp = torch::empty({},
+                               torch::TensorOptions().dtype(torch::kLong).device(dev));
+          }
+          g_pos.set_requires_grad(true);
+          graph_e_cap = e_cap;
+        }
+        {
+          torch::NoGradGuard ng;
+          g_pos.copy_(pos_t);
+          g_z.copy_(z_t);
+          g_cell.copy_(cell_t);
+          g_eidx.copy_(eidx_t);
+          g_coff.copy_(coff_t);
+          g_pbc.copy_(pbc_t);
+          g_ch.copy_(ch);
+          g_sp.copy_(sp);
+        }
+
+        if (!graph_captured) {
+          // Warmup then capture (skip host barrier — NCCL in TS orders ranks).
+          if (graph_step < graph_warmup) {
+            std::tie(energy, forces, ms_fwd, ms_bwd) = run_eager_fwd_bwd(
+                g_pos, g_z, g_cell, g_pbc, g_eidx, g_coff, g_ch, g_sp, /*skip=*/true);
+            ++graph_step;
+            path_tag = "graph_warmup";
+          } else {
+            uma::PeerContext::instance().slot().barrier(rank);
+            try {
+              cuda_graph.capture_begin(
+                  /*pool=*/{0, 0}, cudaStreamCaptureModeThreadLocal);
+              std::tie(energy, forces, ms_fwd, ms_bwd) = run_eager_fwd_bwd(
+                  g_pos, g_z, g_cell, g_pbc, g_eidx, g_coff, g_ch, g_sp,
+                  /*skip=*/true);
+              g_normed = energy;  // keep live handles updated by replay
+              g_forces = forces;
+              cuda_graph.capture_end();
+              graph_captured = true;
+              path_tag = "graph_capture";
+              std::cerr << "uma_libtorch_mp_worker rank=" << rank
+                        << " W11 CUDA graph captured e_cap=" << e_cap << "\n"
+                        << std::flush;
+            } catch (const std::exception& ex) {
+              graph_failed = true;
+              if (graph_captured) {
+                cuda_graph.reset();
+                graph_captured = false;
+              }
+              std::cerr << "uma_libtorch_mp_worker rank=" << rank
+                        << " W11 CUDA graph CAPTURE FAILED: " << ex.what()
+                        << " — falling back to eager\n"
+                        << std::flush;
+              std::tie(energy, forces, ms_fwd, ms_bwd) = run_eager_fwd_bwd(
+                  g_pos, g_z, g_cell, g_pbc, g_eidx, g_coff, g_ch, g_sp,
+                  skip_pre_bwd);
+              path_tag = "graph_fail_eager";
+            }
+            uma::PeerContext::instance().slot().barrier(rank);
+          }
+        } else {
+          const auto t0 = clock::now();
+          cuda_graph.replay();
+          energy = g_normed;
+          forces = g_forces;
+          ms_fwd =
+              std::chrono::duration<double, std::milli>(clock::now() - t0).count();
+          ms_bwd = 0.0;  // folded into replay
+          path_tag = "graph_replay";
+        }
+      } else
+#endif
+      {
+        std::tie(energy, forces, ms_fwd, ms_bwd) = run_eager_fwd_bwd(
+            pos_t, z_t, cell_t, pbc_t, eidx_t, coff_t, ch, sp, skip_pre_bwd);
+        path_tag = "eager";
       }
-      const auto t_bwd0 = clock::now();
-      auto grads = torch::autograd::grad({e_for_grad}, {pos_t}, {}, false, false, false);
-      auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
-      const double ms_bwd =
-          std::chrono::duration<double, std::milli>(clock::now() - t_bwd0).count();
+
       const char* skip_fred = std::getenv("UMA_SKIP_FORCE_GP_REDUCE");
       double ms_fred = 0.0;
       if (skip_fred && std::string(skip_fred) == "1") {
@@ -333,7 +487,8 @@ int main(int argc, char** argv) {
       cudaDeviceSynchronize();
 #endif
       std::cerr << "PERF_TICK rank=" << rank << " world=" << world
-                << " nedges=" << nedges << " ms_fwd=" << ms_fwd
+                << " nedges=" << nedges << " path=" << path_tag
+                << " ms_fwd=" << ms_fwd
                 << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
                 << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred) << "\n"
                 << std::flush;

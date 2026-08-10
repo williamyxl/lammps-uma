@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T03:34:17",
-  "phase": "V5_tier2_W10",
-  "status": "w10_COMPLETE_ef_pass_next_W11",
+  "stamp": "2026-08-10T07:39:30",
+  "phase": "V5_tier2_W11",
+  "status": "w11_gates_pending",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Implement W11 CUDA graph on padded edges; gate water@4",
+  "next_action": "Gate W11 E/F + water@4 vs ASE 94.5 / W8-fix",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": null,
+  "active_jobid": "21009584",
   "tick": {
-    "last": "2026-08-10T01:12:24",
-    "note": "W10 submit {'nacl6_@2': '20999998', 'nacl6_@4': '20999999', 'water888_@2': '21000000', 'water888_@4': '21000001'}"
+    "last": "2026-08-10T07:39:30",
+    "note": "W11 submit {'nacl6_@2': '21009584', 'nacl6_@4': '21009588', 'water888_@2': '21009592', 'water888_@4': '21009596'}"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1476,5 +1476,15 @@
         }
       }
     }
+  },
+  "tier2_w11": {
+    "change": "UMA_CUDA_GRAPH=1 + UMA_EDGE_PAD=1",
+    "jobs": {
+      "nacl6_@2": "21009584",
+      "nacl6_@4": "21009588",
+      "water888_@2": "21009592",
+      "water888_@4": "21009596"
+    },
+    "status": "SUBMITTED"
   }
 }

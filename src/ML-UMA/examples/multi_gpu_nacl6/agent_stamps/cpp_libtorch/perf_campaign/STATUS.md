@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T03:34 CDT · Loop **armed** · **W10 COMPLETE** (E/F PASS; pad opt-in; next W11)
+**Stamp:** 2026-08-10T03:40 CDT · Loop **armed** · **W11 submitted** (CUDA graph + edge pad)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,9 +87,9 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W10 COMPLETE** (`UMA_EDGE_PAD=1`): E/F PASS all cells — **CUDA-graph unlock OK**. Speed not promoted (NaCl@4 +2.0; water@4 96.92, still > ASE 94.5).
-  - NaCl 159.65 / 93.60; water 167.18 / 96.92
-- **Next:** W11 CUDA Graph capture of worker fwd/bwd (needs fixed shapes from W10).
+- **W11 in flight** (`UMA_CUDA_GRAPH=1` + `UMA_EDGE_PAD=1`, ThreadLocal capture, eager fallback):
+  - NaCl@2 `21009584` (RECOMPILE=1) → @4 `21009588`; water@2 `21009592` → @4 `21009596`.
+- Stretch: NCCL-inside-TS may fail capture → document structural floor if so.
 
 
 ## Tier2 W6 (COMPLETE PASS)
