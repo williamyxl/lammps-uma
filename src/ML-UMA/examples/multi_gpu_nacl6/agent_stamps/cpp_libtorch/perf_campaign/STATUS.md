@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T12:03 CDT · Loop **armed** · W17c export `21015028` → NaCl@2 `21015029`
+**Stamp:** 2026-08-10T13:17 CDT · **Handoff** [`HANDOFF.md`](HANDOFF.md) · W17c export `21015028` → NaCl@2 `21015029` (still queued)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v6_w8nk_perf_push_77967fcb` (**CURRENT** — W17 CUDA graph)
 
 ## Locked speed baselines — `general` only (do **not** re-run)

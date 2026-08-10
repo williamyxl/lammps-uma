@@ -1,6 +1,6 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T12:04:21",
+  "stamp": "2026-08-10T13:19:04",
   "phase": "V6_W17_cuda_graph",
   "status": "w17c_submitted",
   "gates": {
@@ -133,7 +133,7 @@
     "21015029"
   ],
   "tick_log": "tick.log",
-  "next_action": "Gate W17c graph path + E/F; matrix if PASS",
+  "next_action": "Next agent: read HANDOFF.md; drain W17c 21015028/21015029",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2047,5 +2047,6 @@
     "export": "21015028",
     "nacl2": "21015029",
     "fix": "capture_safe_shapes+endcapture_hygiene"
-  }
+  },
+  "handoff": "HANDOFF.md"
 }
