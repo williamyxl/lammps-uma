@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T01:26:07",
+  "stamp": "2026-08-10T03:18:14",
   "phase": "V5_tier2_W10",
-  "status": "w10_@2_PASS_await_@4",
+  "status": "w10_nacl_PASS_await_water4",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -1428,6 +1428,23 @@
       "UMA_EDGE_PAD": 1,
       "pass": true,
       "stamp": "2026-08-10T01:26:07"
+    },
+    "nacl6_@4": {
+      "ver": "tier2_w10",
+      "sys": "nacl6",
+      "ngpu": 4,
+      "job": "20999999",
+      "ms": 93.604,
+      "baseline_w8fix_ms": 91.59,
+      "delta_vs_w8fix_ms": 2.013999999999996,
+      "ase_ufast": 164.5,
+      "le_ase": true,
+      "dE_vs_merge_ase": 1.2187229003757238e-10,
+      "force_max_abs": 4.999896874996468e-07,
+      "ef_pass": true,
+      "UMA_EDGE_PAD": 1,
+      "pass": true,
+      "stamp": "2026-08-10T03:18:13"
     }
   }
 }

@@ -871,6 +871,14 @@
               "ms": 93.856,
               "job": "20999255",
               "note": "skip pre-bwd; \u0394W8fix +2.27"
+            },
+            {
+              "label": "W10",
+              "status": "DONE_AB",
+              "ms": 93.604,
+              "job": "20999999",
+              "E": -5830.923741338152,
+              "note": "edge pad; \u0394W8fix +2.01ms"
             }
           ],
           "note": "W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5"
@@ -1040,5 +1048,5 @@
       }
     }
   },
-  "stamp": "2026-08-10T01:26"
+  "stamp": "2026-08-10T03:18"
 }

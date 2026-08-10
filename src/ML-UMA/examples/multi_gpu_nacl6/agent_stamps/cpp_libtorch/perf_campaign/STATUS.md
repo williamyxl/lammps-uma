@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T01:26 CDT · Loop **armed** · **W10 @2 PASS** (NaCl 159.7 / water 167.2)
+**Stamp:** 2026-08-10T03:18 CDT · Loop **armed** · **W10 NaCl@4 93.60** (E/F PASS; await water@4)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W10 @2 COMPLETE**: NaCl **159.65** (Δ -0.43); water **167.18** (Δ +2.43; SP 166.3); both E/F PASS.
-- Waiting @4: NaCl `20999999`, water `21000001`.
+- **W10 NaCl** @2/4 E/F PASS: 159.65 / **93.60** (Δ vs W8-fix -0.43 / +2.01).
+- Water@2 167.18 (Δ +2.43). Waiting: water@4 `21000001`.
 
 
 ## Tier2 W6 (COMPLETE PASS)
