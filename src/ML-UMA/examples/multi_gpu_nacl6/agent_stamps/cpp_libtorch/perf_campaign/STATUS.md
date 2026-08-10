@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T00:30 CDT · Loop **armed** · **W12 COMPLETE — do not promote**
+**Stamp:** 2026-08-10T00:32 CDT · Loop **armed** · **W12 water@4 noise ×3** (chase ASE 94.5)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,10 +87,9 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W12 COMPLETE** (`UMA_SKIP_PRE_BWD_BARRIER=1`): E/F PASS all cells; **do not promote** (no clear win vs W8-fix; water@4 still > ASE 94.5).
-  - NaCl 160.19 / 93.86 (Δ +0.11 / +2.27)
-  - water 178.95 / 95.28 (Δ +14.20 / -0.93; @2 NVT spike, SP was 166.6)
-- Next: W10/W11 (CUDA-graph path) or other max-push; keep W8-fix as best.
+- W12 COMPLETE — **no promote** (NaCl@4 regress; mixed). Best water@4 so far: **95.28** (W12, still +0.78 vs ASE 94.5).
+- **IN FLIGHT:** water@4 W12 noise recheck ×3 (`tier2_w12_water4_noise.txt`): `20999831`, `20999832`, `20999833`.
+- If any rep ≤94.5 → stamp floor PASS; else start W10/W11 CUDA-graph track.
 
 
 ## Tier2 W6 (COMPLETE PASS)

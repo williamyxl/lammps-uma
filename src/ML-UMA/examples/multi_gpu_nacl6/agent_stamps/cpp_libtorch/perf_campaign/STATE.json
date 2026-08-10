@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T00:30:11",
+  "stamp": "2026-08-10T01:00:26",
   "phase": "V5_tier2_W12",
-  "status": "w12_COMPLETE_no_promote",
+  "status": "w12_water4_noise_recheck",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Do not promote W12; resume max-push (W10/W11 or other) toward water ASE@4",
+  "next_action": "Gate noise reps; if miss ASE start W10/W11",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": null,
+  "active_jobid": "20999831",
   "tick": {
-    "last": "2026-08-10T00:19:10",
-    "note": "W12 resubmit {'nacl6_@2': '20999254', 'nacl6_@4': '20999255', 'water888_@2': '20999256', 'water888_@4': '20999257'}"
+    "last": "2026-08-10T01:00:26",
+    "note": "W12 water@4 noise x3 {'water888_@4_rep1': '20999831', 'water888_@4_rep2': '20999832', 'water888_@4_rep3': '20999833'}"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1344,5 +1344,13 @@
         }
       }
     }
+  },
+  "tier2_w12_noise": {
+    "jobs": {
+      "water888_@4_rep1": "20999831",
+      "water888_@4_rep2": "20999832",
+      "water888_@4_rep3": "20999833"
+    },
+    "goal": "water@4 \u226494.5"
   }
 }
