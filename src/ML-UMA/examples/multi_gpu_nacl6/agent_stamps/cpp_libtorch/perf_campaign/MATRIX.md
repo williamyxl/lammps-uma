@@ -30,10 +30,10 @@ FC+`merge_mole`+FP64: FairChem Float/Double crash — do not fix.
 
 | System | ngpu | best ASE (tag, ms) | best FC (tag, ms) | uma (tag, ms) | margin ASE | margin FC | floor |
 |--------|-----:|--------------------|-------------------|---------------|----------:|----------:|:-----:|
-| NaCl6 | 1 | gen **396.5** (locked) | gen **345.5** (locked) | — | — | — | TBD |
+| NaCl6 | 1 | ufast **350.3** | gen **345.5** (locked) | — | — | — | TBD (uma@1) |
 | NaCl6 | 2 | ufast **191.6** | gen **193.2** | ufast **159.4** (W7) | 32.2 | 33.8 | **PASS** |
 | NaCl6 | 4 | ufast **164.5** | gen **118.0** | ufast **92.4** (W7) | 72.1 | 25.6 | **PASS** |
-| water888 | 1 | gen **382.1** (locked) | gen **359.4** (locked) | — | — | — | TBD |
+| water888 | 1 | ufast **337.6** | gen **359.4** (locked) | — | — | — | TBD (uma@1) |
 | water888 | 2 | gen **198.2** (locked; ASE ufast pending) | gen **200.5** | ufast **165.1** (W7) | 33.1* | 35.4 | **PASS*** |
 | water888 | 4 | gen **118.0** (locked; ASE ufast pending) | gen **118.9** | ufast **96.8** (W7) | 21.2* | 22.1 | **PASS*** |
 

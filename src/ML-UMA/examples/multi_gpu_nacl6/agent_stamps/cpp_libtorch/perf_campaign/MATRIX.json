@@ -1,5 +1,5 @@
 {
-  "stamp": "2026-08-09T20:26:00",
+  "stamp": "2026-08-09T20:31:00",
   "policy": "BEST_BARS are minimum floor; max-push to hard ceiling",
   "artifacts": {
     "gen": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/uma-engine/artifacts/uma-s-1p2-omat-f64",
@@ -10,14 +10,15 @@
     "nacl6": {
       "1": {
         "ase": {
-          "tag": "gen",
-          "ms": 396.5
+          "tag": "ufast",
+          "ms": 350.3
         },
         "fc": {
           "tag": "gen",
           "ms": 345.5
         },
-        "uma": null
+        "uma": null,
+        "note": "uma @1 pending; best ASE=ufast"
       },
       "2": {
         "ase": {
@@ -57,14 +58,15 @@
     "water888": {
       "1": {
         "ase": {
-          "tag": "gen",
-          "ms": 382.09
+          "tag": "ufast",
+          "ms": 337.6
         },
         "fc": {
           "tag": "gen",
           "ms": 359.4
         },
-        "uma": null
+        "uma": null,
+        "note": "uma @1 pending; best ASE=ufast"
       },
       "2": {
         "ase": {
@@ -709,6 +711,50 @@
       "job": null,
       "note": "Tier1c",
       "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "gmerge",
+      "ngpu": 1,
+      "ms": 380.7,
+      "status": "DONE",
+      "job": "20989758",
+      "metric": "ms_per_eval_python",
+      "note": null
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "ufast",
+      "ngpu": 1,
+      "ms": 350.3,
+      "status": "DONE",
+      "job": "20989759",
+      "metric": "ms_per_eval_python",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "gmerge",
+      "ngpu": 1,
+      "ms": 353.9,
+      "status": "DONE",
+      "job": "20989760",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "ufast",
+      "ngpu": 1,
+      "ms": 337.6,
+      "status": "DONE",
+      "job": "20989761",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
     }
   ]
 }
