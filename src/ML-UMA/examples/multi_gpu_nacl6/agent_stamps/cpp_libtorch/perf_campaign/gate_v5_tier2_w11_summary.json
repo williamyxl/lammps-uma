@@ -1,0 +1,36 @@
+{
+  "stamp": "2026-08-10T07:53:00",
+  "UMA_CUDA_GRAPH": 1,
+  "UMA_EDGE_PAD": 1,
+  "promote_default": false,
+  "status": "STRUCTURAL_FAIL",
+  "reason": "torch.rand in FairChem UMA Wigner path breaks CUDA graph capture; NCCL-in-TS was secondary risk. Do not promote. Product floor stays W8-fix (~water@4 96.2 vs ASE 94.5).",
+  "jobs": {
+    "nacl6_@2": "21009719",
+    "nacl6_@4": "21009720",
+    "water888_@2": "21009721",
+    "water888_@4": "21009722"
+  },
+  "deps_cancelled": [
+    "21009720",
+    "21009721",
+    "21009722"
+  ],
+  "cells": {
+    "nacl6_2": {
+      "ver": "tier2_w11",
+      "sys": "nacl6",
+      "ngpu": 2,
+      "job": "21009719",
+      "UMA_CUDA_GRAPH": 1,
+      "UMA_EDGE_PAD": 1,
+      "ef_pass": false,
+      "ms": null,
+      "status": "CAPTURE_STRUCTURAL_FAIL",
+      "error": "RuntimeError: Offset increment outside graph capture (torch.rand in UMA TS Wigner path during capture); mid-capture abort left stream capturing so eager fallback died",
+      "promote_default": false,
+      "reason": "Full worker fwd/bwd CUDA graph incompatible with TS torch.rand RNG; W11 stretch closed as structural fail. Product remains W8-fix. Capture-abort hygiene fix landed separately.",
+      "stamp": "2026-08-10T07:53:00"
+    }
+  }
+}

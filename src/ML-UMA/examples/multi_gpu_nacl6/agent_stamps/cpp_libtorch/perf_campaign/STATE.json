@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T07:46:37",
+  "stamp": "2026-08-10T07:53:00",
   "phase": "V5_tier2_W11",
-  "status": "w11_gates_pending",
+  "status": "w11_STRUCTURAL_FAIL_torch_rand",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate W11 E/F + water@4 vs ASE 94.5 / W8-fix",
+  "next_action": "Hard-ceiling note: W11 CUDA graph blocked by TS RNG; keep W8-fix product; optional other wins only if clear <1ms path",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "21009719",
+  "active_jobid": null,
   "tick": {
-    "last": "2026-08-10T07:46:37",
-    "note": "W11 clean resubmit {'nacl6_@2': '21009719', 'nacl6_@4': '21009720', 'water888_@2': '21009721', 'water888_@4': '21009722'}"
+    "last": "2026-08-10T07:53:00",
+    "note": "W11 capture fail torch.rand; deps cancelled; hygiene fix"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1485,7 +1485,43 @@
       "water888_@2": "21009721",
       "water888_@4": "21009722"
     },
-    "status": "SUBMITTED",
-    "note": "clean resubmit after duplicate cancel"
+    "status": "STRUCTURAL_FAIL",
+    "note": "clean resubmit after duplicate cancel",
+    "summary": {
+      "stamp": "2026-08-10T07:53:00",
+      "UMA_CUDA_GRAPH": 1,
+      "UMA_EDGE_PAD": 1,
+      "promote_default": false,
+      "status": "STRUCTURAL_FAIL",
+      "reason": "torch.rand in FairChem UMA Wigner path breaks CUDA graph capture; NCCL-in-TS was secondary risk. Do not promote. Product floor stays W8-fix (~water@4 96.2 vs ASE 94.5).",
+      "jobs": {
+        "nacl6_@2": "21009719",
+        "nacl6_@4": "21009720",
+        "water888_@2": "21009721",
+        "water888_@4": "21009722"
+      },
+      "deps_cancelled": [
+        "21009720",
+        "21009721",
+        "21009722"
+      ],
+      "cells": {
+        "nacl6_2": {
+          "ver": "tier2_w11",
+          "sys": "nacl6",
+          "ngpu": 2,
+          "job": "21009719",
+          "UMA_CUDA_GRAPH": 1,
+          "UMA_EDGE_PAD": 1,
+          "ef_pass": false,
+          "ms": null,
+          "status": "CAPTURE_STRUCTURAL_FAIL",
+          "error": "RuntimeError: Offset increment outside graph capture (torch.rand in UMA TS Wigner path during capture); mid-capture abort left stream capturing so eager fallback died",
+          "promote_default": false,
+          "reason": "Full worker fwd/bwd CUDA graph incompatible with TS torch.rand RNG; W11 stretch closed as structural fail. Product remains W8-fix. Capture-abort hygiene fix landed separately.",
+          "stamp": "2026-08-10T07:53:00"
+        }
+      }
+    }
   }
 }

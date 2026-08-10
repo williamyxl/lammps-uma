@@ -289,3 +289,5 @@ tick178 gather
 2026-08-10T07:39:30 W11 submit CUDA graph {'nacl6_@2': '21009584', 'nacl6_@4': '21009588', 'water888_@2': '21009592', 'water888_@4': '21009596'}
 2026-08-10T07:39:30 W11 submit CUDA graph {'nacl6_@2': '21009584', 'nacl6_@4': '21009588', 'water888_@2': '21009592', 'water888_@4': '21009596'}
 2026-08-10T07:46:37 W11 clean resubmit {'nacl6_@2': '21009719', 'nacl6_@4': '21009720', 'water888_@2': '21009721', 'water888_@4': '21009722'}
+2026-08-10T07:47:36 W11 NaCl@2 21009719 RUNNING (~25s+); deps pending
+2026-08-10T07:53:00 W11 STRUCTURAL FAIL torch.rand capture; deps cancelled\n

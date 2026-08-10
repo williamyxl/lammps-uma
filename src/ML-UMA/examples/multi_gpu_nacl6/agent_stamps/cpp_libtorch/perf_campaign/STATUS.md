@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T03:45 CDT · Loop **armed** · **W11 submitted** (CUDA graph; clean resubmit)
+**Stamp:** 2026-08-10T07:52 CDT · Loop **armed** · **W11 STRUCTURAL FAIL** (CUDA graph vs torch.rand)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,9 +87,9 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W11 in flight** (`UMA_CUDA_GRAPH=1` + `UMA_EDGE_PAD=1`):
-  - NaCl@2 `21009719` (RECOMPILE=1) → @4 `21009720`; water@2 `21009721` → @4 `21009722`.
-- Prior duplicate submits cancelled; single chain only.
+- **W11 STRUCTURAL FAIL** (`21009719` NaCl@2): CUDA graph capture aborts on `torch.rand` in UMA Wigner path (`Offset increment outside graph capture`). Deps cancelled.
+- Product path unchanged: **W8-fix**. Water@4 ASE ufast 94.5 still open (~1.7–2.4 ms); remaining Tier2 graph stretch exhausted.
+- Hygiene fix: mid-capture `cuda_graph.reset()` before eager fallback (no resubmit of W11 graph gates).
 
 
 ## Tier2 W6 (COMPLETE PASS)
