@@ -3,9 +3,11 @@
 // Shared geometry/edge fan-out + rank0 force fan-in for LibTorch MP workers.
 // Avoids multi-MB pipe copies of pos/z/edges/forces each predict.
 //
-// W5: per-rank cell_offsets travel as int32 image indices (cast to FP64 on the
-// worker before TorchScript). Edge capacity is chosen at create time (max_e),
-// clamped to kMaxE.
+// W5: cell_offsets travel as int32 image indices (cast to FP64 on the worker
+// before TorchScript). Edge capacity is chosen at create time (max_e).
+//
+// W6: publish the *full* edge graph once; each worker shards on GPU. Layout
+// stores a single eidx/coff region (not per-rank copies).
 
 #include <algorithm>
 #include <cstdint>
@@ -24,7 +26,8 @@ struct PayloadShm {
   // resizing the fixed mmap layout + revalidation. Multi-node is out of scope.
   static constexpr int kMaxWorld = 8;
   static constexpr int64_t kMaxN = 8192;
-  static constexpr int64_t kMaxE = 512 * 1024;  // hard ceiling per rank
+  // W6: full-graph edge ceiling (was 512K per-rank; full publish needs headroom).
+  static constexpr int64_t kMaxE = 2 * 1024 * 1024;
 
   struct Header {
     pthread_mutex_t mu;
@@ -37,27 +40,27 @@ struct PayloadShm {
     int32_t pbc[3];
     double energy;       // rank0 result
     int32_t result_gen;  // matches gen when forces valid
-    int32_t nedges[kMaxWorld];
-    int64_t max_e;  // W5: edges-per-rank capacity used to size this map
+    int32_t n_edges_full;  // W6: full-graph edge count
+    int32_t nedges[kMaxWorld];  // optional local counts (debug / legacy)
+    int64_t max_e;  // W5/W6: full-graph edge capacity used to size this map
   };
 
-  // Layout after Header (world_slots = actual GPU count, ≤ kMaxWorld):
+  // Layout after Header:
   //   double  pos[kMaxN * 3]
   //   int64_t z[kMaxN]
-  //   per rank r < world_slots:
-  //     int64_t eidx[max_e * 2]
-  //     int32_t coff[max_e * 3]   // W5: was double
-  //   double forces[kMaxN * 3]
+  //   int64_t eidx_full[max_e * 2]     // W6: one full graph
+  //   int32_t coff_full[max_e * 3]
+  //   double  forces[kMaxN * 3]
 
   static int64_t choose_max_e(int64_t n_atoms, int max_neighbors) {
-    // Generous headroom for directed full NL; clamp to product ceiling.
+    // Full-graph capacity; clamp to product ceiling.
     const int64_t nn = std::max<int64_t>(1, max_neighbors > 0 ? max_neighbors : 300);
     const int64_t nat = std::max<int64_t>(1, n_atoms);
     const int64_t need = nat * nn * 2;  // directed edges worst-case-ish
     return std::min(kMaxE, std::max<int64_t>(need, 4096));
   }
 
-  static size_t rank_edge_stride(int64_t max_e) {
+  static size_t edge_bytes(int64_t max_e) {
     return sizeof(int64_t) * static_cast<size_t>(max_e) * 2 +
            sizeof(int32_t) * static_cast<size_t>(max_e) * 3;
   }
@@ -72,7 +75,7 @@ struct PayloadShm {
     size_t n = sizeof(Header);
     n += sizeof(double) * static_cast<size_t>(kMaxN) * 3;
     n += sizeof(int64_t) * static_cast<size_t>(kMaxN);
-    n += static_cast<size_t>(world_slots) * rank_edge_stride(max_e);
+    n += edge_bytes(max_e);  // W6: single full-graph region
     n += sizeof(double) * static_cast<size_t>(kMaxN) * 3;
     return n;
   }
@@ -146,7 +149,7 @@ struct PayloadShm {
   }
 
   static PayloadShm* attach_file(const char* path, size_t expect_bytes) {
-    // W5: parent passes exact byte size via UMA_MP_PAYLOAD_BYTES. Map that,
+    // Parent passes exact byte size via UMA_MP_PAYLOAD_BYTES. Map that,
     // then trust Header::{world,max_e} written at create time.
     int fd = ::open(path, O_RDWR);
     if (fd < 0) throw std::runtime_error("PayloadShm: attach open failed");
@@ -193,18 +196,13 @@ struct PayloadShm {
   char* edges_base() {
     return base() + sizeof(double) * kMaxN * 3 + sizeof(int64_t) * kMaxN;
   }
-  size_t rank_edge_stride() const { return rank_edge_stride(max_e); }
-  int64_t* eidx_ptr(int rank) {
-    return reinterpret_cast<int64_t*>(edges_base() +
-                                     static_cast<size_t>(rank) * rank_edge_stride());
-  }
-  int32_t* coff_ptr(int rank) {
-    return reinterpret_cast<int32_t*>(reinterpret_cast<char*>(eidx_ptr(rank)) +
+  int64_t* eidx_full_ptr() { return reinterpret_cast<int64_t*>(edges_base()); }
+  int32_t* coff_full_ptr() {
+    return reinterpret_cast<int32_t*>(edges_base() +
                                      sizeof(int64_t) * static_cast<size_t>(max_e) * 2);
   }
   double* forces_ptr() {
-    return reinterpret_cast<double*>(
-        edges_base() + static_cast<size_t>(world_slots) * rank_edge_stride());
+    return reinterpret_cast<double*>(edges_base() + edge_bytes(max_e));
   }
 };
 

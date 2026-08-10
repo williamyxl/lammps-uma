@@ -26,6 +26,7 @@
 #include <torch/script.h>
 #include <torch/torch.h>
 
+#include "uma/graph_shard.h"
 #include "uma/kokkos_peer.h"
 #include "uma/metadata.h"
 #include "uma/payload_shm.h"
@@ -202,7 +203,7 @@ int main(int argc, char** argv) {
         throw std::runtime_error("worker: payload gen mismatch");
       }
       const int32_t n = payload->hdr->n;
-      const int32_t nedges = payload->hdr->nedges[rank];
+      const int32_t n_edges_full = payload->hdr->n_edges_full;
       const int64_t charge = payload->hdr->charge;
       const int64_t spin = payload->hdr->spin;
       double cell[9];
@@ -222,22 +223,30 @@ int main(int argc, char** argv) {
       auto cell_t = torch::from_blob(cell, {3, 3}, torch::kFloat64)
                         .to(dev, /*non_blocking=*/true)
                         .contiguous();
-      auto eidx_t =
-          (nedges > 0)
-              ? torch::from_blob(payload->eidx_ptr(rank), {2, nedges}, torch::kLong)
-                    .to(dev, /*non_blocking=*/true)
-                    .contiguous()
-              : torch::empty({2, 0}, torch::TensorOptions().dtype(torch::kLong).device(dev));
-      auto coff_t =
-          (nedges > 0)
-              ? torch::from_blob(payload->coff_ptr(rank), {nedges, 3}, torch::kInt32)
-                    .to(dev, /*non_blocking=*/true)
-                    .to(torch::kFloat64)
-                    .contiguous()
-              : torch::empty({0, 3},
-                             torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+      // W6: H2D full graph, then FairChem partition on GPU (center ∈ node_partition).
+      torch::Tensor eidx_t;
+      torch::Tensor coff_t;
+      int32_t nedges = 0;
+      if (n_edges_full > 0) {
+        auto eidx_full =
+            torch::from_blob(payload->eidx_full_ptr(), {2, n_edges_full}, torch::kLong)
+                .to(dev, /*non_blocking=*/true)
+                .contiguous();
+        auto coff_full =
+            torch::from_blob(payload->coff_full_ptr(), {n_edges_full, 3}, torch::kInt32)
+                .to(dev, /*non_blocking=*/true)
+                .contiguous();
+        auto shard = uma::graph_shard::shard_edges(eidx_full, coff_full, n, world, rank);
+        eidx_t = shard.edge_index;
+        // W5: int32→FP64 cast on device before TorchScript.
+        coff_t = shard.cell_offsets.to(torch::kFloat64).contiguous();
+        nedges = static_cast<int32_t>(eidx_t.size(1));
+      } else {
+        eidx_t = torch::empty({2, 0}, torch::TensorOptions().dtype(torch::kLong).device(dev));
+        coff_t = torch::empty({0, 3},
+                              torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+      }
       // Tier0/W4: same-stream H2D is ordered before forward; no host sync here.
-      // W5: int32→FP64 cast on device before TorchScript (FairChem float offsets).
 
       pos_t = pos_t.set_requires_grad(true);
       auto pbc_t = torch::tensor({pbc[0] != 0, pbc[1] != 0, pbc[2] != 0},

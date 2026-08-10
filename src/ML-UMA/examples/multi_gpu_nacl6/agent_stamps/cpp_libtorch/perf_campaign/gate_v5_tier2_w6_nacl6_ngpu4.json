@@ -1,0 +1,22 @@
+{
+  "ver": "v5_tier2_w6",
+  "sys": "nacl6",
+  "ngpu": 4,
+  "job": "20989046",
+  "ms": 92.934,
+  "ase": 115.2,
+  "fc": 118.0,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "energy_eV": -5830.9237413381525,
+  "dE_vs_merge_ase": 1.227817847393453e-10,
+  "dE_vs_general_ase": 2.1171432308619842e-05,
+  "force_max_abs_vs_ase_general": 5.881311022359892e-07,
+  "force_max_d1": 1.0000000000287557e-06,
+  "ef_pass": true,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "note": "W6 full-graph publish + GPU shard",
+  "stamp": "2026-08-09T19:43:50",
+  "pass": true
+}

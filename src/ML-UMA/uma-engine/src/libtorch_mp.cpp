@@ -522,14 +522,8 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   int32_t pbc32[3] = {pbc0_[0].item<bool>() ? 1 : 0, pbc0_[1].item<bool>() ? 1 : 0,
                       pbc0_[2].item<bool>() ? 1 : 0};
 
-  // Publish geometry + shards once into payload shm (pipe only wakes workers).
+  // W6: publish full graph once; workers shard on GPU (no CPU pack_shards).
   PayloadShm* pay = impl_->payload;
-  std::vector<int64_t*> eidx_ptrs(static_cast<size_t>(num_devices_));
-  std::vector<int32_t*> coff_ptrs(static_cast<size_t>(num_devices_));
-  for (int r = 0; r < num_devices_; ++r) {
-    eidx_ptrs[static_cast<size_t>(r)] = pay->eidx_ptr(r);
-    coff_ptrs[static_cast<size_t>(r)] = pay->coff_ptr(r);
-  }
   // Fill shm buffers unlocked; publish gen under a short critical section.
   pay->hdr->n = static_cast<int32_t>(n);
   pay->hdr->world = num_devices_;
@@ -542,16 +536,22 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   std::memcpy(pay->z_ptr(), z_cpu.data_ptr<int64_t>(),
               static_cast<size_t>(n) * sizeof(int64_t));
   const int64_t n_edges = eidx_full.size(1);
-  const int32_t* coff_ptr =
-      (coff_full.defined() && coff_full.numel() > 0) ? coff_full.data_ptr<int32_t>()
-                                                     : nullptr;
-  const auto t_pack0 = clock::now();
-  if (!graph_shard::pack_shards_cpu(eidx_full.data_ptr<int64_t>(), coff_ptr, n_edges, n,
-                                    num_devices_, pay->max_e, pay->hdr->nedges,
-                                    eidx_ptrs.data(), coff_ptrs.data())) {
+  if (n_edges > pay->max_e) {
     throw std::runtime_error(
-        "LibtorchMpRuntime: pack_shards_cpu failed (nedges > max_e?)");
+        "LibtorchMpRuntime: full-graph n_edges exceeds PayloadShm::max_e");
   }
+  const auto t_pack0 = clock::now();
+  std::memcpy(pay->eidx_full_ptr(), eidx_full.data_ptr<int64_t>(),
+              static_cast<size_t>(n_edges) * 2 * sizeof(int64_t));
+  if (coff_full.defined() && coff_full.numel() > 0) {
+    std::memcpy(pay->coff_full_ptr(), coff_full.data_ptr<int32_t>(),
+                static_cast<size_t>(n_edges) * 3 * sizeof(int32_t));
+  } else {
+    std::memset(pay->coff_full_ptr(), 0,
+                static_cast<size_t>(n_edges) * 3 * sizeof(int32_t));
+  }
+  pay->hdr->n_edges_full = static_cast<int32_t>(n_edges);
+  for (int r = 0; r < PayloadShm::kMaxWorld; ++r) pay->hdr->nedges[r] = 0;
   const auto t_pack1 = clock::now();
   pthread_mutex_lock(&pay->hdr->mu);
   pay->hdr->result_gen = -1;
@@ -617,16 +617,11 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
         line, sizeof(line),
         "PERF_PARENT world=%d ms_wrap=%.3f ms_vesin=%.3f ms_nl=%.3f "
         "ms_d2h=%.3f ms_cover=%.3f ms_shard=%.3f ms_pack=%.3f ms_pub=%.3f "
-        "ms_wait_workers=%.3f ms_total=%.3f gen=%d n_edges=%lld "
-        "nedges=[%d",
+        "ms_wait_workers=%.3f ms_total=%.3f gen=%d n_edges_full=%lld "
+        "mode=W6_full_publish\n",
         num_devices_, ms_wrap, ms_vesin, ms_nl, ms_d2h, ms_cover, ms_shard,
-        ms_pack, ms_pub, ms_wait, ms_tot, gen, static_cast<long long>(n_edges),
-        pay->hdr->nedges[0]);
+        ms_pack, ms_pub, ms_wait, ms_tot, gen, static_cast<long long>(n_edges));
     std::string line_s(line);
-    for (int r = 1; r < num_devices_; ++r) {
-      line_s += "," + std::to_string(pay->hdr->nedges[r]);
-    }
-    line_s += "]\n";
     std::cerr << line_s;
     if (const char* log_dir = std::getenv("UMA_MP_LOG_DIR")) {
       if (*log_dir) {

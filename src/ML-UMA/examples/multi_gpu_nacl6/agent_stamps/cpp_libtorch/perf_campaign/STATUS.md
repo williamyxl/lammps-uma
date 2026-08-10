@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T19:28:33 CDT · Loop **armed** · **Wave A COMPLETE PASS**
+**Stamp:** 2026-08-09T19:45:51 CDT · Loop **armed** · **W6 COMPLETE PASS**
 **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — do **not** re-run ASE/FC
@@ -44,7 +44,7 @@ ASE@1 merge oracle ms: general+merge **367**, umas_fast+merge **350** (single GP
 
 ## Next
 
-1. **Wave A COMPLETE** (W9+W5+attach). Next: Tier2 W6→W12 one+gate each; commit+push Wave A.
+1. **Wave A COMPLETE**. **W6 COMPLETE PASS** (flat vs Wave A). Next: **W7**.
 2. Then Tier2 W6→W12 one+gate each until hard ceiling.
 3. devices=1 umas_fast+merge export required for product completeness.
 
@@ -67,5 +67,14 @@ Wave A **COMPLETE PASS** — both systems @2/@4 speed ≤ ASE/FC + E/F vs merge 
 
 
 ## Queue (live)
-- Wave A @2/@4: **COMPLETE PASS**. No pending gate jobs.
+- W6 gates done. No pending jobs.
+
+
+## Tier2 W6 (COMPLETE PASS)
+| Suite | @2 | @4 | Δ vs Wave A @2/@4 |
+|-------|---:|---:|-------------------:|
+| NaCl6 | **160.2** (`20989045`) | **92.9** (`20989046`) | -0.7 / +0.2 |
+| water888 | **165.47** (`20989047`) | **95.83** (`20989048`) | +1.19 / -0.42 |
+
+Full-graph publish + GPU shard: E/F green; speed ≤ ASE/FC. Wins mostly **&lt;1 ms** (flat) → continue Tier2 W7.
 
