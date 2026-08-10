@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T08:50:58",
+  "stamp": "2026-08-10T08:56:13",
   "phase": "V6_from_W8nk",
-  "status": "w13_pending_w14_code_landed",
+  "status": "w13_DONE_submit_w14",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,11 +128,9 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [
-    "21010752"
-  ],
+  "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Harvest W13 PERF_PARENT/PERF_TICK; decide W14",
+  "next_action": "Submit W14 RECOMPILE=1 NaCl@2 then deps",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1752,10 +1750,77 @@
     }
   },
   "w13": {
-    "job": "21010752",
+    "ver": "w13_profile",
     "sys": "water888",
     "ngpu": 4,
-    "UMA_MP_LOG_DIR": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/matrix/water888_uma_ufast_w13_ngpu4/mp_logs"
+    "job": "21010752",
+    "nvt_pair_ms_per_step": 95.79700000000001,
+    "sp_ms": 97.532,
+    "ase_ufast": 94.5,
+    "delta_vs_ase_ms": 1.2970000000000113,
+    "dE_vs_merge_ase": 8.185452315956354e-12,
+    "force_max_abs": 4.992769293110655e-06,
+    "ef_pass": true,
+    "n_parent_lines": 104,
+    "n_parent_warm": 102,
+    "parent_med_ms": {
+      "ms_wrap": 0.0,
+      "ms_vesin": 1.806,
+      "ms_nl": 1.806,
+      "ms_d2h": 0.156,
+      "ms_pub": 0.25,
+      "ms_wait_workers": 92.711,
+      "ms_total": 94.79650000000001,
+      "ms_pack": 0.093,
+      "ms_shard": 0.092
+    },
+    "tick_med_by_rank": {
+      "0": {
+        "ms_fwd": 42.0893,
+        "ms_bwd": 16.90515,
+        "ms_force_ar": 0.025592999999999998,
+        "ms_compute": 59.088867500000006,
+        "n": 102
+      },
+      "1": {
+        "ms_fwd": 41.5595,
+        "ms_bwd": 17.13315,
+        "ms_force_ar": 0.025428,
+        "ms_compute": 58.7706275,
+        "n": 102
+      },
+      "2": {
+        "ms_fwd": 41.58225,
+        "ms_bwd": 17.182000000000002,
+        "ms_force_ar": 0.0254975,
+        "ms_compute": 58.830417499999996,
+        "n": 102
+      },
+      "3": {
+        "ms_fwd": 41.850350000000006,
+        "ms_bwd": 17.24555,
+        "ms_force_ar": 0.0252075,
+        "ms_compute": 59.3836275,
+        "n": 102
+      }
+    },
+    "agg": {
+      "ms_fwd_med_mean": 41.77035,
+      "ms_bwd_med_mean": 17.1164625,
+      "ms_force_ar_med_mean": 0.025431499999999996,
+      "ms_compute_med_max": 59.3836275
+    },
+    "frac_wait_of_total": 0.9780002426249913,
+    "frac_force_ar_of_wait": 0.0002743094131224989,
+    "frac_fwd_bwd_of_wait": 0.6351653255816463,
+    "parent_overhead_ms": 2.0855000000000103,
+    "decision": {
+      "primary_attack": "W14_result_path",
+      "reason": "ms_wait dominates; force_ar + end-of-step D2H/sync are next pipe cuts; fwd/bwd still majority of wait",
+      "also": "model/fwd_bwd dominate wait \u2014 expect W14 to chip end-of-step only; FairChem for last ms vs ASE"
+    },
+    "stamp": "2026-08-10T08:56:13",
+    "pass": true
   },
   "w14": {
     "change": "async_pin_d2h_stream_sync",

@@ -1,0 +1,20 @@
+{
+  "nvt": 95.79700000000001,
+  "parent_med": {
+    "ms_wrap": 0.0,
+    "ms_vesin": 1.806,
+    "ms_nl": 1.806,
+    "ms_d2h": 0.156,
+    "ms_pub": 0.25,
+    "ms_wait_workers": 92.711,
+    "ms_total": 94.79650000000001,
+    "ms_pack": 0.093,
+    "ms_shard": 0.092
+  },
+  "agg": {
+    "ms_fwd_med_mean": 41.77035,
+    "ms_bwd_med_mean": 17.1164625,
+    "ms_force_ar_med_mean": 0.025431499999999996,
+    "ms_compute_med_max": 59.3836275
+  }
+}
