@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T08:10 CDT · Loop **armed** · **W8nk submitted** (W8-fix + no Kokkos)
+**Stamp:** 2026-08-10T08:12 CDT · Loop **armed** · **W8nk NaCl@2 PASS** (NVT Pair 161.94 ms; no Kokkos)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,10 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W8nk in flight** = W8-fix stream-ordered NCCL + **`UMA_USE_KOKKOS=0`** (`pair_style uma … devices N`):
-  - NaCl NVT@10: @2 `21010252` → @4 `21010253`
-  - water NVT@100: @2 `21010254` → @4 `21010255`
-- Product default flipped to no-Kokkos; opt-in `UMA_USE_KOKKOS=1` for legacy `uma/kk` A/B.
+- **W8nk NaCl@2 PASS** (`21010252`): `pair_style uma`, E/F vs ASE merge OK; NVT@10 Pair **161.94** ms (SP proxy 165.76).
+- Waiting: NaCl@4 `21010253`; water@2/`@4` `21010254`/`21010255`.
 
 
 ## Tier2 W6 (COMPLETE PASS)

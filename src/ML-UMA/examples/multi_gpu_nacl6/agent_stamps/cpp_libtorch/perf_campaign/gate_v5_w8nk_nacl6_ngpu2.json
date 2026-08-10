@@ -1,0 +1,20 @@
+{
+  "ver": "w8nk",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "21010252",
+  "UMA_USE_KOKKOS": 0,
+  "pair_style": "uma",
+  "nsteps_nvt": 10,
+  "ms_sp": 165.76,
+  "nvt_pair_ms_per_step": 161.94,
+  "energy_eV": -5830.923741338153,
+  "dE_vs_merge_ase": 1.2369127944111824e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "force_mae": 1.5176819870893512e-07,
+  "ef_pass": true,
+  "baseline_w8fix_sp_ms": 160.08,
+  "note": "W8nk: W8-fix NCCL + no Kokkos; NVT@10 metric (not directly comparable to W8-fix SP ms)",
+  "stamp": "2026-08-10T08:11:58",
+  "pass": true
+}
