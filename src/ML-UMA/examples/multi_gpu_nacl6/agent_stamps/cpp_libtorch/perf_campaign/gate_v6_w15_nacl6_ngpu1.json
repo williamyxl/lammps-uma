@@ -1,0 +1,23 @@
+{
+  "ver": "w15",
+  "sys": "nacl6",
+  "ngpu": 1,
+  "job": "21011180",
+  "export_job": "21011179",
+  "nvt_pair_ms_per_step": 296.47999999999996,
+  "ms_sp": 295.10999999999996,
+  "ase_ufast": 350.3,
+  "prior_fail_ms": 533.1,
+  "delta_vs_ase_ms": -53.82000000000005,
+  "delta_vs_prior_fail_ms": -236.62000000000006,
+  "dE_vs_merge_ase": 1.255102688446641e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "floor_pass": true,
+  "traced_md5_1MB": "873af21a255abc850b0e987c1c29ff6d",
+  "traced_size": 90998837,
+  "note": "devices=1 model_traced re-exported umas_fast+merge_mole from NaCl atoms",
+  "stamp": "2026-08-10T09:16:06",
+  "pass": true,
+  "promote_default": true
+}

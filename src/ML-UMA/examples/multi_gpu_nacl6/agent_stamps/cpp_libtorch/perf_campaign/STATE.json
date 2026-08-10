@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:14:00",
+  "stamp": "2026-08-10T09:16:06",
   "phase": "V6_from_W8nk",
-  "status": "w15_export_resubmitted_import_fix",
+  "status": "w15_nacl1_PASS",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,12 +128,9 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [
-    "21011179",
-    "21011180"
-  ],
+  "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate W15 devices=1 E/F vs ASE merge + speed vs ASE ufast @1",
+  "next_action": "Optional: water@1 composition-specific traced; W17 blocked on FairChem RNG",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1952,5 +1949,28 @@
       "21011053",
       "21011143"
     ]
+  },
+  "w15_nacl6_@1": {
+    "ver": "w15",
+    "sys": "nacl6",
+    "ngpu": 1,
+    "job": "21011180",
+    "export_job": "21011179",
+    "nvt_pair_ms_per_step": 296.47999999999996,
+    "ms_sp": 295.10999999999996,
+    "ase_ufast": 350.3,
+    "prior_fail_ms": 533.1,
+    "delta_vs_ase_ms": -53.82000000000005,
+    "delta_vs_prior_fail_ms": -236.62000000000006,
+    "dE_vs_merge_ase": 1.255102688446641e-10,
+    "force_max_abs": 4.999896874996468e-07,
+    "ef_pass": true,
+    "floor_pass": true,
+    "traced_md5_1MB": "873af21a255abc850b0e987c1c29ff6d",
+    "traced_size": 90998837,
+    "note": "devices=1 model_traced re-exported umas_fast+merge_mole from NaCl atoms",
+    "stamp": "2026-08-10T09:16:06",
+    "pass": true,
+    "promote_default": true
   }
 }

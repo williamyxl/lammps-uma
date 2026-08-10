@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:14 CDT · W15 export#2 ImportError · fixed → `21011179` + NaCl@1 `21011180`
+**Stamp:** 2026-08-10T09:16 CDT · **W15 NaCl@1 PASS** NVT 296.5 (was 533; ASE 350) dE=1.255e-10
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,7 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W15:** export#2 `21011143` ImportError (`trace_patch`). Resubmit **21011179** → **21011180**.
+- **W15 NaCl@1** (`21011180`) after export `21011179`: E/F=PASS dE=1.255e-10; NVT **296.48** / SP **295.11** (prior fail 533; ASE ufast 350.3).
+- Product multi-GPU remains **W8nk**. Water@1 traced still pending (composition-specific).
 
 
 ## Tier2 W6 (COMPLETE PASS)
