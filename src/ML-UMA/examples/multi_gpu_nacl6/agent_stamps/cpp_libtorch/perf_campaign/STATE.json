@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T12:02:33",
+  "stamp": "2026-08-10T12:04:21",
   "phase": "V6_W17_cuda_graph",
-  "status": "w17c_shape_fix",
+  "status": "w17c_submitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -129,10 +129,11 @@
     }
   },
   "active_jobs": [
-    "21014028"
+    "21015028",
+    "21015029"
   ],
   "tick_log": "tick.log",
-  "next_action": "Submit W17c export+NaCl@2 after shape/hygiene fix",
+  "next_action": "Gate W17c graph path + E/F; matrix if PASS",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2041,5 +2042,10 @@
     "promote_default": false,
     "next": "capture-safe natoms/nedges in export_wrapper + EndCapture hygiene; re-export; W17c",
     "stamp": "2026-08-10T12:02:33"
+  },
+  "w17c": {
+    "export": "21015028",
+    "nacl2": "21015029",
+    "fix": "capture_safe_shapes+endcapture_hygiene"
   }
 }

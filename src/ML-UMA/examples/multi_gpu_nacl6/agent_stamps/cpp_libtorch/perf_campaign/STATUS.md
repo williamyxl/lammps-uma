@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T12:00 CDT · W17b CAPTURE FAIL (shape ops) → W17c export+hygiene
+**Stamp:** 2026-08-10T12:03 CDT · Loop **armed** · W17c export `21015028` → NaCl@2 `21015029`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v6_w8nk_perf_push_77967fcb` (**CURRENT** — W17 CUDA graph)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -88,8 +88,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W17b FAILED** `21014028`: non-default stream OK; capture dies on export_wrapper `_shape_as_tensor`→`.to(cuda)` (`operation not permitted when stream is capturing`). Eager fallback also poisoned → job fail.
-- Fix: capture-safe empty+fill_; `cudaStreamEndCapture` unwind. Re-export + W17c pending submit.
+- **W17c in flight:** export `21015028` (capture-safe shapes) → NaCl@2 `21015029` (RECOMPILE=1, graph+edge pad).
+- Prior: W17b `21014028` structural fail on `_shape_as_tensor` H2D under capture.
 
 
 ## Tier2 W6 (COMPLETE PASS)
