@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:24 CDT · **W15 COMPLETE** NaCl@1 PASS · water@1 E/F PASS floor FAIL NVT 359.7 (ASE 337.6)
+**Stamp:** 2026-08-10T09:31 CDT · Loop **disarmed** · product **W8nk** · V6 idle (water@4 ~1ms / W17 FairChem-blocked)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,7 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W15 COMPLETE** — NaCl@1 **296.5** PASS; water@1 NVT **359.66** E/F=PASS floor=FAIL (ASE 337.6).
-- Multi-GPU product **W8nk**. W17 blocked (FairChem Wigner RNG).
+- **Idle / loop disarmed.** Product **W8nk**. Open: water@4 ASE gap ~1.2 ms; water@1 NVT floor; W17 needs FairChem Wigner RNG fix.
 
 
 ## Tier2 W6 (COMPLETE PASS)

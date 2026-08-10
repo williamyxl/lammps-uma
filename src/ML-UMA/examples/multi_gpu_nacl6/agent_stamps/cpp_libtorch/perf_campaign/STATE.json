@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:24:04",
+  "stamp": "2026-08-10T09:31:48",
   "phase": "V6_from_W8nk",
-  "status": "w15_COMPLETE_PARTIAL",
+  "status": "v6_idle_loop_disarmed",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Idle: W8nk product; W17 blocked on FairChem RNG",
+  "next_action": "Manual: water@4 model-side or FairChem RNG for W17",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
