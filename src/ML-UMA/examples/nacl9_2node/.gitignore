@@ -1,0 +1,7 @@
+results/
+logs/
+__pycache__/
+structures/*.data
+structures/*.extxyz
+.jobids
+.oracle_jobid

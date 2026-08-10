@@ -1,0 +1,66 @@
+{
+  "tag": "nacl9rep",
+  "n": 9,
+  "natoms": 5832,
+  "a_lattice_A": 5.64,
+  "cell_A": 50.76,
+  "construction": "perturb 8-atom unit cell FIRST, then replicate n^3",
+  "perturbation": {
+    "mode": "box",
+    "delta_A": 0.1,
+    "seed": 0,
+    "applied_to": "unit cell (8 atoms), then replicated",
+    "disp_max_abs_A": 0.09945229996597038,
+    "disp_rms_A": 0.06434711731741187,
+    "unit_cell_displacements": [
+      [
+        0.027392337464290872,
+        -0.04604265724722594,
+        -0.09180529521276107
+      ],
+      [
+        -0.09669447289429418,
+        0.06265404784005449,
+        0.08255111545554436
+      ],
+      [
+        0.021327155153435973,
+        0.045899312196799685,
+        0.008724998293084568
+      ],
+      [
+        0.08701448475755366,
+        0.06317071082430645,
+        -0.09945229996597038
+      ],
+      [
+        0.07148085531751389,
+        -0.09328288493890713,
+        0.045931089285988824
+      ],
+      [
+        -0.0648688758794882,
+        0.07263578446997732,
+        0.008292244049818348
+      ],
+      [
+        -0.04005762189252304,
+        -0.015462555760468316,
+        -0.09433606577090742
+      ],
+      [
+        -0.07514334470008721,
+        0.034124882938726064,
+        0.029437902314850023
+      ]
+    ]
+  },
+  "periodicity_note": "Structure is exactly periodic with the 5.64 A unit cell, so forces repeat every 8 atoms. Not comparable to the independently-rattled nacl6 oracle.",
+  "velocities": "MaxwellBoltzmann 300.0K force_temp=True seed=0",
+  "types": {
+    "1": "Na",
+    "2": "Cl"
+  },
+  "data": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl9_2node/structures/nacl9rep_nvt_300K_atomic_metal.data",
+  "extxyz": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl9_2node/structures/nacl9rep_rattle.extxyz"
+}
