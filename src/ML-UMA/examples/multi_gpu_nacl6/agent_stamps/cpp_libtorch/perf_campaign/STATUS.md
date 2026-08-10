@@ -1,7 +1,7 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T21:03 CDT · Loop **armed** · **W8-fix water@2 PASS 164.75** (clears ASE 165.5)
-**Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
+**Stamp:** 2026-08-09T21:53 CDT · Loop **armed** · **W8-fix water@2 PASS 164.75**; plan adds **Tier K (drop Kokkos)**
+**Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
 
@@ -75,7 +75,8 @@ ASE@1 (`merge_mole=True`) ms: `general`+merge **367**, `umas_fast_pytorch`+merge
 
 ## Constraints
 
-FP64 · `uma/kk` + Kokkos · 1 MPI · no Ray · full parent NL · no force-reduce skip.
+FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.  
+**Until Tier K:** gate on `uma/kk` + `-k on g N` for continuity. **After Tier K:** product recipe is `pair_style uma … devices N` (see plan §6).
 
 ## Wave A gates
 | Suite | @2 | @4 | E/F vs ASE `merge_mole=True` | notes |
