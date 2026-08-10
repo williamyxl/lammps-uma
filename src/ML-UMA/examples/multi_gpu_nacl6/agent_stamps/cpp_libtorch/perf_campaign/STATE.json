@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T08:56:13",
+  "stamp": "2026-08-10T08:56:44",
   "phase": "V6_from_W8nk",
-  "status": "w13_DONE_submit_w14",
+  "status": "w14_gates_submitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,9 +128,14 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [],
+  "active_jobs": [
+    "21010851",
+    "21010852",
+    "21010853",
+    "21010854"
+  ],
   "tick_log": "tick.log",
-  "next_action": "Submit W14 RECOMPILE=1 NaCl@2 then deps",
+  "next_action": "Gate W14 E/F + NVT vs W8nk; promote if water@4\u226494.5 or \u22651ms gain",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1826,5 +1831,11 @@
     "change": "async_pin_d2h_stream_sync",
     "commit": "pending_local",
     "gate": "after_w13"
+  },
+  "w14_jobs": {
+    "nacl6_@2": "21010851",
+    "nacl6_@4": "21010852",
+    "water888_@2": "21010853",
+    "water888_@4": "21010854"
   }
 }

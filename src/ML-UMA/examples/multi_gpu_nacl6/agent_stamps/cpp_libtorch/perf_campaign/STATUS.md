@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T08:56 CDT · **W13 DONE** water@4 NVT 95.80 · wait≈92.7ms (98% of total) · W14 gates next
+**Stamp:** 2026-08-10T08:57 CDT · W13 DONE · **W14 gates submitted** NaCl@2 `21010851` (RECOMPILE=1) + deps
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W13 DONE** (`21010752`): water@4 NVT **95.80**; parent wait med **92.71** ms (98% of step); fwd+bwd ≈64% of wait; force_ar ≈0% of wait; parent overhead **2.09** ms.
-- **Next:** W14 gate matrix (`RECOMPILE=1` on first).
+- **W13 DONE** — see `gate_v6_w13_profile_water4.json` (wait-dominated; force_ar ≪1 ms).
+- **W14 gates:** NaCl@2 `21010851` RECOMPILE=1; NaCl@4 `21010852`; water@2 `21010853`; water@4 `21010854` (afterok:21010851).
 
 
 ## Tier2 W6 (COMPLETE PASS)
