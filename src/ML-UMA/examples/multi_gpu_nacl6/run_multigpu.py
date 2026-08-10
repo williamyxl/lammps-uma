@@ -498,12 +498,12 @@ def _run_lmp(cmd: list[str], *, cwd: Path, env: dict, tag: str) -> None:
 
 
 def _uma_use_kokkos() -> bool:
-    """Tier K: UMA_USE_KOKKOS=0 → plain ``pair_style uma`` (no ``-k``/``-sf kk``).
+    """W8nk product: default off → ``pair_style uma`` (no ``-k``/``-sf kk``).
 
-    Default remains 1 until Tier K A/B promotes the non-Kokkos recipe.
+    Set ``UMA_USE_KOKKOS=1`` only for A/B vs legacy ``uma/kk``.
     """
-    v = os.environ.get("UMA_USE_KOKKOS", "1").strip().lower()
-    return v not in ("0", "false", "no", "off")
+    v = os.environ.get("UMA_USE_KOKKOS", "0").strip().lower()
+    return v in ("1", "true", "yes", "on")
 
 
 def uma_pair_style_line(precision: str, uma_devices: int) -> str:

@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T07:53:00",
-  "phase": "V5_tier2_W11",
-  "status": "w11_STRUCTURAL_FAIL_torch_rand",
+  "stamp": "2026-08-10T08:10:49",
+  "phase": "V5_W8nk",
+  "status": "w8nk_gates_pending",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Hard-ceiling note: W11 CUDA graph blocked by TS RNG; keep W8-fix product; optional other wins only if clear <1ms path",
+  "next_action": "Gate W8nk E/F + NVT Pair ms vs W8-fix / ASE; promote if PASS",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": null,
+  "active_jobid": "21010252",
   "tick": {
-    "last": "2026-08-10T07:53:00",
-    "note": "W11 capture fail torch.rand; deps cancelled; hygiene fix"
+    "last": "2026-08-10T08:10:49",
+    "note": "W8nk submit {'nacl6_@2': '21010252', 'nacl6_@4': '21010253', 'water888_@2': '21010254', 'water888_@4': '21010255'}"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1523,5 +1523,19 @@
         }
       }
     }
+  },
+  "product_recipe": "pair_style uma precision double devices N (W8-fix NCCL, no Kokkos)",
+  "UMA_USE_KOKKOS_default": 0,
+  "tier2_w8nk": {
+    "change": "W8-fix + drop Kokkos (pair_style uma)",
+    "jobs": {
+      "nacl6_@2": "21010252",
+      "nacl6_@4": "21010253",
+      "water888_@2": "21010254",
+      "water888_@4": "21010255"
+    },
+    "status": "SUBMITTED",
+    "nacl_nsteps": 10,
+    "water_nsteps": 100
   }
 }

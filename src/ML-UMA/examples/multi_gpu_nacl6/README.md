@@ -10,7 +10,8 @@ Paths: ASE FairChem FP64 · FairChem LAMMPS fix-external · `uma/kk` **double**
 10 steps** via `run_path_{ase,fc,uma}.slurm` (same thermostat as water888:
 `temp 300.0 300.0 0.1`, `timestep 0.001`). Data:
 `structures/nacl6_nvt_300K_atomic_metal.data`. Metric: `nvt_ms_per_step` /
-`nvt_pair_ms_per_step`. See [`TEST_PROTOCOL.md`](TEST_PROTOCOL.md).
+`nvt_pair_ms_per_step`. Product uma path is **W8nk** (`pair_style uma`, no Kokkos).
+See [`TEST_PROTOCOL.md`](TEST_PROTOCOL.md).
 
 ## Latest results
 

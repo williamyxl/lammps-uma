@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T07:52 CDT · Loop **armed** · **W11 STRUCTURAL FAIL** (CUDA graph vs torch.rand)
+**Stamp:** 2026-08-10T08:10 CDT · Loop **armed** · **W8nk submitted** (W8-fix + no Kokkos)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,9 +87,10 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W11 STRUCTURAL FAIL** (`21009719` NaCl@2): CUDA graph capture aborts on `torch.rand` in UMA Wigner path (`Offset increment outside graph capture`). Deps cancelled.
-- Product path unchanged: **W8-fix**. Water@4 ASE ufast 94.5 still open (~1.7–2.4 ms); remaining Tier2 graph stretch exhausted.
-- **NaCl6 NVT default (new):** future ASE/FC/uma gates use `run_path_{ase,fc,uma}.slurm` with **NVT @ 300 K, NSTEPS=10** (data `structures/nacl6_nvt_300K_atomic_metal.data`). See `TEST_PROTOCOL.md`.
+- **W8nk in flight** = W8-fix stream-ordered NCCL + **`UMA_USE_KOKKOS=0`** (`pair_style uma … devices N`):
+  - NaCl NVT@10: @2 `21010252` → @4 `21010253`
+  - water NVT@100: @2 `21010254` → @4 `21010255`
+- Product default flipped to no-Kokkos; opt-in `UMA_USE_KOKKOS=1` for legacy `uma/kk` A/B.
 
 
 ## Tier2 W6 (COMPLETE PASS)

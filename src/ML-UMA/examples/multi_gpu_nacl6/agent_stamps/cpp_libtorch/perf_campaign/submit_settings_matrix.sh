@@ -42,7 +42,7 @@ submit_nacl() {
   local jid
   jid=$(sbatch --parsable --chdir="${NACL}" --gpus-per-node="${ngpu}" \
     --job-name="mx-nacl-${path_key}-${tag}-n${ngpu}" \
-    --export=ALL,NGPUS=${ngpu},FAIRCHEM_WORKERS=${ngpu},UMA_DEVICES=${ngpu},NSTEPS=10,RECOMPILE=0,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge},UMA_ARTIFACT_DIR=${art} \
+    --export=ALL,NGPUS=${ngpu},FAIRCHEM_WORKERS=${ngpu},UMA_DEVICES=${ngpu},NSTEPS=10,RECOMPILE=0,UMA_USE_KOKKOS=0,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge},UMA_ARTIFACT_DIR=${art} \
     "${script}")
   echo "nacl6 path=${path_key} tag=${tag} @${ngpu} job=${jid} NSTEPS=10 NVT@300K" | tee -a "${JOBS}"
 }
@@ -55,7 +55,7 @@ submit_water() {
   local jid
   jid=$(sbatch --parsable --gpus-per-node="${ngpu}" \
     --job-name="mx-h2o-${path}-${tag}-n${ngpu}" \
-    --export=ALL,NGPUS=${ngpu},FAIRCHEM_WORKERS=${ngpu},UMA_DEVICES=${ngpu},NSTEPS=100,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge},UMA_ARTIFACT_DIR=${art},RECOMPILE=0 \
+    --export=ALL,NGPUS=${ngpu},FAIRCHEM_WORKERS=${ngpu},UMA_DEVICES=${ngpu},NSTEPS=100,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge},UMA_ARTIFACT_DIR=${art},RECOMPILE=0,UMA_USE_KOKKOS=0 \
     "${script}")
   echo "water888 path=${path} tag=${tag} @${ngpu} job=${jid}" | tee -a "${JOBS}"
 }

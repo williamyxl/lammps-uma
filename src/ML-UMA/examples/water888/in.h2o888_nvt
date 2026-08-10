@@ -1,0 +1,36 @@
+# H2O NVT 300 K — 10 steps, flexible (NO fix shake / constraints)
+#
+# Data: water_nvt_300K_atomic_metal.data
+#   atom_style atomic, units metal, includes Velocities (Å/ps)
+#   type 1 = O, type 2 = H  (Masses order)
+#
+# Product (W8nk): pair_style uma … devices N (no -k / -sf kk).
+# Prefer: run_path_uma.slurm (UMA_USE_KOKKOS=0 by default).
+
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+
+read_data       water_nvt_300K_atomic_metal.data
+
+# Do NOT re-create velocities — use Velocities section from the data file.
+
+variable        uma_art string ../../uma-engine/artifacts/uma-s-1p2-omat-f64
+pair_style      uma precision double devices ${UMA_DEVICES}
+pair_coeff      * * ${uma_art} O H
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+# Flexible water: do NOT add fix shake, fix rigid, or any bond/angle constraints.
+
+fix             1 all nvt temp 300.0 300.0 0.1
+timestep        0.001
+
+thermo          1
+thermo_style    custom step temp pe ke etotal press
+thermo_modify   norm no
+
+run             10
+print           "Done. Final T = $(temp) K, PE = $(pe) eV"

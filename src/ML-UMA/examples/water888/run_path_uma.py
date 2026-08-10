@@ -47,11 +47,12 @@ def main() -> int:
     if not (art / "model_traced.pt").is_file():
         raise FileNotFoundError(art / "model_traced.pt")
 
-    use_kk = os.environ.get("UMA_USE_KOKKOS", "1").strip().lower() not in (
-        "0",
-        "false",
-        "no",
-        "off",
+    # W8nk product default: plain pair_style uma (no Kokkos). UMA_USE_KOKKOS=1 → uma/kk A/B.
+    use_kk = os.environ.get("UMA_USE_KOKKOS", "0").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
     )
     pair_style = (
         f"pair_style uma/kk precision double devices {uma_devices}"

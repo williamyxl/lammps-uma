@@ -1,8 +1,9 @@
-# TEST_PROTOCOL — multi-GPU uma/kk tests
+# TEST_PROTOCOL — multi-GPU UMA tests
 
-**Stamp:** 2026-08-08 ~20:25 CDT · Branch `uma-kokkos-mlip`  
-**Product path:** `pair_style uma/kk precision double devices N` with
-`lmp -k on g N -sf kk`, **1 MPI rank**, FP64 only.
+**Stamp:** 2026-08-10 · Branch `uma-kokkos-mlip`  
+**Product path (W8nk):** `pair_style uma precision double devices N` — **no**
+`-k` / `-sf kk` / `uma/kk`. W8-fix stream-ordered NCCL + drop Kokkos.
+Opt-in A/B: `UMA_USE_KOKKOS=1` restores legacy `uma/kk`.
 
 ## Systems under test
 

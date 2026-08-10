@@ -24,7 +24,7 @@ submit_nacl() {
     --chdir="${NACL}" \
     --gpus-per-node="${ngpu}" \
     --job-name="ref-nacl-${path_key}-${tag}-n${ngpu}" \
-    --export=ALL,NGPUS=${ngpu},UMA_DEVICES=${ngpu},FAIRCHEM_WORKERS=${ngpu},NSTEPS=10,RECOMPILE=0,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge} \
+    --export=ALL,NGPUS=${ngpu},UMA_DEVICES=${ngpu},FAIRCHEM_WORKERS=${ngpu},NSTEPS=10,RECOMPILE=0,UMA_USE_KOKKOS=0,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge} \
     "${script}")
   echo "nacl6 path=${path_key} tag=${tag} @${ngpu} job=${jid} NSTEPS=10 NVT@300K" | tee -a "${JOBS}"
 }

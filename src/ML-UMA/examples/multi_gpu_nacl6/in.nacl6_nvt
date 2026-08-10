@@ -2,6 +2,7 @@
 # Prefer path-isolated runners for campaign gates:
 #   run_path_{ase,fc,uma}.slurm  (default NSTEPS=10)
 #
+# Product (W8nk): pair_style uma … devices N  (no -k / -sf kk).
 # Data: structures/nacl6_nvt_300K_atomic_metal.data
 #   frozen rattled positions + Maxwell–Boltzmann velocities @ 300 K (seed=0)
 #   type1=Na type2=Cl
@@ -13,7 +14,7 @@ newton          off
 
 read_data       structures/nacl6_nvt_300K_atomic_metal.data
 
-pair_style      uma/kk precision double devices ${UMA_DEVICES}
+pair_style      uma precision double devices ${UMA_DEVICES}
 pair_coeff      * * ${UMA_ARTIFACT} Na Cl
 
 neighbor        2.0 bin
