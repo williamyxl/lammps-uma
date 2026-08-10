@@ -1,0 +1,37 @@
+{
+  "n": 8,
+  "natoms": 4096,
+  "a_lattice_A": 5.64,
+  "cell_A": 45.12,
+  "cell": [
+    [
+      45.12,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      45.12,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      45.12
+    ]
+  ],
+  "perturbation": {
+    "mode": "uniform_box",
+    "delta_A": 0.1,
+    "seed": 0,
+    "disp_max_abs_A": 0.09999935334424978
+  },
+  "velocities": "MaxwellBoltzmann 300.0K force_temp=True seed=0",
+  "types": {
+    "1": "Na",
+    "2": "Cl"
+  },
+  "extxyz": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/structures/nacl8_rattle.extxyz",
+  "data": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/structures/nacl8_nvt_300K_atomic_metal.data",
+  "note": "N=6 reproduces frozen nacl6_rattle_fixed to ~5e-11 A."
+}

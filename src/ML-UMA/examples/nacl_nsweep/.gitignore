@@ -1,0 +1,7 @@
+artifacts/
+results/
+logs/
+structures/*.data
+structures/*.extxyz
+__pycache__/
+*.log
