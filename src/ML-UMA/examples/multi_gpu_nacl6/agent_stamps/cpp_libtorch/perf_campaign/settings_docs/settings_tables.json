@@ -1,0 +1,937 @@
+{
+  "gen": {
+    "nacl6": {
+      "ase": {
+        "1": {
+          "E": -5830.923720166599,
+          "dE": 0.0,
+          "ms": 396.4798304019496,
+          "status": "DONE",
+          "metric": "ms_per_eval_python",
+          "mae": 0,
+          "rmse": 0,
+          "max_abs": 0,
+          "max_norm_atom": 0
+        },
+        "2": {
+          "E": -5830.92372016672,
+          "dE": 0.0,
+          "ms": 193.9,
+          "status": "REUSED",
+          "metric": "ms_per_eval_python",
+          "mae": 0,
+          "rmse": 0,
+          "max_abs": 0,
+          "max_norm_atom": 0
+        },
+        "4": {
+          "E": -5830.92372016672,
+          "dE": 0.0,
+          "ms": 115.2,
+          "status": "REUSED",
+          "metric": "ms_per_eval_python",
+          "mae": 0,
+          "rmse": 0,
+          "max_abs": 0,
+          "max_norm_atom": 0
+        }
+      },
+      "fc": {
+        "1": {
+          "E": -5830.923715251117,
+          "dE": 4.915603312838357e-06,
+          "ms": 345.52841098047793,
+          "status": "DONE",
+          "metric": "ms_per_eval_python",
+          "mae": 1.0019622693623854e-06,
+          "rmse": 1.3427168968524177e-06,
+          "max_abs": 7.123409645842793e-06,
+          "max_norm_atom": 7.126594828838874e-06
+        },
+        "2": {
+          "E": -5830.923715251116,
+          "dE": 4.915e-06,
+          "ms": 193.2,
+          "status": "REUSED",
+          "metric": "ms_per_eval_python",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": "\u2014",
+          "max_norm_atom": "\u2014",
+          "note": "FC force vs ASE not re-extracted; E residual ~5e-6"
+        },
+        "4": {
+          "E": -5830.923715251116,
+          "dE": 4.915e-06,
+          "ms": 118.0,
+          "status": "REUSED",
+          "metric": "ms_per_eval_python",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": "\u2014",
+          "max_norm_atom": "\u2014",
+          "note": "FC force vs ASE not re-extracted; E residual ~5e-6"
+        }
+      },
+      "uma": {
+        "1": {
+          "E": -5830.923720166722,
+          "dE": 1.8189894035458565e-12,
+          "ms": 320.38,
+          "status": "DONE",
+          "metric": "ms_per_eval_python",
+          "mae": 1.5158049994882126e-07,
+          "rmse": 2.1794267593834002e-07,
+          "max_abs": 4.99965972469707e-07,
+          "max_norm_atom": 7.673305594281034e-07
+        },
+        "2": {
+          "E": -5830.92372016672,
+          "dE": 0.0,
+          "ms": 172.9,
+          "status": "REUSED_Tier0",
+          "metric": "ms_per_eval_python",
+          "mae": "~1.5e-7",
+          "rmse": "\u2014",
+          "max_abs": "~5e-7",
+          "max_norm_atom": "~7.7e-7",
+          "note": "Tier0 vs ASE general"
+        },
+        "4": {
+          "E": -5830.92372016672,
+          "dE": 0.0,
+          "ms": 100.2,
+          "status": "REUSED_Tier0",
+          "metric": "ms_per_eval_python",
+          "mae": "~1.5e-7",
+          "rmse": "\u2014",
+          "max_abs": "~5e-7",
+          "max_norm_atom": "~7.7e-7",
+          "note": "Tier0 vs ASE general"
+        }
+      }
+    },
+    "water888": {
+      "ase": {
+        "1": {
+          "E": -3143.3893561182,
+          "dE": 0.0,
+          "ms": 382.09,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 0,
+          "rmse": 0,
+          "max_abs": 0,
+          "max_norm_atom": 0
+        },
+        "2": {
+          "E": -3143.3893561182,
+          "dE": 0.0,
+          "ms": 198.19,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 0,
+          "rmse": 0,
+          "max_abs": 0,
+          "max_norm_atom": 0
+        },
+        "4": {
+          "E": -3143.3893561182,
+          "dE": 0.0,
+          "ms": 117.98,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 0,
+          "rmse": 0,
+          "max_abs": 0,
+          "max_norm_atom": 0
+        }
+      },
+      "fc": {
+        "1": {
+          "E": -3143.3893545503,
+          "dE": 1.568e-06,
+          "ms": 359.4,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": 9.35e-05,
+          "max_norm_atom": "\u2014",
+          "note": "max|\u0394F| from COMPARE vs ASE@1"
+        },
+        "2": {
+          "E": -3143.3893545503,
+          "dE": 1.568e-06,
+          "ms": 200.54,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": 9.35e-05,
+          "max_norm_atom": "\u2014",
+          "note": "max|\u0394F| from COMPARE vs ASE@1"
+        },
+        "4": {
+          "E": -3143.3893545503,
+          "dE": 1.568e-06,
+          "ms": 118.94,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": 9.35e-05,
+          "max_norm_atom": "\u2014",
+          "note": "max|\u0394F| from COMPARE vs ASE@1"
+        }
+      },
+      "uma": {
+        "1": {
+          "E": -3143.3893561182,
+          "dE": 8.2e-12,
+          "ms": 332.51,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": 4.962e-06,
+          "max_norm_atom": "\u2014",
+          "note": "@2/@4 ms from Tier0; @1 from COMPARE"
+        },
+        "2": {
+          "E": -3143.3893561182,
+          "dE": 8.2e-12,
+          "ms": 178.32,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": 4.962e-06,
+          "max_norm_atom": "\u2014",
+          "note": "@2/@4 ms from Tier0; @1 from COMPARE"
+        },
+        "4": {
+          "E": -3143.3893561182,
+          "dE": 8.2e-12,
+          "ms": 104.2,
+          "status": "REUSED",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": 4.962e-06,
+          "max_norm_atom": "\u2014",
+          "note": "@2/@4 ms from Tier0; @1 from COMPARE"
+        }
+      }
+    }
+  },
+  "gmerge": {
+    "nacl6": {
+      "ase": {
+        "1": {
+          "E": -5830.923741338032,
+          "dE": 0.0,
+          "ms": 380.7,
+          "status": "DONE",
+          "job": "20989758",
+          "metric": "ms_per_eval_python",
+          "mae": 1.1742910118365698e-16,
+          "rmse": 1.4751909114457717e-16,
+          "max_abs": 5.828670879282072e-16,
+          "max_norm_atom": 6.111349805610007e-16
+        },
+        "2": {
+          "E": -5830.923741338028,
+          "dE": 4.547473508864641e-12,
+          "ms": 195.7,
+          "status": "DONE",
+          "job": "20989338",
+          "metric": "ms_per_eval_python",
+          "mae": 1.1125883706661123e-16,
+          "rmse": 1.4006351826700254e-16,
+          "max_abs": 5.551115123125783e-16,
+          "max_norm_atom": 6.798699777552592e-16
+        },
+        "4": {
+          "E": -5830.923741338027,
+          "dE": 5.4569682106375694e-12,
+          "ms": 167.9,
+          "status": "DONE",
+          "job": "20989346",
+          "metric": "ms_per_eval_python",
+          "mae": 1.1996233752051596e-16,
+          "rmse": 1.5175350324672832e-16,
+          "max_abs": 6.106226635438361e-16,
+          "max_norm_atom": 6.650125288142465e-16
+        }
+      },
+      "fc": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64: FairChem Float vs Double in merge_MOLE",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64: FairChem Float vs Double in merge_MOLE",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64: FairChem Float vs Double in merge_MOLE",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "uma": {
+        "1": {
+          "E": -5830.923720166724,
+          "dE": 2.12e-05,
+          "ms": 315.5,
+          "status": "DONE",
+          "job": "20989768",
+          "metric": "ms_per_eval_python",
+          "note": "E matches general not merge \u2014 devices=1 merge art suspect",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": "\u2014",
+          "max_norm_atom": "\u2014"
+        },
+        "2": {
+          "E": -5830.9237413382,
+          "dE": 1.67e-10,
+          "ms": 169.85,
+          "status": "REUSED_Tier1c",
+          "job": "20983451",
+          "metric": "ms_per_eval_python",
+          "mae": null,
+          "rmse": null,
+          "max_abs": 5e-07,
+          "max_norm_atom": "\u2014",
+          "note": "vs merge ASE"
+        },
+        "4": {
+          "E": -5830.923741338154,
+          "dE": 1.23e-10,
+          "ms": 96.47,
+          "status": "DONE",
+          "job": "20989769",
+          "metric": "ms_per_eval_python",
+          "mae": 1.52e-07,
+          "rmse": null,
+          "max_abs": 5e-07,
+          "max_norm_atom": 7.79e-07,
+          "note": "vs merge ASE forces"
+        }
+      }
+    },
+    "water888": {
+      "ase": {
+        "1": {
+          "E": -3143.389377472269,
+          "dE": 4.547473508864641e-13,
+          "ms": 353.9,
+          "status": "DONE",
+          "job": "20989760",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 5.092006813057528e-16,
+          "rmse": 6.672090619834497e-16,
+          "max_abs": 2.831068712794149e-15,
+          "max_norm_atom": 3.6591071278906366e-15
+        },
+        "2": {
+          "E": -3143.38937747227,
+          "dE": 4.547473508864641e-13,
+          "ms": 174.0,
+          "status": "DONE",
+          "job": "20989762",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 6.007487272773146e-16,
+          "rmse": 7.773127550699297e-16,
+          "max_abs": 4.9960036108132044e-15,
+          "max_norm_atom": 5.358192126731684e-15
+        },
+        "4": {
+          "E": -3143.389377472269,
+          "dE": 4.547473508864641e-13,
+          "ms": 98.5,
+          "status": "DONE",
+          "job": "20989764",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 6.215903947181141e-16,
+          "rmse": 8.042861478839253e-16,
+          "max_abs": 4.6629367034256575e-15,
+          "max_norm_atom": 4.930190325141863e-15
+        }
+      },
+      "fc": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64: FairChem Float vs Double in merge_MOLE",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64: FairChem Float vs Double in merge_MOLE",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64: FairChem Float vs Double in merge_MOLE",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "uma": {
+        "1": {
+          "E": -3143.3893561181703,
+          "dE": 2.1354099317250075e-05,
+          "ms": 326.5,
+          "status": "DONE",
+          "job": "20989772",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": "\u2014",
+          "max_norm_atom": "\u2014",
+          "note": "@1 E~general ASE (merge residual absent)"
+        },
+        "2": {
+          "E": -3143.389377472278,
+          "dE": 8.185452315956354e-12,
+          "ms": 186.45,
+          "status": "DONE",
+          "job": "20989770",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 7.436870275313855e-07,
+          "rmse": 1.3903859533004445e-06,
+          "max_abs": 4.992769293110655e-06,
+          "max_norm_atom": 6.638901104638336e-06
+        },
+        "4": {
+          "E": -3143.3893774722783,
+          "dE": 8.640199666842818e-12,
+          "ms": 101.05,
+          "status": "DONE",
+          "job": "20989771",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 7.436870275313855e-07,
+          "rmse": 1.3903859533004445e-06,
+          "max_abs": 4.992769293110655e-06,
+          "max_norm_atom": 6.638901104638336e-06
+        }
+      }
+    }
+  },
+  "ufast_nomole": {
+    "nacl6": {
+      "ase": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "fc": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "uma": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      }
+    },
+    "water888": {
+      "ase": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "fc": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "uma": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_ILLEGAL",
+          "note": "FairChem: umas_fast_pytorch requires merge_mole=True",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      }
+    }
+  },
+  "ufast": {
+    "nacl6": {
+      "ase": {
+        "1": {
+          "E": -5830.92374133803,
+          "dE": 0.0,
+          "ms": 350.3,
+          "status": "DONE",
+          "job": "20989759",
+          "metric": "ms_per_eval_python",
+          "mae": 1.163565970198184e-16,
+          "rmse": 1.4679546062765212e-16,
+          "max_abs": 5.551115123125783e-16,
+          "max_norm_atom": 6.794825716556446e-16
+        },
+        "2": {
+          "E": -5830.923741338028,
+          "dE": 1.8189894035458565e-12,
+          "ms": 191.6,
+          "status": "DONE",
+          "job": "20989339",
+          "metric": "ms_per_eval_python",
+          "mae": 1.180977879452779e-16,
+          "rmse": 1.4904349303171268e-16,
+          "max_abs": 6.661338147750939e-16,
+          "max_norm_atom": 6.794294244517629e-16
+        },
+        "4": {
+          "E": -5830.923741338027,
+          "dE": 2.7284841053187847e-12,
+          "ms": 164.5,
+          "status": "DONE",
+          "job": "20989347",
+          "metric": "ms_per_eval_python",
+          "mae": 1.7011791118452166e-16,
+          "rmse": 2.133576220894483e-16,
+          "max_abs": 8.604228440844963e-16,
+          "max_norm_atom": 8.968100940422724e-16
+        }
+      },
+      "fc": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64 crash",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64 crash",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64 crash",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "uma": {
+        "1": {
+          "E": -5830.923720166722,
+          "dE": 2.12e-05,
+          "ms": 533.1,
+          "status": "DONE_FLOOR_FAIL",
+          "job": "20989766",
+          "metric": "ms_per_eval_python",
+          "note": "devices=1: slow + E~general",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": "\u2014",
+          "max_norm_atom": "\u2014"
+        },
+        "2": {
+          "E": -5830.923741338152,
+          "dE": 1.22e-10,
+          "ms": 159.4,
+          "status": "DONE_W7",
+          "job": "20989184",
+          "metric": "ms_per_eval_python",
+          "mae": 1.52e-07,
+          "rmse": null,
+          "max_abs": 5e-07,
+          "max_norm_atom": 7.79e-07
+        },
+        "4": {
+          "E": -5830.9237413381525,
+          "dE": 1.23e-10,
+          "ms": 92.37,
+          "status": "DONE_W7",
+          "job": "20989185",
+          "metric": "ms_per_eval_python",
+          "mae": 1.52e-07,
+          "rmse": null,
+          "max_abs": 5e-07,
+          "max_norm_atom": 7.79e-07
+        }
+      }
+    },
+    "water888": {
+      "ase": {
+        "1": {
+          "E": -3143.389377472269,
+          "dE": 4.547473508864641e-13,
+          "ms": 337.6,
+          "status": "DONE",
+          "job": "20989761",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 5.890987964644644e-16,
+          "rmse": 7.579502570808395e-16,
+          "max_abs": 2.6645352591003757e-15,
+          "max_norm_atom": 3.685957161943871e-15
+        },
+        "2": {
+          "E": -3143.3893774722696,
+          "dE": 0.0,
+          "ms": 165.5,
+          "status": "DONE",
+          "job": "20989763",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 7.105430480817137e-16,
+          "rmse": 9.241878747814967e-16,
+          "max_abs": 4.551914400963142e-15,
+          "max_norm_atom": 4.980250615761879e-15
+        },
+        "4": {
+          "E": -3143.389377472269,
+          "dE": 4.547473508864641e-13,
+          "ms": 94.5,
+          "status": "DONE",
+          "job": "20989765",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 7.192078535303604e-16,
+          "rmse": 9.319569906225026e-16,
+          "max_abs": 5.218048215738236e-15,
+          "max_norm_atom": 5.628567954035225e-15
+        }
+      },
+      "fc": {
+        "1": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64 crash",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "2": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64 crash",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        },
+        "4": {
+          "E": null,
+          "dE": null,
+          "ms": null,
+          "status": "SKIP_KNOWN_CRASH",
+          "note": "FC+merge_mole+FP64 crash",
+          "metric": null,
+          "mae": null,
+          "rmse": null,
+          "max_abs": null,
+          "max_norm_atom": null
+        }
+      },
+      "uma": {
+        "1": {
+          "E": -3143.3893561181703,
+          "dE": 2.14e-05,
+          "ms": 337.7,
+          "status": "DONE",
+          "job": "20989767",
+          "metric": "nvt_pair_ms_per_step",
+          "note": "E~general",
+          "mae": "\u2014",
+          "rmse": "\u2014",
+          "max_abs": "\u2014",
+          "max_norm_atom": "\u2014"
+        },
+        "2": {
+          "E": -3143.389377472278,
+          "dE": 8.2e-12,
+          "ms": 165.1,
+          "status": "DONE_W7",
+          "job": "20989186",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 7.44e-07,
+          "rmse": null,
+          "max_abs": 4.99e-06,
+          "max_norm_atom": 6.64e-06
+        },
+        "4": {
+          "E": -3143.389377472278,
+          "dE": 8.2e-12,
+          "ms": 96.84,
+          "status": "DONE_W7_FLOOR_FAIL_vs_ASE",
+          "job": "20989187",
+          "metric": "nvt_pair_ms_per_step",
+          "mae": 7.44e-07,
+          "rmse": null,
+          "max_abs": 4.99e-06,
+          "max_norm_atom": 6.64e-06,
+          "note": "ms 96.84 > ASE ufast 94.5"
+        }
+      }
+    }
+  }
+}

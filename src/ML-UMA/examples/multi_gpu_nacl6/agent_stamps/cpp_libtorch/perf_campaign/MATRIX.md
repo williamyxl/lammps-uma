@@ -45,6 +45,7 @@ See `MATRIX.json`. Illegal and FC-merge crashes stamped there.
 
 ## Next
 
-1. Fix water EX (absolute) → measure water ASE gmerge/ufast @1/@2/@4; NaCl ASE @1 gmerge/ufast.
-2. Fill missing uma `gen`/`gmerge`/`ufast` @1 and water/NaCl gaps.
-3. Recompute BEST_BARS; then Tier2 **W8** max-push (floor already green on NaCl @2/@4 and water vs gen).
+1. Four settings docs: [`settings_docs/`](settings_docs/README.md) (gen / gmerge / ufast_nomole / ufast).
+2. Fix water EX (absolute) → measure water ASE gmerge/ufast @1/@2/@4; NaCl ASE @1 gmerge/ufast.
+3. Fill missing uma `gen`/`gmerge`/`ufast` @1 and water/NaCl gaps.
+4. Recompute BEST_BARS; then Tier2 **W8** max-push (floor already green on NaCl @2/@4 and water vs gen).
