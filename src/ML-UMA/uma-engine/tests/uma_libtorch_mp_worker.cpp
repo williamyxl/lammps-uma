@@ -448,7 +448,8 @@ int main(int argc, char** argv) {
                         << " W11 CUDA graph captured e_cap=" << e_cap << "\n"
                         << std::flush;
             } catch (const std::exception& ex) {
-              // Mid-capture abort leaves the stream capturing; reset before eager.
+              // Mid-capture abort leaves the stream capturing; fully unwind
+              // before eager (reset alone can leave sticky capturing state).
               graph_failed = true;
               graph_captured = false;
               if (capture_begun) {
@@ -456,6 +457,18 @@ int main(int argc, char** argv) {
                   cuda_graph.reset();
                 } catch (...) {
                 }
+              }
+              {
+                cudaStreamCaptureStatus cap_st = cudaStreamCaptureStatusNone;
+                if (cudaStreamIsCapturing(graph_stream.stream(), &cap_st) ==
+                        cudaSuccess &&
+                    cap_st != cudaStreamCaptureStatusNone) {
+                  cudaGraph_t orphan = nullptr;
+                  cudaStreamEndCapture(graph_stream.stream(), &orphan);
+                  if (orphan) cudaGraphDestroy(orphan);
+                }
+                cudaGetLastError();  // clear sticky async error
+                cudaStreamSynchronize(graph_stream.stream());
               }
               std::cerr << "uma_libtorch_mp_worker rank=" << rank
                         << " W11 CUDA graph CAPTURE FAILED: " << ex.what()

@@ -1,0 +1,18 @@
+{
+  "ver": "w17b",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "21014028",
+  "art": "uma-s-1p2-omat-f64-fast-cgraph",
+  "fix": "gamma0+nondefault_stream",
+  "UMA_CUDA_GRAPH": 1,
+  "UMA_EDGE_PAD": 1,
+  "RECOMPILE": 1,
+  "graph_path": "graph_fail_eager",
+  "graph_error": "operation not permitted when stream is capturing (export_wrapper _shape_as_tensor\u2192.to(cuda))",
+  "fallback_hygiene": "FAILED (sticky capturing; job died)",
+  "status": "CAPTURE_STRUCTURAL_FAIL_SHAPE_OPS",
+  "promote_default": false,
+  "next": "capture-safe natoms/nedges in export_wrapper + EndCapture hygiene; re-export; W17c",
+  "stamp": "2026-08-10T12:02:33"
+}

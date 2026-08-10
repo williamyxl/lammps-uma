@@ -47,10 +47,13 @@ class EnergyExportWrapper(nn.Module):
         spin: torch.Tensor,
     ) -> AtomicData | TraceableBatch:
         device = pos.device
-        pos_shape = torch._shape_as_tensor(pos)
-        natoms = pos_shape[0:1].to(dtype=torch.long, device=device)
-        edge_shape = torch._shape_as_tensor(edge_index)
-        nedges = edge_shape[1:2].to(dtype=torch.long, device=device)
+        # Capture-safe: no _shape_as_tensor + CPU→GPU .to() (illegal under CUDA
+        # graph capture). empty+fill_ stays on-device; size() is host int at
+        # trace time and is fine for fixed-shape EDGE_PAD graphs (W17).
+        natoms = torch.empty(1, dtype=torch.long, device=device)
+        natoms.fill_(pos.size(0))
+        nedges = torch.empty(1, dtype=torch.long, device=device)
+        nedges.fill_(edge_index.size(1))
         fixed = torch.zeros(pos.shape[0], dtype=torch.long, device=device)
         tags = torch.zeros(pos.shape[0], dtype=torch.long, device=device)
         batch = torch.zeros(pos.shape[0], dtype=torch.long, device=device)

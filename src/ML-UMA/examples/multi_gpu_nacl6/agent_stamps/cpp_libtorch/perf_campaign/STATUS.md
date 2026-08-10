@@ -1,7 +1,7 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T10:59 CDT · W17b stream-fix NaCl@2 `21014028` (RECOMPILE=1)
-**Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
+**Stamp:** 2026-08-10T12:00 CDT · W17b CAPTURE FAIL (shape ops) → W17c export+hygiene
+**Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v6_w8nk_perf_push_77967fcb` (**CURRENT** — W17 CUDA graph)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
 
@@ -68,9 +68,10 @@ FairChem `InferenceSettings` preset **`turbo`** is unused here (≠ `umas_fast_p
 ASE@1 (`merge_mole=True`) ms: `general`+merge **367**, `umas_fast_pytorch`+merge **350** (single GPU).
 
 ## Next
-1. **V6 from W8nk** — plan `v6_w8nk_perf_push_77967fcb`: W13 profile → W14 result-path → floor clear water@4.
-2. devices=1 `umas_fast_pytorch`+`merge_mole` export (W15).
-3. Do **not** retry W11 CUDA graph without FairChem Wigner RNG fix.
+1. **W17c:** re-export `*-f64-fast-cgraph` with capture-safe `natoms`/`nedges` (no `_shape_as_tensor` H2D); worker EndCapture hygiene.
+2. Gate NaCl@2 `path=graph_capture`; if PASS → full matrix; else close W17 structural, keep **W8nk**.
+3. Hard-ceiling: W14 &lt;1 ms NO_PROMOTE; W17 is last same-node stretch before FairChem/model floor (~water@4 1.2 ms).
+
 
 
 ## Constraints
@@ -87,8 +88,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W17 smoke:** export `21013149` VERIFY_OK (no `aten::rand`); NaCl@2 `21013150` E/F **PASS** (dE~1e-10, Fmax~5e-7) but **CAPTURE FAIL**: non-default stream required.
-- Fix landed: pool stream + CUDAStreamGuard; NCCL on current stream when `UMA_CUDA_GRAPH=1`. Resubmit NaCl@2 with RECOMPILE=1.
+- **W17b FAILED** `21014028`: non-default stream OK; capture dies on export_wrapper `_shape_as_tensor`→`.to(cuda)` (`operation not permitted when stream is capturing`). Eager fallback also poisoned → job fail.
+- Fix: capture-safe empty+fill_; `cudaStreamEndCapture` unwind. Re-export + W17c pending submit.
 
 
 ## Tier2 W6 (COMPLETE PASS)
