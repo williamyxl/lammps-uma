@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T08:49:50",
+  "stamp": "2026-08-10T08:50:58",
   "phase": "V6_from_W8nk",
-  "status": "w13_profile_submitted",
+  "status": "w13_pending_w14_code_landed",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -1756,5 +1756,10 @@
     "sys": "water888",
     "ngpu": 4,
     "UMA_MP_LOG_DIR": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/matrix/water888_uma_ufast_w13_ngpu4/mp_logs"
+  },
+  "w14": {
+    "change": "async_pin_d2h_stream_sync",
+    "commit": "pending_local",
+    "gate": "after_w13"
   }
 }

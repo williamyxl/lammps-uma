@@ -297,3 +297,4 @@ tick178 gather
 2026-08-10T08:10:49 W8nk submit {'nacl6_@2': '21010252', 'nacl6_@4': '21010253', 'water888_@2': '21010254', 'water888_@4': '21010255'}\n2026-08-10T08:11:58 W8nk NaCl@2 PASS nvt_pair=161.94\n2026-08-10T08:45:19 W8nk PRODUCT ef_PASS nvt NaCl@2/@4=161.94/92.097 water@2/@4=164.82/95.74400000000001 floor_water4_FAIL
 2026-08-10T08:49:36 W13 submit water@4 job=21010752
 2026-08-10T08:49:50 W13 submit water@4 job=21010752
+2026-08-10T08:50:58 W14 code landed; await W13 21010752\n

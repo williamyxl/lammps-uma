@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T08:47 CDT · Loop **armed** · **W8nk PRODUCT** · W13 profile water@4 submitted `21010752`
+**Stamp:** 2026-08-10T08:50 CDT · Loop **armed** · **W8nk PRODUCT** · W13 `21010752` · W14 code landed (await profile+gate)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -88,7 +88,8 @@ Wave A **COMPLETE PASS**.
 
 ## Queue (live)
 - **W8nk PRODUCT** locked (E/F PASS; water@4 floor FAIL 95.74 vs ASE 94.5).
-- **W13** water@4 profile `UMA_MP_LOG_DIR` job **21010752** (RECOMPILE=0).
+- **W13** water@4 profile job **21010752** (pending Resources).
+- **W14** worker change pushed (async pin D2H + `cudaStreamSynchronize`); gate jobs after W13 harvest (`RECOMPILE=1`).
 
 
 ## Tier2 W6 (COMPLETE PASS)
