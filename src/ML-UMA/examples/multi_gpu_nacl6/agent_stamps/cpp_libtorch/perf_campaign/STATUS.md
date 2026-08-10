@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W14 NaCl@2** (`21010851`) E/F PASS; SP **161.81** ≈ W8nk; NVT 197 is one vesin spike in NVT@10 — not promote-kill.
-- Running/queued: water@2 `21010853`; NaCl@4 `21010852`; water@4 `21010854`.
+- **W14 NaCl@2** SP flat; **water@2** NVT **165.33** (ΔW8nk +0.51) E/F PASS.
+- Waiting: NaCl@4 `21010852`; water@4 `21010854`.
 
 
 ## Tier2 W6 (COMPLETE PASS)

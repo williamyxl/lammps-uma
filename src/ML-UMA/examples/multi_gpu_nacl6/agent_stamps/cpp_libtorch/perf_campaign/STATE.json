@@ -1,6 +1,6 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:00:17",
+  "stamp": "2026-08-10T09:00:42",
   "phase": "V6_from_W8nk",
   "status": "w14_nacl2_PASS_sp_flat_nvt_noisy",
   "gates": {
@@ -1857,5 +1857,24 @@
     "pass": true,
     "note": "SP 161.81 \u2248 W8nk; NVT 197 polluted by one vesin spike (~355ms at gen=12). Not a W14 regression. Await full matrix.",
     "speed_pass_sp": true
+  },
+  "w14_water888_@2": {
+    "ver": "w14",
+    "sys": "water888",
+    "ngpu": 2,
+    "job": "21010853",
+    "nvt_pair_ms_per_step": 165.33,
+    "ms_sp": 166.65,
+    "baseline_w8nk_nvt": 164.82,
+    "delta_vs_w8nk_ms": 0.5100000000000193,
+    "ase_ufast": 165.5,
+    "le_ase": true,
+    "dE_vs_merge_ase": 8.185452315956354e-12,
+    "force_max_abs": 4.992769293110655e-06,
+    "ef_pass": true,
+    "speed_pass": true,
+    "promote_default": false,
+    "stamp": "2026-08-10T09:00:42",
+    "pass": true
   }
 }
