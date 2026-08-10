@@ -15,9 +15,9 @@
 # Multi-GPU needs model_mp_wN_n648_r*.pt from export_mp_water888.slurm
 
 set -euo pipefail
-# Always resolve to this script's directory (ignore SLURM_SUBMIT_DIR / --chdir).
-EX="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "${EX}/../../../.." && pwd)"
+# Absolute path — Slurm may copy the batch script to spool so BASH_SOURCE is unreliable.
+EX="/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/water888"
+ROOT="/work/nvme/bfzx/xyan11/workdir/lammps-uma"
 ENG="${ROOT}/src/ML-UMA/uma-engine"
 mkdir -p "${EX}/logs"
 

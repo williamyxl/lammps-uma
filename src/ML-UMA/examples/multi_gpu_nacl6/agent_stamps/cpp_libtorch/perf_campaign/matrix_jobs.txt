@@ -1,0 +1,17 @@
+nacl6 path=ase tag=gmerge @1 job=20989758
+nacl6 path=ase tag=ufast @1 job=20989759
+water888 path=ase tag=gmerge @1 job=20989760
+water888 path=ase tag=ufast @1 job=20989761
+water888 path=ase tag=gmerge @2 job=20989762
+water888 path=ase tag=ufast @2 job=20989763
+water888 path=ase tag=gmerge @4 job=20989764
+water888 path=ase tag=ufast @4 job=20989765
+nacl6 path=uma_double tag=ufast @1 job=20989766
+water888 path=uma tag=ufast @1 job=20989767
+nacl6 path=uma_double tag=gmerge @1 job=20989768
+nacl6 path=uma_double tag=gmerge @4 job=20989769
+water888 path=uma tag=gmerge @2 job=20989770
+water888 path=uma tag=gmerge @4 job=20989771
+water888 path=uma tag=gmerge @1 job=20989772
+nacl6 path=uma_double tag=gen @1 job=20989773
+water888 path=uma tag=gen @1 job=20989774

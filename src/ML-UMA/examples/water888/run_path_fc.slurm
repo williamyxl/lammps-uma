@@ -14,8 +14,8 @@
 # Override GPUs: sbatch --gpus-per-node=N --export=ALL,NGPUS=N,FAIRCHEM_WORKERS=N,NSTEPS=100 ...
 
 set -euo pipefail
-# Always resolve to this script's directory (ignore SLURM_SUBMIT_DIR / --chdir).
-EX="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Absolute path — Slurm may copy the batch script to spool so BASH_SOURCE is unreliable.
+EX="/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/water888"
 mkdir -p "${EX}/logs"
 export NGPUS="${NGPUS:-${SLURM_GPUS_ON_NODE:-1}}"
 export FAIRCHEM_WORKERS="${FAIRCHEM_WORKERS:-${NGPUS}}"

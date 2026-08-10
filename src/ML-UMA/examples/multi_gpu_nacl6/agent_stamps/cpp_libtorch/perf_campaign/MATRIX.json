@@ -1,0 +1,714 @@
+{
+  "stamp": "2026-08-09T20:26:00",
+  "policy": "BEST_BARS are minimum floor; max-push to hard ceiling",
+  "artifacts": {
+    "gen": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/uma-engine/artifacts/uma-s-1p2-omat-f64",
+    "gmerge": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/uma-engine/artifacts/uma-s-1p2-omat-f64-merge",
+    "ufast": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/uma-engine/artifacts/uma-s-1p2-omat-f64-fast"
+  },
+  "best_bars": {
+    "nacl6": {
+      "1": {
+        "ase": {
+          "tag": "gen",
+          "ms": 396.5
+        },
+        "fc": {
+          "tag": "gen",
+          "ms": 345.5
+        },
+        "uma": null
+      },
+      "2": {
+        "ase": {
+          "tag": "ufast",
+          "ms": 191.6
+        },
+        "fc": {
+          "tag": "gen",
+          "ms": 193.2
+        },
+        "uma": {
+          "tag": "ufast",
+          "ms": 159.4
+        },
+        "floor": "PASS",
+        "margin_ase": 32.2,
+        "margin_fc": 33.8
+      },
+      "4": {
+        "ase": {
+          "tag": "ufast",
+          "ms": 164.5
+        },
+        "fc": {
+          "tag": "gen",
+          "ms": 118.0
+        },
+        "uma": {
+          "tag": "ufast",
+          "ms": 92.37
+        },
+        "floor": "PASS",
+        "margin_ase": 72.1,
+        "margin_fc": 25.6
+      }
+    },
+    "water888": {
+      "1": {
+        "ase": {
+          "tag": "gen",
+          "ms": 382.09
+        },
+        "fc": {
+          "tag": "gen",
+          "ms": 359.4
+        },
+        "uma": null
+      },
+      "2": {
+        "ase": {
+          "tag": "gen",
+          "ms": 198.19,
+          "note": "ufast pending"
+        },
+        "fc": {
+          "tag": "gen",
+          "ms": 200.54
+        },
+        "uma": {
+          "tag": "ufast",
+          "ms": 165.1
+        },
+        "floor": "PASS_vs_gen",
+        "margin_ase": 33.09,
+        "margin_fc": 35.44
+      },
+      "4": {
+        "ase": {
+          "tag": "gen",
+          "ms": 117.98,
+          "note": "ufast pending"
+        },
+        "fc": {
+          "tag": "gen",
+          "ms": 118.94
+        },
+        "uma": {
+          "tag": "ufast",
+          "ms": 96.84
+        },
+        "floor": "PASS_vs_gen",
+        "margin_ase": 21.14,
+        "margin_fc": 22.1
+      }
+    }
+  },
+  "cells": [
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "ufast_nomole",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "ufast_nomole",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "ufast_nomole",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "ufast_nomole",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "ufast_nomole",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "ufast_nomole",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "ufast_nomole",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "ufast_nomole",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "ufast_nomole",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "ufast_nomole",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "ufast_nomole",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "ufast_nomole",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "ufast_nomole",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "ufast_nomole",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "ufast_nomole",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "ufast_nomole",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "ufast_nomole",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "ufast_nomole",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_ILLEGAL",
+      "job": null,
+      "note": "umas_fast_pytorch requires merge_mole=True",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "gmerge",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "gmerge",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "gmerge",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "ufast",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "ufast",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "ufast",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "gmerge",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "gmerge",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "gmerge",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "ufast",
+      "ngpu": 1,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "ufast",
+      "ngpu": 2,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "ufast",
+      "ngpu": 4,
+      "ms": null,
+      "status": "SKIP_KNOWN_CRASH",
+      "job": null,
+      "note": "FC+merge_mole+FP64 Float/Double in merge_MOLE",
+      "metric": null
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "gen",
+      "ngpu": 1,
+      "ms": 396.5,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "gen",
+      "ngpu": 1,
+      "ms": 345.5,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "gen",
+      "ngpu": 2,
+      "ms": 193.9,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "gen",
+      "ngpu": 2,
+      "ms": 193.2,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "gen",
+      "ngpu": 4,
+      "ms": 115.2,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "fc",
+      "tag": "gen",
+      "ngpu": 4,
+      "ms": 118.0,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "gen",
+      "ngpu": 1,
+      "ms": 382.09,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "gen",
+      "ngpu": 1,
+      "ms": 359.4,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "gen",
+      "ngpu": 2,
+      "ms": 198.19,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "gen",
+      "ngpu": 2,
+      "ms": 200.54,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "gen",
+      "ngpu": 4,
+      "ms": 117.98,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "fc",
+      "tag": "gen",
+      "ngpu": 4,
+      "ms": 118.94,
+      "status": "REUSED",
+      "job": null,
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "gmerge",
+      "ngpu": 2,
+      "ms": 195.7,
+      "status": "DONE",
+      "job": "20989338",
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "gmerge",
+      "ngpu": 4,
+      "ms": 167.9,
+      "status": "DONE",
+      "job": "20989346",
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "ufast",
+      "ngpu": 2,
+      "ms": 191.6,
+      "status": "DONE",
+      "job": "20989339",
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "ase",
+      "tag": "ufast",
+      "ngpu": 4,
+      "ms": 164.5,
+      "status": "DONE",
+      "job": "20989347",
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "ufast",
+      "ngpu": 2,
+      "ms": 159.4,
+      "status": "DONE",
+      "job": "20989184",
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "ufast",
+      "ngpu": 4,
+      "ms": 92.37,
+      "status": "DONE",
+      "job": "20989185",
+      "note": null,
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "ufast",
+      "ngpu": 2,
+      "ms": 165.1,
+      "status": "DONE",
+      "job": "20989186",
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "ufast",
+      "ngpu": 4,
+      "ms": 96.84,
+      "status": "DONE",
+      "job": "20989187",
+      "note": null,
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "gen",
+      "ngpu": 2,
+      "ms": 172.9,
+      "status": "REUSED",
+      "job": null,
+      "note": "Tier0",
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "gen",
+      "ngpu": 4,
+      "ms": 100.2,
+      "status": "REUSED",
+      "job": null,
+      "note": "Tier0",
+      "metric": "ms_per_eval_python"
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "gen",
+      "ngpu": 2,
+      "ms": 178.3,
+      "status": "REUSED",
+      "job": null,
+      "note": "Tier0",
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "gen",
+      "ngpu": 4,
+      "ms": 104.2,
+      "status": "REUSED",
+      "job": null,
+      "note": "Tier0",
+      "metric": "nvt_pair_ms_per_step"
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "gmerge",
+      "ngpu": 2,
+      "ms": 170.0,
+      "status": "REUSED",
+      "job": null,
+      "note": "Tier1c",
+      "metric": "ms_per_eval_python"
+    }
+  ]
+}

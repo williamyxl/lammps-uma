@@ -1,7 +1,7 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T20:12:00 CDT · Loop **armed** · **W7 COMPLETE PASS**
-**State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
+**Stamp:** 2026-08-09T20:28 CDT · Loop **armed** · **MATRIX+W8 in flight**
+**Matrix:** [`MATRIX.md`](MATRIX.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
 

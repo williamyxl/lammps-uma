@@ -285,9 +285,20 @@ class SharedPeerGatherSlot {
       throw std::runtime_error(std::string("ncclCommInitRank: ") +
                                ncclGetErrorString(nr));
     }
+#if defined(UMA_ENGINE_USE_CUDA)
+    // Tier2/W8: dedicated NCCL stream; Torch default stream waits via event.
+    if (cudaStreamCreateWithFlags(&nccl_stream_, cudaStreamNonBlocking) !=
+        cudaSuccess) {
+      throw std::runtime_error("cudaStreamCreate(nccl_stream) failed");
+    }
+    if (cudaEventCreateWithFlags(&nccl_done_evt_, cudaEventDisableTiming) !=
+        cudaSuccess) {
+      throw std::runtime_error("cudaEventCreate(nccl_done_evt) failed");
+    }
+#endif
     nccl_ready_ = true;
     std::cerr << "SharedPeerGatherSlot: nccl ready rank=" << rank
-              << " world=" << shm_->world << "\n";
+              << " world=" << shm_->world << " stream=dedicated\n";
 #endif
   }
 
@@ -323,6 +334,17 @@ class SharedPeerGatherSlot {
       ncclCommDestroy(comm_);
       comm_ = nullptr;
     }
+#if defined(UMA_ENGINE_USE_CUDA)
+    if (nccl_done_evt_) {
+      cudaEventDestroy(nccl_done_evt_);
+      nccl_done_evt_ = nullptr;
+    }
+    if (nccl_stream_) {
+      cudaStreamSynchronize(nccl_stream_);
+      cudaStreamDestroy(nccl_stream_);
+      nccl_stream_ = nullptr;
+    }
+#endif
 #endif
     nccl_ready_ = false;
     if (!ipc_ready_) my_rank_ = -1;
@@ -442,6 +464,23 @@ class SharedPeerGatherSlot {
     return gpu.contiguous();
   }
 
+  // Tier2/W8: NCCL on dedicated stream; make results visible to Torch default.
+  void nccl_join_default_stream_() {
+#if defined(UMA_ENGINE_USE_CUDA)
+    if (!nccl_stream_ || !nccl_done_evt_) return;
+    cudaEventRecord(nccl_done_evt_, nccl_stream_);
+    cudaStreamWaitEvent(cudaStreamDefault, nccl_done_evt_, 0);
+#endif
+  }
+
+  cudaStream_t nccl_cuda_stream_() const {
+#if defined(UMA_ENGINE_USE_CUDA)
+    return nccl_stream_ ? nccl_stream_ : cudaStreamDefault;
+#else
+    return cudaStreamDefault;
+#endif
+  }
+
   torch::Tensor all_gather_nccl_(int rank, const torch::Tensor& local,
                                  int64_t n_atoms) {
     (void)rank;
@@ -472,18 +511,16 @@ class SharedPeerGatherSlot {
     const size_t sendcount = static_cast<size_t>(gpu.numel());
     ncclResult_t nr =
         ncclAllGather(gpu.data_ptr(), gathered.data_ptr(), sendcount,
-                      nccl_dtype_(gpu.scalar_type()), comm_, cudaStreamDefault);
+                      nccl_dtype_(gpu.scalar_type()), comm_, nccl_cuda_stream_());
     if (nr != ncclSuccess) {
       throw std::runtime_error(std::string("ncclAllGather: ") +
                                ncclGetErrorString(nr));
     }
-    // Tier0/W4: no host sync — same default stream orders NCCL then Torch.
+    nccl_join_default_stream_();
     if (gpu.dim() == 0) {
-      // Not used for node gather; return raw concat.
       return gathered;
     }
     auto sizes = size_list(n_atoms, world);
-    // Tier0/W3: equal shards → pad==want for every rank; gathered is final.
     bool equal = true;
     for (int r = 1; r < world; ++r) {
       if (sizes[static_cast<size_t>(r)] != sizes[0]) {
@@ -512,17 +549,16 @@ class SharedPeerGatherSlot {
     }
     auto gpu = ensure_cuda_(local);
     if (gpu.numel() == 0) {
-      // Keep ranks in lockstep without a zero-byte NCCL call.
       auto t = torch::zeros({1}, torch::dtype(torch::kFloat64).device(gpu.device()));
       auto out = torch::empty_like(t);
       ncclResult_t nr =
           ncclAllReduce(t.data_ptr(), out.data_ptr(), 1, ncclDouble, ncclSum,
-                        comm_, cudaStreamDefault);
+                        comm_, nccl_cuda_stream_());
       if (nr != ncclSuccess) {
         throw std::runtime_error(std::string("ncclAllReduce(empty sync): ") +
                                  ncclGetErrorString(nr));
       }
-      // Tier0/W4: device-ordered; host sync only at worker result publish.
+      nccl_join_default_stream_();
       return gpu;
     }
     auto out = torch::empty_like(gpu);
@@ -530,12 +566,12 @@ class SharedPeerGatherSlot {
         ncclAllReduce(gpu.data_ptr(), out.data_ptr(),
                       static_cast<size_t>(gpu.numel()),
                       nccl_dtype_(gpu.scalar_type()), ncclSum, comm_,
-                      cudaStreamDefault);
+                      nccl_cuda_stream_());
     if (nr != ncclSuccess) {
       throw std::runtime_error(std::string("ncclAllReduce: ") +
                                ncclGetErrorString(nr));
     }
-    // Tier0/W4: no host sync after AR.
+    nccl_join_default_stream_();
     return out;
   }
 #endif  // UMA_ENGINE_USE_NCCL
@@ -740,6 +776,10 @@ class SharedPeerGatherSlot {
   // Process-local NCCL state.
 #if defined(UMA_ENGINE_USE_NCCL)
   ncclComm_t comm_ = nullptr;
+#if defined(UMA_ENGINE_USE_CUDA)
+  cudaStream_t nccl_stream_ = nullptr;
+  cudaEvent_t nccl_done_evt_ = nullptr;
+#endif
 #endif
   bool nccl_ready_ = false;
 };
