@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T13:17 CDT · **Handoff** [`HANDOFF.md`](HANDOFF.md) · W17c export `21015028` → NaCl@2 `21015029` (still queued)
+**Stamp:** 2026-08-10T13:33 CDT · **Handoff** [`HANDOFF.md`](HANDOFF.md) · W17c export `21015028` → NaCl@2 `21015029` (queued; est. start 17:35 CDT)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v6_w8nk_perf_push_77967fcb` (**CURRENT** — W17 CUDA graph)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -72,6 +72,14 @@ ASE@1 (`merge_mole=True`) ms: `general`+merge **367**, `umas_fast_pytorch`+merge
 2. Gate NaCl@2 `path=graph_capture`; if PASS → full matrix; else close W17 structural, keep **W8nk**.
 3. Hard-ceiling: W14 &lt;1 ms NO_PROMOTE; W17 is last same-node stretch before FairChem/model floor (~water@4 1.2 ms).
 
+Drain command once `21015029` is terminal:
+
+```bash
+python w17_gate.py --job 21015029 --sys nacl6 --ngpu 2 --ver w17c --write
+# rc=0 PASS  → bash w17_submit_matrix.sh 21015029
+# rc=1 CAPTURE_FAIL → structural close W17, keep W8nk (do not blind-resubmit)
+```
+
 
 
 ## Constraints
@@ -89,7 +97,21 @@ Wave A **COMPLETE PASS**.
 
 ## Queue (live)
 - **W17c in flight:** export `21015028` (capture-safe shapes) → NaCl@2 `21015029` (RECOMPILE=1, graph+edge pad).
+- Walltimes trimmed for backfill (export 4h→40m, gate 2h→1h); prior exports ran ~5 min. Est. start 17:35 CDT.
+- Drain automation: `w17c_poll.sh` (transition-only log → `w17c_poll.log`), `w17_gate.py` (path tag + E/F + speed → `gate_v6_*.json`).
 - Prior: W17b `21014028` structural fail on `_shape_as_tensor` H2D under capture.
+
+### W17c pre-flight audit (static, no GPU)
+
+| Check | Result |
+|-------|--------|
+| W17b root cause reproduced from shard | `natoms = torch.to(_shape_as_tensor(pos)[0:1], cuda)` — confirmed the capture-illegal H2D |
+| Old cgraph artifact still has it | yes (`_shape_as_tensor` ×1, `torch.to(...device)` ×28) → **re-export is required**, current art cannot capture |
+| `aten::rand` in shard | 0 (γ=0 patch held) |
+| Host-sync ops in TS (`.item`/`nonzero`/`unique`/`masked_select`) | none found |
+| `int(...)` on `NumToTensor` shapes | 32 sites — trace-time constants under fixed EDGE_PAD, not runtime syncs |
+| NCCL under capture | `nccl_on_current_stream_()` routes collectives to the captured stream; no side-stream event waits |
+| Backward under capture | torch 2.8.0+cu128 supports graphed backward; **first time this path is exercised** (W17b died in forward) → main residual risk |
 
 
 ## Tier2 W6 (COMPLETE PASS)

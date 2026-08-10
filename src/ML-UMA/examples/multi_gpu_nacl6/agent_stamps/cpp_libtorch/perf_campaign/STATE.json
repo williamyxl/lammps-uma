@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T13:19:04",
+  "stamp": "2026-08-10T13:33:45",
   "phase": "V6_W17_cuda_graph",
-  "status": "w17c_submitted",
+  "status": "w17c_queued_monitored",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -133,7 +133,7 @@
     "21015029"
   ],
   "tick_log": "tick.log",
-  "next_action": "Next agent: read HANDOFF.md; drain W17c 21015028/21015029",
+  "next_action": "Drain W17c: poller w17c_poll.sh armed; on terminal run python w17_gate.py --job 21015029 --sys nacl6 --ngpu 2 --ver w17c --write; rc0 -> w17_submit_matrix.sh 21015029; rc1 -> structural close W17, keep W8nk",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2044,9 +2044,32 @@
     "stamp": "2026-08-10T12:02:33"
   },
   "w17c": {
-    "export": "21015028",
-    "nacl2": "21015029",
-    "fix": "capture_safe_shapes+endcapture_hygiene"
+    "export_job": "21015028",
+    "gate_job": "21015029",
+    "queue_state": "PENDING (Priority) / PENDING (Dependency)",
+    "est_start": "2026-08-10T17:35:54",
+    "walltime_trimmed": {
+      "export": "04:00:00->00:40:00",
+      "gate": "02:00:00->01:00:00",
+      "reason": "prior exports ran ~5 min; oversized limits blocked backfill"
+    },
+    "automation": {
+      "poller": "w17c_poll.sh",
+      "poll_log": "w17c_poll.log",
+      "gate": "w17_gate.py"
+    },
+    "preflight_audit": {
+      "w17b_root_cause_confirmed": "natoms = torch.to(_shape_as_tensor(pos)[0:1], cuda) under capture",
+      "old_cgraph_art_still_illegal": true,
+      "aten_rand_hits": 0,
+      "host_sync_ops_found": [],
+      "int_on_numtotensor_sites": 32,
+      "int_sites_benign_under_edge_pad": true,
+      "nccl_on_captured_stream": true,
+      "torch_version": "2.8.0+cu128",
+      "backward_capture_supported": true,
+      "residual_risk": "graphed backward never exercised (W17b died in forward)"
+    }
   },
   "handoff": "HANDOFF.md"
 }
