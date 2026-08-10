@@ -1,0 +1,63 @@
+{
+  "path": "uma_kk_precision_double",
+  "key": "uma",
+  "jobid": "20999257",
+  "natoms": 648,
+  "nsteps": 100,
+  "temperature_K": 300.0,
+  "dtype": "float64",
+  "ngpus": 4,
+  "uma_devices": 4,
+  "lmp": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/build-uma/lmp",
+  "energy_eV": -3143.389377472278,
+  "sp_ms": 101.12,
+  "nvt_ms_per_step": 95.276,
+  "nvt_ms_total": 9527.6,
+  "nvt_pair_ms_per_step": 95.276,
+  "nvt_loop_ms_per_step": 95.7116,
+  "sp_block": {
+    "loop_s": 0.107958,
+    "nsteps": 1,
+    "pair_s": 0.10112,
+    "loop_ms_per_step": 107.958,
+    "pair_ms_per_step": 101.12
+  },
+  "nvt_block": {
+    "loop_s": 9.57116,
+    "nsteps": 100,
+    "pair_s": 9.5276,
+    "loop_ms_per_step": 95.7116,
+    "pair_ms_per_step": 95.276
+  },
+  "all_loop_blocks": [
+    {
+      "loop_s": 0.000123091,
+      "nsteps": 0,
+      "pair_s": 0.0,
+      "loop_ms_per_step": null,
+      "pair_ms_per_step": null
+    },
+    {
+      "loop_s": 0.107958,
+      "nsteps": 1,
+      "pair_s": 0.10112,
+      "loop_ms_per_step": 107.958,
+      "pair_ms_per_step": 101.12
+    },
+    {
+      "loop_s": 9.57116,
+      "nsteps": 100,
+      "pair_s": 9.5276,
+      "loop_ms_per_step": 95.7116,
+      "pair_ms_per_step": 95.276
+    }
+  ],
+  "lmp_wall_s": 22.905239999992773,
+  "timing_source_sp": "lammps_post_warmup_nve1_pair",
+  "timing_source_nvt": "lammps_post_warmup_nvt_pair",
+  "cold_start_excluded": true,
+  "warmup": true,
+  "parity_frame": "first",
+  "nvt_frame_dumps": false,
+  "note": "First-frame E+F from run 0 dump; NVT Pair ms/step for speed. lmp_wall_s includes cold start (not used for compare)."
+}

@@ -856,6 +856,13 @@
               "job": "20994398",
               "E": -5830.9237413381525,
               "note": "no-Kokkos; \u0394 vs W8fix +1.05ms"
+            },
+            {
+              "label": "W12",
+              "status": "DONE_AB",
+              "ms": 93.856,
+              "job": "20999255",
+              "note": "skip pre-bwd; \u0394W8fix +2.27"
             }
           ],
           "note": "W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5"
@@ -1004,11 +1011,18 @@
               "job": "20994400",
               "E": -3143.389377472278,
               "note": "no-Kokkos; vs ASE +1.59; vs W8fix -0.12"
+            },
+            {
+              "label": "W12",
+              "status": "DONE_AB",
+              "ms": 95.276,
+              "job": "20999257",
+              "note": "skip pre-bwd; \u0394W8fix -0.93"
             }
           ]
         }
       }
     }
   },
-  "stamp": "2026-08-10T00:26"
+  "stamp": "2026-08-10T00:30"
 }

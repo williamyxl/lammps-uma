@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T00:26:00",
+  "stamp": "2026-08-10T00:30:11",
   "phase": "V5_tier2_W12",
-  "status": "w12_@2_PASS_await_@4",
+  "status": "w12_COMPLETE_no_promote",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate W12 E/F+speed vs W8-fix / ASE water@4",
+  "next_action": "Do not promote W12; resume max-push (W10/W11 or other) toward water ASE@4",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,7 +505,7 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "20999255",
+  "active_jobid": null,
   "tick": {
     "last": "2026-08-10T00:19:10",
     "note": "W12 resubmit {'nacl6_@2': '20999254', 'nacl6_@4': '20999255', 'water888_@2': '20999256', 'water888_@4': '20999257'}"
@@ -1277,7 +1277,7 @@
       "water888_@2": "20999256",
       "water888_@4": "20999257"
     },
-    "status": "RESUBMITTED",
+    "status": "COMPLETE_NO_PROMOTE",
     "note": "first submit failed: dual RECOMPILE raced CMakeTmp",
     "nacl6_@2": {
       "ver": "tier2_w12",
@@ -1312,6 +1312,37 @@
       "UMA_SKIP_PRE_BWD_BARRIER": 1,
       "pass": true,
       "stamp": "2026-08-10T00:26:00"
+    },
+    "summary": {
+      "stamp": "2026-08-10T00:30:10",
+      "UMA_SKIP_PRE_BWD_BARRIER": 1,
+      "promote": false,
+      "reason": "No cell beats W8-fix by \u22650.5ms; water@2 NVT noisy; NaCl@4 regresses; water@4 still > ASE 94.5",
+      "cells": {
+        "nacl6_2": {
+          "ms": 160.19400000000002,
+          "delta_w8fix": 0.11400000000000432,
+          "ef": "PASS"
+        },
+        "nacl6_4": {
+          "ms": 93.856,
+          "delta_w8fix": 2.265999999999991,
+          "ef": "PASS"
+        },
+        "water_2": {
+          "ms": 178.95,
+          "delta_w8fix": 14.199999999999989,
+          "ef": "PASS",
+          "note": "NVT spike; SP was 166.6"
+        },
+        "water_4": {
+          "ms": 95.276,
+          "sp_ms": 101.12,
+          "delta_w8fix": -0.9339999999999975,
+          "ef": "PASS",
+          "ase_floor": "FAIL"
+        }
+      }
     }
   }
 }

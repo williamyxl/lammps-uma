@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T00:26 CDT · Loop **armed** · **W12 @2 PASS** (NaCl 160.2 / water 178.9)
+**Stamp:** 2026-08-10T00:30 CDT · Loop **armed** · **W12 COMPLETE — do not promote**
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,10 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W12 @2 COMPLETE** (`UMA_SKIP_PRE_BWD_BARRIER=1`): NaCl **160.19** (Δ +0.11); water **178.95** (Δ +14.20); both E/F PASS.
-- Waiting @4: NaCl `20999255`, water `20999257` (Priority/Resources).
+- **W12 COMPLETE** (`UMA_SKIP_PRE_BWD_BARRIER=1`): E/F PASS all cells; **do not promote** (no clear win vs W8-fix; water@4 still > ASE 94.5).
+  - NaCl 160.19 / 93.86 (Δ +0.11 / +2.27)
+  - water 178.95 / 95.28 (Δ +14.20 / -0.93; @2 NVT spike, SP was 166.6)
+- Next: W10/W11 (CUDA-graph path) or other max-push; keep W8-fix as best.
 
 
 ## Tier2 W6 (COMPLETE PASS)

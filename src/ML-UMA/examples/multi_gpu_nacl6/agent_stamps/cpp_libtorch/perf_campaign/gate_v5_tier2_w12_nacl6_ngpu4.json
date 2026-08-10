@@ -1,0 +1,17 @@
+{
+  "ver": "tier2_w12",
+  "sys": "nacl6",
+  "ngpu": 4,
+  "job": "20999255",
+  "ms": 93.856,
+  "baseline_w8fix_ms": 91.59,
+  "delta_vs_w8fix_ms": 2.265999999999991,
+  "ase_ufast": 164.5,
+  "le_ase": true,
+  "dE_vs_merge_ase": 1.227817847393453e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "UMA_SKIP_PRE_BWD_BARRIER": 1,
+  "pass": true,
+  "stamp": "2026-08-10T00:30:10"
+}
