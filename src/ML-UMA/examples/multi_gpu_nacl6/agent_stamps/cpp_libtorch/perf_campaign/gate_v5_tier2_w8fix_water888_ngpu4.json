@@ -1,0 +1,21 @@
+{
+  "ver": "w8fix",
+  "sys": "water888",
+  "ngpu": 4,
+  "job": "20989979",
+  "ms": 96.205,
+  "ase_ufast": 94.5,
+  "le_ase": false,
+  "speed_pass": false,
+  "energy_eV": -3143.389377472278,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "force_mae_vs_merge_ase": 7.436870275313855e-07,
+  "force_max_abs_vs_merge_ase": 4.992769293110655e-06,
+  "ef_pass": true,
+  "delta_vs_w7_ms": -0.6350000000000051,
+  "floor_fail_vs_ase": true,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "note": "W8-fix",
+  "stamp": "2026-08-09T23:12:05",
+  "pass": true
+}

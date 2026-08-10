@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T21:53 CDT · Loop **armed** · **W8-fix water@2 PASS 164.75**; plan adds **Tier K (drop Kokkos)**
+**Stamp:** 2026-08-09T23:11 CDT · Loop **armed** · **W8-fix COMPLETE** (NaCl@4 91.6; water@4 96.2 still > ASE 94.5)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,9 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W8-fix NaCl@2 `20989976`: E/F PASS, **160.08** ms (+0.7 vs W7).
-- W8-fix water@2 `20989978`: E/F PASS, **164.75** ms (ASE ufast 165.5; **−0.35 vs W7**).
-- Waiting: NaCl@4 `20989977`, water@4 `20989979` (Priority).
+- W8-fix **COMPLETE**: NaCl@2 160.08 / @4 **91.59** (E/F PASS; @4 −0.8 vs W7). Water@2 164.75 / @4 **96.21** (E/F PASS; −0.6 vs W7; still **FAIL** ASE ufast 94.5 by 1.7 ms).
+- Next: continue Tier2 toward water@4 ASE floor, then **Tier K** (drop Kokkos).
 
 
 ## Tier2 W6 (COMPLETE PASS)

@@ -1,6 +1,6 @@
 # Settings: fast and merge (`umas_fast_pytorch`, `merge_mole=True`)
 
-**Stamp:** 2026-08-09T21:04  
+**Stamp:** 2026-08-09T23:12  
 **FairChem:** `execution_mode=umas_fast_pytorch`, `merge_mole=True`  
 **uma artifact:** `uma-s-1p2-omat-f64-fast`  
 **E/F reference:** ASE `umas_fast_pytorch`+`merge_mole`  
@@ -29,7 +29,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE_FLOOR_FAIL | -5830.9237 | 2.120e-05 | — | — | — | 533.1000 | 20989766 devices=1: slow + E~general |
 | uma | 2 | DONE_W8 | -5830.9237 | 1.255e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 160.0800 | 20989976 W8 stream-ordered NCCL W8 INVALID_FORCE ms=160.19 (20989797): forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage — do not promote |
-| uma | 4 | DONE_W7 | -5830.9237 | 1.230e-10 | 1.520e-07 | 5.000e-07 | 7.790e-07 | 92.3700 | 20989185 W8 INVALID_FORCE ms=90.45 (20989798): forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage — do not promote |
+| uma | 4 | DONE_W8 | -5830.9237 | 1.219e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 91.5940 | 20989977 W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5 W8 INVALID_FORCE ms=90.45 (20989798): forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage — do not promote |
 
 ### Timing summary (NaCl6)
 
@@ -37,7 +37,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 |------|---:|---:|---:|
 | ase | 350.3438 | 191.6000 | 164.5000 |
 | fc | SKIP_KNOWN_CRASH | SKIP_KNOWN_CRASH | SKIP_KNOWN_CRASH |
-| uma | 533.1000 | 160.0800 | 92.3700 |
+| uma | 533.1000 | 160.0800 | 91.5940 |
 
 ## water888 (648 atoms, NVT)
 
@@ -51,7 +51,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE | -3143.3894 | 2.140e-05 | — | — | — | 337.7000 | 20989767 E~general |
 | uma | 2 | DONE_W8 | -3143.3894 | 8.640e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 164.7500 | 20989978 W8-fix; clears ASE ufast 165.5; -0.35 vs W7 |
-| uma | 4 | DONE_W7_FLOOR_FAIL_vs_ASE | -3143.3894 | 8.200e-12 | 7.440e-07 | 4.990e-06 | 6.640e-06 | 96.8400 | 20989187 ms 96.84 > ASE ufast 94.5 |
+| uma | 4 | DONE_W8_FLOOR_FAIL_vs_ASE | -3143.3894 | 8.185e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 96.2050 | 20989979 W8-fix; vs ASE ufast 94.5; delta_vs_w7=-0.64ms |
 
 ### Timing summary (water888)
 
@@ -59,7 +59,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 |------|---:|---:|---:|
 | ase | 337.6000 | 165.5000 | 94.5000 |
 | fc | SKIP_KNOWN_CRASH | SKIP_KNOWN_CRASH | SKIP_KNOWN_CRASH |
-| uma | 337.7000 | 164.7500 | 96.8400 |
+| uma | 337.7000 | 164.7500 | 96.2050 |
 
 ## Legend
 

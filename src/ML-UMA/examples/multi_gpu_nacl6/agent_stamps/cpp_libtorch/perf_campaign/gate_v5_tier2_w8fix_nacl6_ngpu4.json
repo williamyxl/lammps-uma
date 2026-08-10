@@ -1,0 +1,20 @@
+{
+  "ver": "w8fix",
+  "sys": "nacl6",
+  "ngpu": 4,
+  "job": "20989977",
+  "ms": 91.594,
+  "ase_ufast": 164.5,
+  "le_ase": true,
+  "speed_pass": true,
+  "energy_eV": -5830.923741338152,
+  "dE_vs_merge_ase": 1.2187229003757238e-10,
+  "force_mae_vs_merge_ase": 1.5176819870893512e-07,
+  "force_max_abs_vs_merge_ase": 4.999896874996468e-07,
+  "ef_pass": true,
+  "delta_vs_w7_ms": -0.7760000000000105,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "note": "W8-fix stream-ordered NCCL",
+  "stamp": "2026-08-09T23:12:05",
+  "pass": true
+}

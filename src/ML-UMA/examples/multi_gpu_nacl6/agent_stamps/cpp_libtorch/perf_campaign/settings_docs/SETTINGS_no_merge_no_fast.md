@@ -1,6 +1,6 @@
 # Settings: no merge, no fast (`general`, `merge_mole=False`)
 
-**Stamp:** 2026-08-09T21:04  
+**Stamp:** 2026-08-09T23:12  
 **FairChem:** `execution_mode=general`, `merge_mole=False`  
 **uma artifact:** `uma-s-1p2-omat-f64`  
 **E/F reference:** ASE `general`  

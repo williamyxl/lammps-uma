@@ -814,16 +814,16 @@
           "note": "W8 stream-ordered NCCL"
         },
         "4": {
-          "E": -5830.9237413381525,
-          "dE": 1.23e-10,
-          "ms": 92.37,
-          "status": "DONE_W7",
-          "job": "20989185",
+          "E": -5830.923741338152,
+          "dE": 1.2187229003757238e-10,
+          "ms": 91.594,
+          "status": "DONE_W8",
+          "job": "20989977",
           "metric": "ms_per_eval_python",
-          "mae": 1.52e-07,
+          "mae": 1.5176819870893512e-07,
           "rmse": null,
-          "max_abs": 5e-07,
-          "max_norm_atom": 7.79e-07,
+          "max_abs": 4.999896874996468e-07,
+          "max_norm_atom": 7.793410036545456e-07,
           "probes": [
             {
               "label": "W8",
@@ -833,7 +833,8 @@
               "E": -5830.923741338152,
               "note": "forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
             }
-          ]
+          ],
+          "note": "W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5"
         }
       }
     },
@@ -943,19 +944,19 @@
         },
         "4": {
           "E": -3143.389377472278,
-          "dE": 8.2e-12,
-          "ms": 96.84,
-          "status": "DONE_W7_FLOOR_FAIL_vs_ASE",
-          "job": "20989187",
+          "dE": 8.185452315956354e-12,
+          "ms": 96.205,
+          "status": "DONE_W8_FLOOR_FAIL_vs_ASE",
+          "job": "20989979",
           "metric": "nvt_pair_ms_per_step",
-          "mae": 7.44e-07,
+          "mae": 7.436870275313855e-07,
           "rmse": null,
-          "max_abs": 4.99e-06,
-          "max_norm_atom": 6.64e-06,
-          "note": "ms 96.84 > ASE ufast 94.5"
+          "max_abs": 4.992769293110655e-06,
+          "max_norm_atom": 6.638901104638336e-06,
+          "note": "W8-fix; vs ASE ufast 94.5; delta_vs_w7=-0.64ms"
         }
       }
     }
   },
-  "stamp": "2026-08-09T21:04"
+  "stamp": "2026-08-09T23:12"
 }

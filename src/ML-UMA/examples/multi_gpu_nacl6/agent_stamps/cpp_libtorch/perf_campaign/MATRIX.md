@@ -1,7 +1,7 @@
 # Settings matrix + BEST_BARS (living)
 
 **Plan:** ASE/FC best bars = **minimum floor**; uma max-push continues to hard ceiling.
-**Stamp:** 2026-08-09T21:03 CDT
+**Stamp:** 2026-08-09T23:11 CDT
 
 ## Policy
 
@@ -32,16 +32,17 @@ FC+`merge_mole`+FP64: FairChem Float/Double crash — do not fix.
 |--------|-----:|--------------------|-------------------|---------------|----------:|----------:|:-----:|
 | NaCl6 | 1 | ufast **350.3** | gen **345.5** | gen **315.6** (ufast 533 FAIL) | 34.7 | 29.9 | **PASS** (gen) |
 | NaCl6 | 2 | ufast **191.6** | gen **193.2** | ufast **159.4** (W7) | 32.2 | 33.8 | **PASS** |
-| NaCl6 | 4 | ufast **164.5** | gen **118.0** | ufast **92.4** (W7) | 72.1 | 25.6 | **PASS** |
+| NaCl6 | 4 | ufast **164.5** | gen **118.0** | ufast **91.6** (W8-fix) | 72.9 | 26.4 | **PASS** |
 | water888 | 1 | ufast **337.6** | gen **359.4** | ufast **337.7** (E~gen) | −0.1 | 21.7 | **FAIL**/suspect @1 |
 | water888 | 2 | ufast **165.5** | gen **200.5** | ufast **164.75** (W8-fix) | 0.75 | 35.75 | **PASS** |
-| water888 | 4 | ufast **94.5** | gen **118.9** | ufast **96.8** (W7) | **-2.3** | 22.1 | **FAIL** |
+| water888 | 4 | ufast **94.5** | gen **118.9** | ufast **96.2** (W8-fix) | **-1.7** | 22.7 | **FAIL** |
 
 Living E/F/timing tables: [`settings_docs/`](settings_docs/README.md) — refresh with `python regenerate_settings_docs.py --ingest-matrix`.
 
-### W8 probe (not promoted)
+### W8-fix (promoted where E/F PASS)
 
-NaCl ufast W8 (`20989797`/`20989798`): timing ~160.2 / 90.5 ms but **INVALID_FORCE** (absmax ~1e11 / 5e6) — NCCL on dedicated stream raced Torch default producers. Stream-order fix in `shared_peer.h`; re-gate before promoting over W7.
+Stream-ordered NCCL (default→nccl precede). NaCl@4 **91.59** ms clears ASE; water@4 **96.21** still fails ASE ufast 94.5. Prior broken W8 kept as INVALID_FORCE probes only.
+
 
 ## Grid (seed / live)
 
