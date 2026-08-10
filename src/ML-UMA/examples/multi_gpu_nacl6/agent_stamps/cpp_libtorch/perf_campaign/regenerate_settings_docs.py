@@ -354,7 +354,11 @@ def ingest_matrix(tables: dict) -> int:
 
                     z = np.load(fz)
                     key = next(
-                        (k for k in z.files if k.startswith("forces_")),
+                        (
+                            k
+                            for k in z.files
+                            if k.startswith("forces_") or k == "forces"
+                        ),
                         None,
                     )
                     if key:

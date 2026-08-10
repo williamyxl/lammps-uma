@@ -50,7 +50,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 2 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE | -3143.3894 | 2.140e-05 | — | — | — | 337.7000 | 20989767 E~general |
-| uma | 2 | DONE_W7 | -3143.3894 | 8.200e-12 | 7.440e-07 | 4.990e-06 | 6.640e-06 | 165.1000 | 20989186 |
+| uma | 2 | DONE_W8 | -3143.3894 | 8.640e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 164.7500 | 20989978 W8-fix; clears ASE ufast 165.5; -0.35 vs W7 |
 | uma | 4 | DONE_W7_FLOOR_FAIL_vs_ASE | -3143.3894 | 8.200e-12 | 7.440e-07 | 4.990e-06 | 6.640e-06 | 96.8400 | 20989187 ms 96.84 > ASE ufast 94.5 |
 
 ### Timing summary (water888)
@@ -59,7 +59,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 |------|---:|---:|---:|
 | ase | 337.6000 | 165.5000 | 94.5000 |
 | fc | SKIP_KNOWN_CRASH | SKIP_KNOWN_CRASH | SKIP_KNOWN_CRASH |
-| uma | 337.7000 | 165.1000 | 96.8400 |
+| uma | 337.7000 | 164.7500 | 96.8400 |
 
 ## Legend
 

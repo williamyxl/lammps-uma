@@ -929,16 +929,17 @@
           "max_norm_atom": "\u2014"
         },
         "2": {
-          "E": -3143.389377472278,
-          "dE": 8.2e-12,
-          "ms": 165.1,
-          "status": "DONE_W7",
-          "job": "20989186",
+          "E": -3143.3893774722783,
+          "dE": 8.64e-12,
+          "ms": 164.75,
+          "status": "DONE_W8",
+          "job": "20989978",
           "metric": "nvt_pair_ms_per_step",
-          "mae": 7.44e-07,
+          "mae": 7.437e-07,
           "rmse": null,
-          "max_abs": 4.99e-06,
-          "max_norm_atom": 6.64e-06
+          "max_abs": 4.993e-06,
+          "max_norm_atom": 6.639e-06,
+          "note": "W8-fix; clears ASE ufast 165.5; -0.35 vs W7"
         },
         "4": {
           "E": -3143.389377472278,
