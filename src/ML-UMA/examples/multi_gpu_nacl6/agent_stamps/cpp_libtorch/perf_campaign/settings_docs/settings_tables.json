@@ -817,6 +817,14 @@
               "job": "20994397",
               "E": -5830.923741338153,
               "note": "TierK no-Kokkos; dE=1.237e-10; fmax=5.000e-07"
+            },
+            {
+              "label": "W12",
+              "status": "DONE_AB",
+              "ms": 160.19400000000002,
+              "job": "20999254",
+              "E": -5830.923741338153,
+              "note": "skip pre-bwd barrier; \u0394 vs W8fix +0.11ms"
             }
           ],
           "note": "W8 stream-ordered NCCL"
@@ -994,5 +1002,5 @@
       }
     }
   },
-  "stamp": "2026-08-09T23:24"
+  "stamp": "2026-08-10T00:24"
 }

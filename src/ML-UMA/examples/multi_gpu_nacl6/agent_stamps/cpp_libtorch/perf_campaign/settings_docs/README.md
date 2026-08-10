@@ -1,6 +1,6 @@
 # Settings documents (E / force / timing)
 
-**Stamp:** 2026-08-09T23:24
+**Stamp:** 2026-08-10T00:24
 
 | Document | `execution_mode` | `merge_mole` |
 |----------|------------------|--------------|
