@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T10:06:11",
+  "stamp": "2026-08-10T10:23:18",
   "phase": "V6_from_W8nk",
-  "status": "w17_export_submitted",
+  "status": "w17_await_export_gamma0",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -133,7 +133,7 @@
     "21013150"
   ],
   "tick_log": "tick.log",
-  "next_action": "Verify export no aten::rand; gate W17 NaCl@2 E/F + graph path",
+  "next_action": "Gate export verify + NaCl@2 graph; then w17_submit_matrix.sh",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {

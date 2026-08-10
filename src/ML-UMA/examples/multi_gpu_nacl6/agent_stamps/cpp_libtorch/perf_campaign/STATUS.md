@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T10:06 CDT · **W17** fixed-gamma export `21013149` → graph NaCl@2 `21013150`
+**Stamp:** 2026-08-10T10:16 CDT · Loop **re-armed** · W17 γ=0 export `21013149` (Resources) → graph NaCl@2 `21013150`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
