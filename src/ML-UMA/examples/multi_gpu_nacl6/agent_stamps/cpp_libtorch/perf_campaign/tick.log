@@ -282,4 +282,4 @@ tick178 gather
 2026-08-10T00:17:12 W12 submit skip pre-bwd barrier {'nacl6_@2': '20999228', 'nacl6_@4': '20999230', 'water888_@2': '20999232', 'water888_@4': '20999234'}
 2026-08-10T00:17:12 W12 submit skip pre-bwd barrier {'nacl6_@2': '20999228', 'nacl6_@4': '20999230', 'water888_@2': '20999232', 'water888_@4': '20999234'}
 2026-08-10T00:19:10 W12 resubmit after cmake race {'nacl6_@2': '20999254', 'nacl6_@4': '20999255', 'water888_@2': '20999256', 'water888_@4': '20999257'}
-2026-08-10T00:24:01 W12 NaCl@2 gated ms=160.19400000000002 E/F PASS\n
+2026-08-10T00:24:01 W12 NaCl@2 gated ms=160.19400000000002 E/F PASS\n2026-08-10T00:26:00 W12 water@2 gated ms=178.95 E/F PASS\n

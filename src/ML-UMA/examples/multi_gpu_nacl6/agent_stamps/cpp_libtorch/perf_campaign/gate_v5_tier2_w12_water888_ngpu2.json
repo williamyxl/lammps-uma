@@ -1,0 +1,17 @@
+{
+  "ver": "tier2_w12",
+  "sys": "water888",
+  "ngpu": 2,
+  "job": "20999256",
+  "ms": 178.95,
+  "baseline_w8fix_ms": 164.75,
+  "delta_vs_w8fix_ms": 14.199999999999989,
+  "ase_ufast": 165.5,
+  "le_ase": false,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "force_max_abs": 4.992769293110655e-06,
+  "ef_pass": true,
+  "UMA_SKIP_PRE_BWD_BARRIER": 1,
+  "pass": true,
+  "stamp": "2026-08-10T00:26:00"
+}

@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T00:24:01",
+  "stamp": "2026-08-10T00:26:00",
   "phase": "V5_tier2_W12",
-  "status": "w12_nacl2_PASS_await_rest",
+  "status": "w12_@2_PASS_await_@4",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -505,7 +505,7 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "20999256",
+  "active_jobid": "20999255",
   "tick": {
     "last": "2026-08-10T00:19:10",
     "note": "W12 resubmit {'nacl6_@2': '20999254', 'nacl6_@4': '20999255', 'water888_@2': '20999256', 'water888_@4': '20999257'}"
@@ -1295,6 +1295,23 @@
       "UMA_SKIP_PRE_BWD_BARRIER": 1,
       "pass": true,
       "stamp": "2026-08-10T00:24:01"
+    },
+    "water888_@2": {
+      "ver": "tier2_w12",
+      "sys": "water888",
+      "ngpu": 2,
+      "job": "20999256",
+      "ms": 178.95,
+      "baseline_w8fix_ms": 164.75,
+      "delta_vs_w8fix_ms": 14.199999999999989,
+      "ase_ufast": 165.5,
+      "le_ase": false,
+      "dE_vs_merge_ase": 8.185452315956354e-12,
+      "force_max_abs": 4.992769293110655e-06,
+      "ef_pass": true,
+      "UMA_SKIP_PRE_BWD_BARRIER": 1,
+      "pass": true,
+      "stamp": "2026-08-10T00:26:00"
     }
   }
 }

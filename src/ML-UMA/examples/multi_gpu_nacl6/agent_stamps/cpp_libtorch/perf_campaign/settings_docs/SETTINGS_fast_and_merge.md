@@ -1,6 +1,6 @@
 # Settings: fast and merge (`umas_fast_pytorch`, `merge_mole=True`)
 
-**Stamp:** 2026-08-10T00:24  
+**Stamp:** 2026-08-10T00:26  
 **FairChem:** `execution_mode=umas_fast_pytorch`, `merge_mole=True`  
 **uma artifact:** `uma-s-1p2-omat-f64-fast`  
 **E/F reference:** ASE `umas_fast_pytorch`+`merge_mole`  
@@ -50,7 +50,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 2 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE | -3143.3894 | 2.140e-05 | — | — | — | 337.7000 | 20989767 E~general |
-| uma | 2 | DONE_W8 | -3143.3894 | 8.640e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 164.7500 | 20989978 W8-fix; clears ASE ufast 165.5; -0.35 vs W7 TierK DONE_AB ms=165.10000000000002 (20994399): TierK no-Kokkos; dE=8.185e-12; fmax=4.993e-06 |
+| uma | 2 | DONE_W8 | -3143.3894 | 8.640e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 164.7500 | 20989978 W8-fix; clears ASE ufast 165.5; -0.35 vs W7 TierK DONE_AB ms=165.10000000000002 (20994399): TierK no-Kokkos; dE=8.185e-12; fmax=4.993e-06 W12 DONE_AB ms=178.95 (20999256): skip pre-bwd; Δ vs W8fix +14.20ms |
 | uma | 4 | DONE_W8_FLOOR_FAIL_vs_ASE | -3143.3894 | 8.185e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 96.2050 | 20989979 W8-fix; vs ASE ufast 94.5; delta_vs_w7=-0.64ms TierK DONE_AB ms=96.092 (20994400): no-Kokkos; vs ASE +1.59; vs W8fix -0.12 |
 
 ### Timing summary (water888)
