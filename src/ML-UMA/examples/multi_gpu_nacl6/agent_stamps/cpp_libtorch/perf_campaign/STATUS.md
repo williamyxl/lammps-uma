@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T10:58 CDT · W17 γ=0 E/F PASS; graph fail non-default stream — fix+resubmit
+**Stamp:** 2026-08-10T10:59 CDT · W17b stream-fix NaCl@2 `21014028` (RECOMPILE=1)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
