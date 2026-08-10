@@ -1,0 +1,14 @@
+{
+  "ngpus": 2,
+  "rows": [
+    {
+      "key": "uma_double",
+      "energy_eV": -3143.389377472278,
+      "nvt_pair_ms_per_step": 167.18,
+      "ms_per_eval_python": 167.18,
+      "slurm_job_id": "21000000",
+      "abs_dE_vs_ase_f64": 8.185452315956354e-12,
+      "force_max_abs": 4.992769293110655e-06
+    }
+  ]
+}

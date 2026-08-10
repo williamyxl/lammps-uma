@@ -1,6 +1,6 @@
 # Settings: fast, no merge (`umas_fast_pytorch`, `merge_mole=False`)
 
-**Stamp:** 2026-08-10T01:24  
+**Stamp:** 2026-08-10T01:26  
 **FairChem:** `execution_mode=umas_fast_pytorch`, `merge_mole=False`  
 **uma artifact:** `n/a (illegal)`  
 **E/F reference:** n/a  
