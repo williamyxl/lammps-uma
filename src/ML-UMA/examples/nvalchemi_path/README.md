@@ -41,8 +41,28 @@ gating is required.
   `AtomicData.from_atoms(dtype=...)`, which defaults to float32 and would
   otherwise silently break parity before the model is called.
 - **Steps**: NaCl 10, water 100 (campaign convention).
-- **Parity**: `|ΔE| ≤ 1e-6 eV`, `max|ΔF| ≤ 1e-5 eV/Å` vs the merge oracle,
-  plus `|Σ F| < 1e-6` net-force sanity.
+- **Parity**: `|ΔE| ≤ 1e-6 eV` **and** per-atom `max|ΔF| ≤ 1e-5 eV/Å` vs the
+  merge oracle. `ef_pass` requires both.
+
+### Per-atom forces, not net force
+
+`|Σ F| ≈ 0` only tests translational invariance — it passes even when every
+atom's force is wrong. Negating all forces leaves `|Σ F|` **bit-identical**
+while inverting the physics. So the gate is the per-atom error distribution
+(max / mean / RMS / relative, count over tolerance) plus the worst-N atoms
+named explicitly. Verified with negative controls: a single atom perturbed by
+1e-3 is caught and pinpointed, and full negation is caught at `rel = 2.00`.
+
+```bash
+# worst-12 atoms vs oracle (exit 1 on FAIL)
+python force_parity.py --forces results/<run>/forces.npz --sys nacl6
+
+# specific atoms, or compare two paths directly
+python force_parity.py --forces A.npz --sys nacl6 --atoms 0,42,1727
+python force_parity.py --forces A.npz --compare B.npz --sys nacl6
+```
+
+Works on any path's `forces.npz` (ASE FC, FC LAMMPS, LibTorch UMA, nvalchemi).
 
 ## Multi-GPU
 
