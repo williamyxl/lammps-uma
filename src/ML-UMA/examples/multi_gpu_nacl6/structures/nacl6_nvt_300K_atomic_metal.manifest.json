@@ -1,0 +1,10 @@
+{
+  "file": "nacl6_nvt_300K_atomic_metal.data",
+  "natoms": 1728,
+  "positions_source": "nacl6_rattle_fixed.extxyz",
+  "velocities": "MaxwellBoltzmannDistribution temperature_K=300 force_temp=True",
+  "seed": 0,
+  "types": {"1": "Na", "2": "Cl"},
+  "units": "metal",
+  "note": "Do not re-rattle positions; regenerate velocities only via prep_nacl6_nvt_data.py --force"
+}

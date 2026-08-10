@@ -1,0 +1,29 @@
+# NaCl 6×6×6 — short NVT @ 300 K (smoke / launch wall).
+# Prefer path-isolated runners for campaign gates:
+#   run_path_{ase,fc,uma}.slurm  (default NSTEPS=10)
+#
+# Data: structures/nacl6_nvt_300K_atomic_metal.data
+#   frozen rattled positions + Maxwell–Boltzmann velocities @ 300 K (seed=0)
+#   type1=Na type2=Cl
+
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+
+read_data       structures/nacl6_nvt_300K_atomic_metal.data
+
+pair_style      uma/kk precision double devices ${UMA_DEVICES}
+pair_coeff      * * ${UMA_ARTIFACT} Na Cl
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+fix             1 all nvt temp 300.0 300.0 0.1
+timestep        0.001
+thermo          1
+thermo_style    custom step temp pe ke etotal
+thermo_modify   norm no
+
+run             10
+print           "Done. Final T = $(temp) K, PE = $(pe) eV"

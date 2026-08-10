@@ -89,7 +89,7 @@ Wave A **COMPLETE PASS**.
 ## Queue (live)
 - **W11 STRUCTURAL FAIL** (`21009719` NaCl@2): CUDA graph capture aborts on `torch.rand` in UMA Wigner path (`Offset increment outside graph capture`). Deps cancelled.
 - Product path unchanged: **W8-fix**. Water@4 ASE ufast 94.5 still open (~1.7–2.4 ms); remaining Tier2 graph stretch exhausted.
-- Hygiene fix: mid-capture `cuda_graph.reset()` before eager fallback (no resubmit of W11 graph gates).
+- **NaCl6 NVT default (new):** future ASE/FC/uma gates use `run_path_{ase,fc,uma}.slurm` with **NVT @ 300 K, NSTEPS=10** (data `structures/nacl6_nvt_300K_atomic_metal.data`). See `TEST_PROTOCOL.md`.
 
 
 ## Tier2 W6 (COMPLETE PASS)

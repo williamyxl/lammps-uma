@@ -12,16 +12,21 @@ mkdir -p "${REF}" "${WATER}/logs"
 : > "${JOBS}"
 
 submit_nacl() {
+  # Path-isolated SP + NVT@300K (NSTEPS=10) — same recipe as future campaign gates.
   local path=$1 ngpu=$2 mode=$3 merge=$4 tag=$5
-  local script=${NACL}/run_ngpu${ngpu}_${path}.slurm
-  local rdir=${REF}/nacl6_${path}_${tag}_ngpu${ngpu}
-  mkdir -p "${rdir}"
+  local path_key=$path
+  if [[ "${path}" == "uma_double" || "${path}" == "uma" ]]; then
+    path_key=uma
+  fi
+  local script=${NACL}/run_path_${path_key}.slurm
   local jid
   jid=$(sbatch --parsable \
-    --job-name="ref-${path}-${tag}-n${ngpu}" \
-    --export=ALL,NGPUS=${ngpu},UMA_DEVICES=${ngpu},ONLY_PATHS=${path},FAIRCHEM_WORKERS=${ngpu},RECOMPILE=0,MERGE_RESULTS=0,SKIP_DIST_DESTROY=1,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge},RESULTS_DIR=${rdir} \
+    --chdir="${NACL}" \
+    --gpus-per-node="${ngpu}" \
+    --job-name="ref-nacl-${path_key}-${tag}-n${ngpu}" \
+    --export=ALL,NGPUS=${ngpu},UMA_DEVICES=${ngpu},FAIRCHEM_WORKERS=${ngpu},NSTEPS=10,RECOMPILE=0,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge} \
     "${script}")
-  echo "nacl6 path=${path} tag=${tag} @${ngpu} job=${jid} results=${rdir}" | tee -a "${JOBS}"
+  echo "nacl6 path=${path_key} tag=${tag} @${ngpu} job=${jid} NSTEPS=10 NVT@300K" | tee -a "${JOBS}"
 }
 
 submit_water() {
