@@ -15,7 +15,8 @@
 # Multi-GPU needs model_mp_wN_n648_r*.pt from export_mp_water888.slurm
 
 set -euo pipefail
-EX="${SLURM_SUBMIT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+# Always resolve to this script's directory (ignore SLURM_SUBMIT_DIR / --chdir).
+EX="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${EX}/../../../.." && pwd)"
 ENG="${ROOT}/src/ML-UMA/uma-engine"
 mkdir -p "${EX}/logs"
