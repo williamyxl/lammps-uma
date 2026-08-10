@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T23:14 CDT · Loop **armed** · **Tier K submitted** (UMA_USE_KOKKOS=0 A/B)
+**Stamp:** 2026-08-09T23:22 CDT · Loop **armed** · **Tier K @2 PASS** (NaCl 160.51 / water 165.10; no Kokkos)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W8-fix COMPLETE. **Tier K** A/B in flight: `UMA_USE_KOKKOS=0` → `pair_style uma … devices N` (no `-k`/`-sf kk`).
-- Jobs: see `tierK_jobs.txt` (NaCl+water @2/@4).
+- Tier K @2 **E/F PASS**: NaCl `20994397` **160.51** ms (Δ vs W8-fix +0.43); water `20994399` **165.10** ms (Δ +0.35). Recipe confirmed: `pair_style uma` / bare `lmp`.
+- Waiting: NaCl@4 `20994398`, water@4 `20994400`.
 
 
 ## Tier2 W6 (COMPLETE PASS)

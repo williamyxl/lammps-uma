@@ -809,6 +809,14 @@
               "job": "20989797",
               "E": -5830.923741338154,
               "note": "forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage \u2014 do not promote"
+            },
+            {
+              "label": "TierK",
+              "status": "DONE_AB",
+              "ms": 160.51200000000003,
+              "job": "20994397",
+              "E": -5830.923741338153,
+              "note": "TierK no-Kokkos; dE=1.237e-10; fmax=5.000e-07"
             }
           ],
           "note": "W8 stream-ordered NCCL"
@@ -940,7 +948,17 @@
           "rmse": null,
           "max_abs": 4.993e-06,
           "max_norm_atom": 6.639e-06,
-          "note": "W8-fix; clears ASE ufast 165.5; -0.35 vs W7"
+          "note": "W8-fix; clears ASE ufast 165.5; -0.35 vs W7",
+          "probes": [
+            {
+              "label": "TierK",
+              "status": "DONE_AB",
+              "ms": 165.10000000000002,
+              "job": "20994399",
+              "E": -3143.389377472278,
+              "note": "TierK no-Kokkos; dE=8.185e-12; fmax=4.993e-06"
+            }
+          ]
         },
         "4": {
           "E": -3143.389377472278,
@@ -958,5 +976,5 @@
       }
     }
   },
-  "stamp": "2026-08-09T23:12"
+  "stamp": "2026-08-09T23:22"
 }

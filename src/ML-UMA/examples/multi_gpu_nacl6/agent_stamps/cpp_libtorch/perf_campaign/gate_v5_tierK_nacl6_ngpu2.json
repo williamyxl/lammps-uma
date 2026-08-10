@@ -1,0 +1,18 @@
+{
+  "ver": "tierK",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "20994397",
+  "ms": 160.51200000000003,
+  "baseline_w8fix_ms": 160.08,
+  "delta_vs_w8fix_ms": 0.43200000000001637,
+  "ase_ufast": 191.6,
+  "le_ase": true,
+  "dE_vs_merge_ase": 1.2369127944111824e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "UMA_USE_KOKKOS": 0,
+  "pair_style": "uma",
+  "pass": true,
+  "stamp": "2026-08-09T23:22:16"
+}

@@ -1,6 +1,6 @@
 # Settings: fast and merge (`umas_fast_pytorch`, `merge_mole=True`)
 
-**Stamp:** 2026-08-09T23:12  
+**Stamp:** 2026-08-09T23:22  
 **FairChem:** `execution_mode=umas_fast_pytorch`, `merge_mole=True`  
 **uma artifact:** `uma-s-1p2-omat-f64-fast`  
 **E/F reference:** ASE `umas_fast_pytorch`+`merge_mole`  
@@ -28,7 +28,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 2 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE_FLOOR_FAIL | -5830.9237 | 2.120e-05 | — | — | — | 533.1000 | 20989766 devices=1: slow + E~general |
-| uma | 2 | DONE_W8 | -5830.9237 | 1.255e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 160.0800 | 20989976 W8 stream-ordered NCCL W8 INVALID_FORCE ms=160.19 (20989797): forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage — do not promote |
+| uma | 2 | DONE_W8 | -5830.9237 | 1.255e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 160.0800 | 20989976 W8 stream-ordered NCCL W8 INVALID_FORCE ms=160.19 (20989797): forces absmax=6.213e+11; NCCL dedicated-stream race; forces garbage — do not promote TierK DONE_AB ms=160.51200000000003 (20994397): TierK no-Kokkos; dE=1.237e-10; fmax=5.000e-07 |
 | uma | 4 | DONE_W8 | -5830.9237 | 1.219e-10 | 1.518e-07 | 5.000e-07 | 7.793e-07 | 91.5940 | 20989977 W8-fix; delta_vs_w7=-0.78ms; clears ASE 164.5 W8 INVALID_FORCE ms=90.45 (20989798): forces absmax=5.165e+06; NCCL dedicated-stream race; forces garbage — do not promote |
 
 ### Timing summary (NaCl6)
@@ -50,7 +50,7 @@ GPUs: 1 / 2 / 4 (ASE/FC `workers=N`; uma `devices N`, 1 MPI).
 | fc | 2 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | fc | 4 | SKIP_KNOWN_CRASH | — | — | — | — | — | — | FC+merge_mole+FP64 crash |
 | uma | 1 | DONE | -3143.3894 | 2.140e-05 | — | — | — | 337.7000 | 20989767 E~general |
-| uma | 2 | DONE_W8 | -3143.3894 | 8.640e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 164.7500 | 20989978 W8-fix; clears ASE ufast 165.5; -0.35 vs W7 |
+| uma | 2 | DONE_W8 | -3143.3894 | 8.640e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 164.7500 | 20989978 W8-fix; clears ASE ufast 165.5; -0.35 vs W7 TierK DONE_AB ms=165.10000000000002 (20994399): TierK no-Kokkos; dE=8.185e-12; fmax=4.993e-06 |
 | uma | 4 | DONE_W8_FLOOR_FAIL_vs_ASE | -3143.3894 | 8.185e-12 | 7.437e-07 | 4.993e-06 | 6.639e-06 | 96.2050 | 20989979 W8-fix; vs ASE ufast 94.5; delta_vs_w7=-0.64ms |
 
 ### Timing summary (water888)
