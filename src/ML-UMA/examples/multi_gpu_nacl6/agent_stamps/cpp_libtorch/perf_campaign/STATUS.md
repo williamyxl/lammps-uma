@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T23:27 CDT · Loop **armed** · **W12 submitted** (skip pre-bwd barrier)
+**Stamp:** 2026-08-09T23:30 CDT · Loop **armed** · **W12 resubmitted** (single RECOMPILE)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,10 +87,10 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- Tier K COMPLETE (keep Kokkos default). W9 already in waveA.
-- **W12 in flight** (`UMA_SKIP_PRE_BWD_BARRIER=1`): skip host barrier before bwd (energy AR orders ranks).
-  - Jobs: NaCl@2 `20999228` (RECOMPILE=1) → @4 `20999230`; water@2 `20999232` → @4 `20999234`.
-- Goal: water@4 ≤ ASE ufast 94.5 (need ~−1.6 ms vs W8-fix 96.21). W10/W11 deferred (padding unlocks CUDA graph; not the near-term ASE gap closer).
+- Tier K COMPLETE. W9 already in waveA. W10/W11 deferred.
+- **W12 resubmitted** after dual-RECOMPILE CMake race (`UMA_SKIP_PRE_BWD_BARRIER=1`).
+  - Jobs: NaCl@2 `20999254` (RECOMPILE=1) → @4 `20999255`; water@2 `20999256` → @4 `20999257`.
+- Goal: water@4 ≤ ASE ufast 94.5 (~−1.6 ms vs W8-fix).
 
 
 ## Tier2 W6 (COMPLETE PASS)

@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T00:17:12",
+  "stamp": "2026-08-10T00:19:10",
   "phase": "V5_tier2_W12",
-  "status": "w12_gates_pending",
+  "status": "w12_gates_resubmitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate W12 E/F+speed; promote if water@4 clears ASE or wins \u22650.5ms",
+  "next_action": "Gate W12 E/F+speed vs W8-fix / ASE water@4",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": "20999228",
+  "active_jobid": "20999254",
   "tick": {
-    "last": "2026-08-10T00:17:12",
-    "note": "W12 submitted {'nacl6_@2': '20999228', 'nacl6_@4': '20999230', 'water888_@2': '20999232', 'water888_@4': '20999234'}"
+    "last": "2026-08-10T00:19:10",
+    "note": "W12 resubmit {'nacl6_@2': '20999254', 'nacl6_@4': '20999255', 'water888_@2': '20999256', 'water888_@4': '20999257'}"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1272,11 +1272,12 @@
   "tier2_w12": {
     "change": "UMA_SKIP_PRE_BWD_BARRIER=1",
     "jobs": {
-      "nacl6_@2": "20999228",
-      "nacl6_@4": "20999230",
-      "water888_@2": "20999232",
-      "water888_@4": "20999234"
+      "nacl6_@2": "20999254",
+      "nacl6_@4": "20999255",
+      "water888_@2": "20999256",
+      "water888_@4": "20999257"
     },
-    "status": "SUBMITTED"
+    "status": "RESUBMITTED",
+    "note": "first submit failed: dual RECOMPILE raced CMakeTmp"
   }
 }
