@@ -1,0 +1,20 @@
+{
+  "ver": "w15",
+  "sys": "water888",
+  "ngpu": 1,
+  "job": "21011643",
+  "export_job": "21011642",
+  "artifact": "uma-s-1p2-omat-f64-fast-water648",
+  "nvt_pair_ms_per_step": 359.66,
+  "ms_sp": 305.69,
+  "ase_ufast": 337.6,
+  "delta_vs_ase_ms": 22.060000000000002,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "force_max_abs": 4.992769293110655e-06,
+  "ef_pass": true,
+  "floor_pass": false,
+  "pair_style_line": "pair_style uma precision double devices 1",
+  "stamp": "2026-08-10T09:24:04",
+  "pass": false,
+  "promote_default": false
+}

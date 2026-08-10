@@ -1,0 +1,16 @@
+{
+  "ver": "w15",
+  "stamp": "2026-08-10T09:24:04",
+  "nacl6_@1": {
+    "nvt": 296.47999999999996,
+    "pass": true,
+    "job": "21011180"
+  },
+  "water888_@1": {
+    "nvt": 359.66,
+    "pass": false,
+    "job": "21011643"
+  },
+  "note": "devices=1 composition-specific traced; multi-GPU product remains W8nk",
+  "promote_devices1": false
+}

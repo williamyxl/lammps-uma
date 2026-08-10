@@ -33,7 +33,7 @@ FC+`merge_mole`+FP64: FairChem Float/Double crash — do not fix.
 | NaCl6 | 1 | ufast **350.3** | gen **345.5** | ufast **296.5** (W15) | 53.8 | 49.0 | **PASS** |
 | NaCl6 | 2 | ufast **191.6** | gen **193.2** | ufast **159.4** (W7) | 32.2 | 33.8 | **PASS** |
 | NaCl6 | 4 | ufast **164.5** | gen **118.0** | ufast **91.6** (W8-fix) | 72.9 | 26.4 | **PASS** |
-| water888 | 1 | ufast **337.6** | gen **359.4** | ufast **337.7** (E~gen) | −0.1 | 21.7 | **FAIL**/suspect @1 |
+| water888 | 1 | ufast **337.6** | gen **359.4** | ufast **359.7** (W15) | -22.1 | -0.3 | **FAIL** |
 | water888 | 2 | ufast **165.5** | gen **200.5** | ufast **164.75** (W8-fix) | 0.75 | 35.75 | **PASS** |
 | water888 | 4 | ufast **94.5** | gen **118.9** | ufast **96.2** (W8-fix) | **-1.7** | 22.7 | **FAIL** |
 

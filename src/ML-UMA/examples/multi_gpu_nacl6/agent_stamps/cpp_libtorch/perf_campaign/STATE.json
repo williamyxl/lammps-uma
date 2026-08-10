@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:21:44",
+  "stamp": "2026-08-10T09:24:04",
   "phase": "V6_from_W8nk",
-  "status": "w15_water1_submitted",
+  "status": "w15_COMPLETE_PARTIAL",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,12 +128,9 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [
-    "21011642",
-    "21011643"
-  ],
+  "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Optional: water@1 composition-specific traced; W17 blocked on FairChem RNG",
+  "next_action": "Idle: W8nk product; W17 blocked on FairChem RNG",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1980,5 +1977,41 @@
     "export": "21011642",
     "gate": "21011643",
     "art": "uma-s-1p2-omat-f64-fast-water648"
+  },
+  "w15_water888_@1": {
+    "ver": "w15",
+    "sys": "water888",
+    "ngpu": 1,
+    "job": "21011643",
+    "export_job": "21011642",
+    "artifact": "uma-s-1p2-omat-f64-fast-water648",
+    "nvt_pair_ms_per_step": 359.66,
+    "ms_sp": 305.69,
+    "ase_ufast": 337.6,
+    "delta_vs_ase_ms": 22.060000000000002,
+    "dE_vs_merge_ase": 8.185452315956354e-12,
+    "force_max_abs": 4.992769293110655e-06,
+    "ef_pass": true,
+    "floor_pass": false,
+    "pair_style_line": "pair_style uma precision double devices 1",
+    "stamp": "2026-08-10T09:24:04",
+    "pass": false,
+    "promote_default": false
+  },
+  "w15_summary": {
+    "ver": "w15",
+    "stamp": "2026-08-10T09:24:04",
+    "nacl6_@1": {
+      "nvt": 296.47999999999996,
+      "pass": true,
+      "job": "21011180"
+    },
+    "water888_@1": {
+      "nvt": 359.66,
+      "pass": false,
+      "job": "21011643"
+    },
+    "note": "devices=1 composition-specific traced; multi-GPU product remains W8nk",
+    "promote_devices1": false
   }
 }
