@@ -1,5 +1,5 @@
 {
-  "stamp": "2026-08-09T20:31:00",
+  "stamp": "2026-08-09T20:33:00",
   "policy": "BEST_BARS are minimum floor; max-push to hard ceiling",
   "artifacts": {
     "gen": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/uma-engine/artifacts/uma-s-1p2-omat-f64",
@@ -17,8 +17,13 @@
           "tag": "gen",
           "ms": 345.5
         },
-        "uma": null,
-        "note": "uma @1 pending; best ASE=ufast"
+        "uma": {
+          "tag": "ufast",
+          "ms": 533.1
+        },
+        "floor": "FAIL",
+        "margin_ase": -182.8,
+        "margin_fc": -187.6
       },
       "2": {
         "ase": {
@@ -70,9 +75,8 @@
       },
       "2": {
         "ase": {
-          "tag": "gen",
-          "ms": 198.19,
-          "note": "ufast pending"
+          "tag": "ufast",
+          "ms": 165.5
         },
         "fc": {
           "tag": "gen",
@@ -82,9 +86,10 @@
           "tag": "ufast",
           "ms": 165.1
         },
-        "floor": "PASS_vs_gen",
-        "margin_ase": 33.09,
-        "margin_fc": 35.44
+        "floor": "PASS_thin",
+        "margin_ase": 0.4,
+        "margin_fc": 35.44,
+        "note": "uma barely under ASE ufast @2"
       },
       "4": {
         "ase": {
@@ -755,6 +760,39 @@
       "job": "20989761",
       "metric": "nvt_pair_ms_per_step",
       "note": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "gmerge",
+      "ngpu": 2,
+      "ms": 174.0,
+      "status": "DONE",
+      "job": "20989762",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "ufast",
+      "ngpu": 2,
+      "ms": 165.5,
+      "status": "DONE",
+      "job": "20989763",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "ufast",
+      "ngpu": 1,
+      "ms": 533.1,
+      "status": "DONE",
+      "job": "20989766",
+      "metric": "ms_per_eval_python",
+      "note": "FLOOR_FAIL vs ASE 350.3 and FC 345.5; E matches general ASE not merge \u2014 devices=1 f64-fast suspect"
     }
   ]
 }
