@@ -14,3 +14,12 @@ nacl6 path=fc tag=gmerge @4 job=20989350 results=/work/nvme/bfzx/xyan11/workdir/
 nacl6 path=fc tag=ufast @4 job=20989351 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_fc_ufast_ngpu4
 water888 path=fc tag=gmerge @4 job=20989352
 water888 path=fc tag=ufast @4 job=20989353
+--- water resubmit ---
+water888 path=ase tag=gmerge @2 job=20989439 RESUBMIT
+water888 path=ase tag=ufast @2 job=20989440 RESUBMIT
+water888 path=fc tag=gmerge @2 job=20989441 RESUBMIT
+water888 path=fc tag=ufast @2 job=20989442 RESUBMIT
+water888 path=ase tag=gmerge @4 job=20989443 RESUBMIT
+water888 path=ase tag=ufast @4 job=20989444 RESUBMIT
+water888 path=fc tag=gmerge @4 job=20989445 RESUBMIT
+water888 path=fc tag=ufast @4 job=20989446 RESUBMIT

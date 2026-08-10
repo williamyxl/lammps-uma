@@ -475,21 +475,56 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   rebuild_neighbors_full(build_dev);
   const auto t_nl = clock::now();
 
-  // V2a: D2H + pack outside the payload mutex. Workers only read after pipe
-  // wake once gen is published; holding mu across pack/memcpy caused multi-10ms
-  // ms_pub stalls under MD (water888 @4). Mutex unlock = release fence for gen.
-  auto eidx_full = edge_index_.to(torch::kCPU).contiguous();
-  // W5: int32 image offsets through shm (exact in FP64 after worker cast).
-  auto coff_full =
-      cell_offsets_.defined()
-          ? cell_offsets_.to(torch::kCPU, torch::kInt32).contiguous()
-          : torch::Tensor();
+  // W7: kick full-graph edge D2H first (largest), then blocking geo D2H + shm
+  // publish while edge DMA finishes; sync; publish edges (two-phase publish).
+  auto eidx_full = edge_index_.to(torch::kCPU, /*non_blocking=*/true).contiguous();
+  torch::Tensor coff_nb;
+  if (cell_offsets_.defined()) {
+    coff_nb = cell_offsets_.to(torch::kCPU, /*non_blocking=*/true);
+  }
   auto pos_cpu = pos0_.to(torch::kCPU, torch::kFloat64).contiguous();
   auto z_cpu = z0_.to(torch::kCPU, torch::kLong).contiguous();
   auto cell_cpu = cell0_.to(torch::kCPU, torch::kFloat64).contiguous();
+  const auto t_geo_d2h = clock::now();
+
+  if (n > PayloadShm::kMaxN) {
+    throw std::runtime_error("LibtorchMpRuntime: n exceeds PayloadShm::kMaxN");
+  }
+  if (num_devices_ > PayloadShm::kMaxWorld) {
+    throw std::runtime_error("LibtorchMpRuntime: world exceeds PayloadShm::kMaxWorld");
+  }
+  if (!impl_->payload) {
+    throw std::runtime_error("LibtorchMpRuntime: payload shm missing");
+  }
+
+  int32_t pbc32[3] = {pbc0_[0].item<bool>() ? 1 : 0, pbc0_[1].item<bool>() ? 1 : 0,
+                      pbc0_[2].item<bool>() ? 1 : 0};
+
+  // Phase A: publish geometry into payload while edge D2H is in flight.
+  PayloadShm* pay = impl_->payload;
+  pay->hdr->n = static_cast<int32_t>(n);
+  pay->hdr->world = num_devices_;
+  pay->hdr->charge = charge;
+  pay->hdr->spin = spin;
+  std::memcpy(pay->hdr->cell, cell_cpu.data_ptr<double>(), 9 * sizeof(double));
+  std::memcpy(pay->hdr->pbc, pbc32, sizeof(pbc32));
+  std::memcpy(pay->pos_ptr(), pos_cpu.data_ptr<double>(),
+              static_cast<size_t>(n) * 3 * sizeof(double));
+  std::memcpy(pay->z_ptr(), z_cpu.data_ptr<int64_t>(),
+              static_cast<size_t>(n) * sizeof(int64_t));
+  const auto t_geo_pub = clock::now();
+
+#if defined(UMA_ENGINE_USE_CUDA)
+  cudaDeviceSynchronize();  // edge D2H complete
+#endif
+  // W5: int32 image offsets through shm (exact in FP64 after worker cast).
+  auto coff_full =
+      coff_nb.defined() ? coff_nb.to(torch::kInt32).contiguous() : torch::Tensor();
+  eidx_full = eidx_full.contiguous();
   const auto t_d2h = clock::now();
+
   // Tier0/W1: coverage check once per (n, world), or every step if
-  // UMA_DEBUG_PARTITION_CHECK=1. pack_shards_cpu already assigns every edge.
+  // UMA_DEBUG_PARTITION_CHECK=1.
   const bool debug_part = [] {
     const char* e = std::getenv("UMA_DEBUG_PARTITION_CHECK");
     return e && e[0] == '1' && e[1] == '\0';
@@ -509,32 +544,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
     impl_->partition_checked = true;
   }
 
-  if (n > PayloadShm::kMaxN) {
-    throw std::runtime_error("LibtorchMpRuntime: n exceeds PayloadShm::kMaxN");
-  }
-  if (num_devices_ > PayloadShm::kMaxWorld) {
-    throw std::runtime_error("LibtorchMpRuntime: world exceeds PayloadShm::kMaxWorld");
-  }
-  if (!impl_->payload) {
-    throw std::runtime_error("LibtorchMpRuntime: payload shm missing");
-  }
-
-  int32_t pbc32[3] = {pbc0_[0].item<bool>() ? 1 : 0, pbc0_[1].item<bool>() ? 1 : 0,
-                      pbc0_[2].item<bool>() ? 1 : 0};
-
-  // W6: publish full graph once; workers shard on GPU (no CPU pack_shards).
-  PayloadShm* pay = impl_->payload;
-  // Fill shm buffers unlocked; publish gen under a short critical section.
-  pay->hdr->n = static_cast<int32_t>(n);
-  pay->hdr->world = num_devices_;
-  pay->hdr->charge = charge;
-  pay->hdr->spin = spin;
-  std::memcpy(pay->hdr->cell, cell_cpu.data_ptr<double>(), 9 * sizeof(double));
-  std::memcpy(pay->hdr->pbc, pbc32, sizeof(pbc32));
-  std::memcpy(pay->pos_ptr(), pos_cpu.data_ptr<double>(),
-              static_cast<size_t>(n) * 3 * sizeof(double));
-  std::memcpy(pay->z_ptr(), z_cpu.data_ptr<int64_t>(),
-              static_cast<size_t>(n) * sizeof(int64_t));
+  // Phase B: publish full edge graph (W6); workers shard on GPU.
   const int64_t n_edges = eidx_full.size(1);
   if (n_edges > pay->max_e) {
     throw std::runtime_error(
@@ -601,6 +611,8 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
       std::chrono::duration<double, std::milli>(t_nl - t0).count();
   const double ms_d2h =
       std::chrono::duration<double, std::milli>(t_d2h - t_nl).count();
+  const double ms_geo_pub =
+      std::chrono::duration<double, std::milli>(t_geo_pub - t_geo_d2h).count();
   const double ms_shard =
       std::chrono::duration<double, std::milli>(t_pack1 - t_pack0).count();
   const double ms_pack =
@@ -612,15 +624,16 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   const double ms_tot =
       std::chrono::duration<double, std::milli>(clock::now() - t0).count();
   {
-    char line[480];
+    char line[520];
     std::snprintf(
         line, sizeof(line),
         "PERF_PARENT world=%d ms_wrap=%.3f ms_vesin=%.3f ms_nl=%.3f "
-        "ms_d2h=%.3f ms_cover=%.3f ms_shard=%.3f ms_pack=%.3f ms_pub=%.3f "
-        "ms_wait_workers=%.3f ms_total=%.3f gen=%d n_edges_full=%lld "
-        "mode=W6_full_publish\n",
-        num_devices_, ms_wrap, ms_vesin, ms_nl, ms_d2h, ms_cover, ms_shard,
-        ms_pack, ms_pub, ms_wait, ms_tot, gen, static_cast<long long>(n_edges));
+        "ms_d2h=%.3f ms_geo_pub=%.3f ms_cover=%.3f ms_shard=%.3f ms_pack=%.3f "
+        "ms_pub=%.3f ms_wait_workers=%.3f ms_total=%.3f gen=%d n_edges_full=%lld "
+        "mode=W7_twophase\n",
+        num_devices_, ms_wrap, ms_vesin, ms_nl, ms_d2h, ms_geo_pub, ms_cover,
+        ms_shard, ms_pack, ms_pub, ms_wait, ms_tot, gen,
+        static_cast<long long>(n_edges));
     std::string line_s(line);
     std::cerr << line_s;
     if (const char* log_dir = std::getenv("UMA_MP_LOG_DIR")) {

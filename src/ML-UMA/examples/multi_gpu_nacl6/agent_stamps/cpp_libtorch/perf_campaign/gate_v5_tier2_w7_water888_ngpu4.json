@@ -1,0 +1,23 @@
+{
+  "ver": "v5_tier2_w7",
+  "sys": "water888",
+  "ngpu": 4,
+  "job": "20989187",
+  "ase_oracle_job": "20984160",
+  "ms": 96.839,
+  "ase": 117.98,
+  "fc": 118.94,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "energy_eV": -3143.389377472278,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "force_max_abs_ase_merge": 4.992769293110655e-06,
+  "force_mae_ase_merge": 7.436870275313855e-07,
+  "ef_pass": true,
+  "delta_vs_w6_ms": 1.007000000000005,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "note": "W7 two-phase publish; +1.0ms vs W6 (flat)",
+  "stamp": "2026-08-09T20:12:33",
+  "pass": true
+}

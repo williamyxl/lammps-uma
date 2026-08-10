@@ -29,6 +29,7 @@ submit_water() {
   local script=${WATER}/run_path_${path}.slurm
   local jid
   jid=$(sbatch --parsable \
+    --chdir="${WATER}" \
     --gpus-per-node="${ngpu}" \
     --job-name="h2o-ref-${path}-${tag}-n${ngpu}" \
     --export=ALL,NGPUS=${ngpu},FAIRCHEM_WORKERS=${ngpu},NSTEPS=100,FAIRCHEM_EXECUTION_MODE=${mode},FAIRCHEM_MERGE_MOLE=${merge} \

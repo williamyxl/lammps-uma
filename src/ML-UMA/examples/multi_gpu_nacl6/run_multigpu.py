@@ -1146,6 +1146,9 @@ def main() -> int:
             "uma_devices",
             "pair_style",
             "multi_gpu_note",
+            "execution_mode",
+            "merge_mole",
+            "ms_per_eval_python",
         ):
             if k in r:
                 row[k] = r[k]

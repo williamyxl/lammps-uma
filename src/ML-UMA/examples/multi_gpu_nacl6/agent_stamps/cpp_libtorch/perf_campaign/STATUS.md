@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T19:45:51 CDT · Loop **armed** · **W6 COMPLETE PASS**
+**Stamp:** 2026-08-09T20:12:00 CDT · Loop **armed** · **W7 COMPLETE PASS**
 **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -15,26 +15,19 @@ Historical floor (`execution_mode=general`, `merge_mole=False`). Still required;
 | water888 | ASE FP64 NVT | 382.09 | 198.19 | 117.98 | `water888/results/COMPARE.md` (jobs 20948821 / 20949177 / 20949180) |
 | water888 | FC LAMMPS NVT | 359.40 | 200.54 | 118.94 | same (20949064 / 20949178 / 20949181) |
 
-## Matching-settings speed bars (in flight — measure then lock)
+## Matching-settings speed bars (measure → lock)
 
-Same `execution_mode` / `merge_mole` as the uma artifact under test. Env:
-`FAIRCHEM_EXECUTION_MODE`, `FAIRCHEM_MERGE_MOLE`. See [`GLOSSARY.md`](GLOSSARY.md).
+Honest metric: NaCl `ms_per_eval_python` (ignore SLURM-wall `ms_per_eval`). Water NVT Pair pending resubmit (`--chdir` fix).
 
 | Suite | path | settings | @2 | @4 | status |
 |-------|------|----------|---:|---:|--------|
-| NaCl6 | ASE | `general`+`merge_mole` | `20989338` | `20989346` | queued |
-| NaCl6 | ASE | `umas_fast_pytorch`+`merge_mole` | `20989339` | `20989347` | queued |
-| NaCl6 | FC | `general`+`merge_mole` | `20989342` | `20989350` | queued |
-| NaCl6 | FC | `umas_fast_pytorch`+`merge_mole` | `20989343` | `20989351` | queued |
-| water888 | ASE | `general`+`merge_mole` | `20989340` | `20989348` | queued |
-| water888 | ASE | `umas_fast_pytorch`+`merge_mole` | `20989341` | `20989349` | queued |
-| water888 | FC | `general`+`merge_mole` | `20989344` | `20989352` | queued |
-| water888 | FC | `umas_fast_pytorch`+`merge_mole` | `20989345` | `20989353` | queued |
+| NaCl6 | ASE | `general`+`merge_mole` | **195.7** (`20989338`) | **167.9** (`20989346`) | locked |
+| NaCl6 | ASE | `umas_fast_pytorch`+`merge_mole` | **191.6** (`20989339`) | **164.5** (`20989347`) | locked |
+| NaCl6 | FC | `general`+`merge_mole` | `20989342` | `20989350` | running |
+| NaCl6 | FC | `umas_fast_pytorch`+`merge_mole` | `20989343` | `20989351` | running |
+| water888 | ASE/FC | both settings @2/@4 | — | — | **resubmit** (bad `SLURM_SUBMIT_DIR`) |
 
-Job list: `matching_ase_fc_jobs.txt`. Submit: `submit_matching_ase_fc_bars.sh`.
-
-**Tier1+ hard gate:** uma ≤ matching ASE **and** ≤ matching FC (after those
-rows exist). Clearing only the `general` table is not enough.
+**Tier1+ hard gate:** uma ≤ matching ASE **and** ≤ matching FC. Uma W7 already ≤ NaCl matching ASE (`*-f64-fast` @2 159.4 &lt; 191.6; @4 92.4 &lt; 164.5).
 
 ## Settings (required)
 
@@ -76,31 +69,24 @@ ASE@1 (`merge_mole=True`) ms: `general`+merge **367**, `umas_fast_pytorch`+merge
 
 ## Next
 
-1. **Matching ASE/FC bars** (`general`+`merge_mole`, `umas_fast_pytorch`+`merge_mole`) @2/@4 NaCl+water — measure, lock, then re-gate uma `*-f64-fast`.
-2. **W7 in flight** (two-phase geo/edge publish); then Tier2 W8→W12 until hard ceiling.
+1. Finish NaCl FC matching bars; **resubmit water ASE/FC** with `--chdir` to `water888`.
+2. Tier2 **W8** (NCCL stream overlap) — W7 flat (&lt;1 ms / water@4 +1 ms).
 3. devices=1 `umas_fast_pytorch`+`merge_mole` export required for product completeness.
 
 ## Constraints
 
 FP64 · `uma/kk` + Kokkos · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 
-## Wave A unblock (tick71)
-- Water@2 `20985385` still **PENDING (Resources)** — holds water@4 `20985403` (`afterok`).
-- Cancelled dependent `20985386`/`20985387`; **NaCl@4** resubmitted independently as `20985402` (RECOMPILE=0; binary already good from `20984870`).
-- Active queue: `20985385` Resources | `20985402` Priority | `20985403` Dependency.
-
-## Wave A gates (live)
+## Wave A gates
 | Suite | @2 | @4 | E/F vs ASE `merge_mole=True` | notes |
 |-------|---:|---:|:----------------------------:|-------|
 | NaCl6 | **160.9** (`20984870`) | **92.7** (`20985402`) | PASS | W5/W9 |
 | water888 | **164.28** (`20985385`) | **96.25** (`20985403`) | PASS | attach max_e fix |
 
-Wave A **COMPLETE PASS** — both systems @2/@4 speed ≤ ASE/FC + E/F vs ASE `merge_mole=True`.
-
+Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- W6 gates done. No pending jobs.
-
+- W7 done. NaCl FC matching + water resubmit in flight.
 
 ## Tier2 W6 (COMPLETE PASS)
 | Suite | @2 | @4 | Δ vs Wave A @2/@4 |
@@ -108,10 +94,10 @@ Wave A **COMPLETE PASS** — both systems @2/@4 speed ≤ ASE/FC + E/F vs ASE `m
 | NaCl6 | **160.2** (`20989045`) | **92.9** (`20989046`) | -0.7 / +0.2 |
 | water888 | **165.47** (`20989047`) | **95.83** (`20989048`) | +1.19 / -0.42 |
 
-Full-graph publish + GPU shard: E/F green; speed ≤ ASE/FC. Wins mostly **&lt;1 ms** (flat) → continue Tier2 W7.
-## Tier2 W7 (live)
-| Suite | @2 | @4 | notes |
-|-------|---:|---:|-------|
-| NaCl6 | **159.4** (`20989184`) PASS (ΔW6 -0.9) | pending `20989185` | two-phase |
-| water888 | **165.10** (`20989186`) PASS (ΔW6 -0.37) | pending `20989187` | |
+## Tier2 W7 (COMPLETE PASS)
+| Suite | @2 | @4 | Δ vs W6 |
+|-------|---:|---:|--------:|
+| NaCl6 | **159.4** (`20989184`) | **92.37** (`20989185`) | -0.9 / -0.56 |
+| water888 | **165.10** (`20989186`) | **96.84** (`20989187`) | -0.37 / **+1.01** |
 
+Two-phase publish: E/F vs ASE `merge_mole=True` PASS; speed ≤ locked `general` ASE/FC. Wins mostly &lt;1 ms (water@4 regression) → continue W8.

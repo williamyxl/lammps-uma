@@ -1,7 +1,7 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-09T19:45:51",
-  "phase": "V5_waveA_W5W9",
+  "stamp": "2026-08-09T20:12:00",
+  "phase": "tier2_w7_complete",
   "status": "waveA_water_retry_attach_fix",
   "gates": {
     "E_F": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Tier2 W7 two-phase publish; commit+push W6",
+  "next_action": "Tier2 W7 gates in flight",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -507,8 +507,8 @@
   },
   "active_jobid": "20985385",
   "tick": {
-    "last": "2026-08-09T19:45:51",
-    "note": "tick153 W6 COMPLETE water@4=95.83"
+    "last": "2026-08-09T20:01:39",
+    "note": "tick161 W7 @4 poll"
   },
   "tier1": {
     "export_job": "20982262",
@@ -1156,6 +1156,107 @@
       "nacl6_@4": 0.23599999999999,
       "water888_@2": 1.1899999999999977,
       "water888_@4": -0.41800000000000637
+    }
+  },
+  "tier2_w7": {
+    "change": "W7 two-phase publish: geo shm while edge D2H",
+    "jobs": {
+      "nacl6_@2": "20989184",
+      "water888_@2": "20989186",
+      "nacl6_@4": "20989185",
+      "water888_@4": "20989187"
+    },
+    "status": "NaCl@2 PASS; waiting rest",
+    "art": "uma-s-1p2-omat-f64-fast",
+    "gates": {
+      "nacl6_@2": {
+        "ver": "v5_tier2_w7",
+        "sys": "nacl6",
+        "ngpu": 2,
+        "job": "20989184",
+        "ms": 159.362,
+        "ase": 193.9,
+        "fc": 193.2,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -5830.923741338152,
+        "dE_vs_merge_ase": 1.2187229003757238e-10,
+        "force_max_d1": 1.0000000000287557e-06,
+        "ef_pass": true,
+        "delta_vs_w6_ms": -0.8859999999999957,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "note": "W7 two-phase geo/edge publish",
+        "stamp": "2026-08-09T19:53:47",
+        "pass": true
+      },
+      "water888_@2": {
+        "ver": "v5_tier2_w7",
+        "sys": "water888",
+        "ngpu": 2,
+        "job": "20989186",
+        "ase_oracle_job": "20984160",
+        "ms": 165.10000000000002,
+        "ase": 198.19,
+        "fc": 200.54,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.389377472278,
+        "dE_vs_merge_ase": 8.185452315956354e-12,
+        "force_max_abs_ase_merge": 4.992769293110655e-06,
+        "ef_pass": true,
+        "delta_vs_w6_ms": -0.3699999999999761,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "note": "W7 two-phase publish",
+        "stamp": "2026-08-09T19:55:49",
+        "pass": true
+      }
+    }
+  },
+  "w7": {
+    "status": "COMPLETE_PASS",
+    "nacl6": {
+      "@2": {
+        "job": "20989184",
+        "ms": 159.4
+      },
+      "@4": {
+        "job": "20989185",
+        "ms": 92.37
+      }
+    },
+    "water888": {
+      "@2": {
+        "job": "20989186",
+        "ms": 165.1
+      },
+      "@4": {
+        "job": "20989187",
+        "ms": 96.84
+      }
+    },
+    "note": "two-phase publish; flat vs W6; water@4 +1ms"
+  },
+  "matching_ase_fc": {
+    "nacl6_ase": {
+      "gmerge": {
+        "@2": 195.7,
+        "@4": 167.9,
+        "jobs": [
+          "20989338",
+          "20989346"
+        ]
+      },
+      "ufast": {
+        "@2": 191.6,
+        "@4": 164.5,
+        "jobs": [
+          "20989339",
+          "20989347"
+        ]
+      },
+      "metric": "ms_per_eval_python"
     }
   }
 }
