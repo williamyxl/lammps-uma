@@ -497,20 +497,28 @@ def _run_lmp(cmd: list[str], *, cwd: Path, env: dict, tag: str) -> None:
         )
 
 
-def uma_pair_style_line(precision: str, uma_devices: int) -> str:
-    """Always ``uma/kk`` — native Kokkos-peer GP keeps Kokkos on for devices>1.
+def _uma_use_kokkos() -> bool:
+    """Tier K: UMA_USE_KOKKOS=0 → plain ``pair_style uma`` (no ``-k``/``-sf kk``).
 
-    Legacy Ray (``UMA_ALLOW_RAY_GP=1``) used plain ``uma`` without ``-k``; that
-    path is no longer the default.
+    Default remains 1 until Tier K A/B promotes the non-Kokkos recipe.
     """
-    return f"pair_style uma/kk precision {precision} devices {uma_devices}"
+    v = os.environ.get("UMA_USE_KOKKOS", "1").strip().lower()
+    return v not in ("0", "false", "no", "off")
+
+
+def uma_pair_style_line(precision: str, uma_devices: int) -> str:
+    """``uma/kk`` when Kokkos on; plain ``uma`` + explicit ``devices N`` otherwise."""
+    style = "uma/kk" if _uma_use_kokkos() else "uma"
+    return f"pair_style {style} precision {precision} devices {uma_devices}"
 
 
 def uma_kk_argv(ngpus: int, *extra: str, uma_devices: int | None = None) -> list[str]:
-    """LAMMPS argv for uma paths: always ``lmp -k on g N -sf kk`` (single rank)."""
+    """LAMMPS argv: with Kokkos ``-k on g N -sf kk``; without, bare ``lmp``."""
     lmp = find_uma_lmp_binary()
-    del uma_devices  # pair_style carries devices; Kokkos g uses ngpus
-    return [str(lmp), "-k", "on", "g", str(ngpus), "-sf", "kk", *extra]
+    del uma_devices  # pair_style carries devices
+    if _uma_use_kokkos():
+        return [str(lmp), "-k", "on", "g", str(ngpus), "-sf", "kk", *extra]
+    return [str(lmp), *extra]
 
 
 def load_uma_d1_baseline(results_root: Path) -> dict[str, dict]:
@@ -808,10 +816,16 @@ def run_uma_kk(
     el = " ".join(symbols)
     pair_style = uma_pair_style_line(precision, uma_devices)
 
-    kk_note = (
-        f"argv: lmp -k on g {ngpus} -sf kk (single MPI rank). "
-        f"pair_style: {pair_style} (native Kokkos-peer GP when devices>1)."
-    )
+    if _uma_use_kokkos():
+        kk_note = (
+            f"argv: lmp -k on g {ngpus} -sf kk (single MPI rank). "
+            f"pair_style: {pair_style} (LibTorch MP + NCCL when devices>1)."
+        )
+    else:
+        kk_note = (
+            f"argv: lmp (no Kokkos; UMA_USE_KOKKOS=0). "
+            f"pair_style: {pair_style} (LibTorch MP + NCCL when devices>1)."
+        )
 
     inp_sp = work / "in.sp"
     inp_sp.write_text(
