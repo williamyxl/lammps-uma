@@ -279,3 +279,5 @@ tick178 gather
 2026-08-09T20:57:37 CDT tick: W8-fix 77-79 status check
 2026-08-09T20:59:37 CDT tick: still Priority PD 77-79
 2026-08-09T21:01:39 CDT tick: PD Priority ~10m since nacl@2 done
+2026-08-10T00:17:12 W12 submit skip pre-bwd barrier {'nacl6_@2': '20999228', 'nacl6_@4': '20999230', 'water888_@2': '20999232', 'water888_@4': '20999234'}
+2026-08-10T00:17:12 W12 submit skip pre-bwd barrier {'nacl6_@2': '20999228', 'nacl6_@4': '20999230', 'water888_@2': '20999232', 'water888_@4': '20999234'}

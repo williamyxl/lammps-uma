@@ -285,7 +285,13 @@ int main(int argc, char** argv) {
         if (!(escale > 0.0)) escale = 1.0 / static_cast<double>(world);
       }
       auto e_for_grad = energy.reshape({-1}).sum() * escale;
-      uma::PeerContext::instance().slot().barrier(rank);
+      // W12: energy AR inside TS already orders ranks; optional skip of host barrier.
+      {
+        const char* skip_bar = std::getenv("UMA_SKIP_PRE_BWD_BARRIER");
+        if (!(skip_bar && std::string(skip_bar) == "1")) {
+          uma::PeerContext::instance().slot().barrier(rank);
+        }
+      }
       const auto t_bwd0 = clock::now();
       auto grads = torch::autograd::grad({e_for_grad}, {pos_t}, {}, false, false, false);
       auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
