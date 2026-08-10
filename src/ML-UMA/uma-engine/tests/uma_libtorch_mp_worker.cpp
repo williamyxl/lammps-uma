@@ -422,29 +422,36 @@ int main(int argc, char** argv) {
             path_tag = "graph_warmup";
           } else {
             uma::PeerContext::instance().slot().barrier(rank);
+            bool capture_begun = false;
             try {
               cuda_graph.capture_begin(
                   /*pool=*/{0, 0}, cudaStreamCaptureModeThreadLocal);
+              capture_begun = true;
               std::tie(energy, forces, ms_fwd, ms_bwd) = run_eager_fwd_bwd(
                   g_pos, g_z, g_cell, g_pbc, g_eidx, g_coff, g_ch, g_sp,
                   /*skip=*/true);
               g_normed = energy;  // keep live handles updated by replay
               g_forces = forces;
               cuda_graph.capture_end();
+              capture_begun = false;
               graph_captured = true;
               path_tag = "graph_capture";
               std::cerr << "uma_libtorch_mp_worker rank=" << rank
                         << " W11 CUDA graph captured e_cap=" << e_cap << "\n"
                         << std::flush;
             } catch (const std::exception& ex) {
+              // Mid-capture abort leaves the stream capturing; reset before eager.
               graph_failed = true;
-              if (graph_captured) {
-                cuda_graph.reset();
-                graph_captured = false;
+              graph_captured = false;
+              if (capture_begun) {
+                try {
+                  cuda_graph.reset();
+                } catch (...) {
+                }
               }
               std::cerr << "uma_libtorch_mp_worker rank=" << rank
                         << " W11 CUDA graph CAPTURE FAILED: " << ex.what()
-                        << " — falling back to eager\n"
+                        << " — falling back to eager (graph disabled)\n"
                         << std::flush;
               std::tie(energy, forces, ms_fwd, ms_bwd) = run_eager_fwd_bwd(
                   g_pos, g_z, g_cell, g_pbc, g_eidx, g_coff, g_ch, g_sp,
@@ -482,25 +489,60 @@ int main(int argc, char** argv) {
         ms_fred =
             std::chrono::duration<double, std::milli>(clock::now() - t_fred0).count();
       }
+      // W14: scoped stream sync + async D2H into pinned payload (no full
+      // cudaDeviceSynchronize; avoid torch CPU clone when shm is registered).
 #if defined(UMA_ENGINE_USE_CUDA)
-      // One sync before D2H / result publish.
-      cudaDeviceSynchronize();
+      auto stream = at::cuda::getCurrentCUDAStream();
+      bool forces_d2h_async = false;
+      if (rank == 0) {
+        forces = forces.contiguous();
+        const size_t nbytes =
+            static_cast<size_t>(n) * 3u * sizeof(double);
+        if (payload_pinned && forces.is_cuda() &&
+            forces.scalar_type() == torch::kFloat64) {
+          const cudaError_t st = cudaMemcpyAsync(
+              payload->forces_ptr(), forces.data_ptr<double>(), nbytes,
+              cudaMemcpyDeviceToHost, stream.stream());
+          if (st != cudaSuccess) {
+            throw std::runtime_error(
+                std::string("W14 cudaMemcpyAsync forces D2H: ") +
+                cudaGetErrorString(st));
+          }
+          forces_d2h_async = true;
+        }
+      }
+      {
+        const cudaError_t st = cudaStreamSynchronize(stream.stream());
+        if (st != cudaSuccess) {
+          throw std::runtime_error(
+              std::string("W14 cudaStreamSynchronize: ") +
+              cudaGetErrorString(st));
+        }
+      }
+#else
+      const bool forces_d2h_async = false;
 #endif
       std::cerr << "PERF_TICK rank=" << rank << " world=" << world
                 << " nedges=" << nedges << " path=" << path_tag
                 << " ms_fwd=" << ms_fwd
                 << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
-                << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred) << "\n"
+                << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred)
+#if defined(UMA_ENGINE_USE_CUDA)
+                << " d2h=" << (forces_d2h_async ? "async_pin" : "sync_cpu")
+#endif
+                << "\n"
                 << std::flush;
 
       // Rank0 publishes E+F into payload shm; pipe returns ok only (pipe-tax cut).
       const double e = energy.reshape({-1})[0].item<double>();
       if (rank == 0) {
-        auto f_cpu = forces.to(torch::kCPU).contiguous();
         pthread_mutex_lock(&payload->hdr->mu);
         payload->hdr->energy = e;
-        std::memcpy(payload->forces_ptr(), f_cpu.data_ptr<double>(),
-                    static_cast<size_t>(n) * 3 * sizeof(double));
+        if (!forces_d2h_async) {
+          auto f_cpu = forces.to(torch::kCPU).contiguous();
+          std::memcpy(payload->forces_ptr(), f_cpu.data_ptr<double>(),
+                      static_cast<size_t>(n) * 3 * sizeof(double));
+        }
         payload->hdr->result_gen = gen;
         pthread_mutex_unlock(&payload->hdr->mu);
       } else {
