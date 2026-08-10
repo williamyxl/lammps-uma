@@ -1,5 +1,5 @@
 {
-  "stamp": "2026-08-09T20:33:00",
+  "stamp": "2026-08-09T20:35:00",
   "policy": "BEST_BARS are minimum floor; max-push to hard ceiling",
   "artifacts": {
     "gen": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/uma-engine/artifacts/uma-s-1p2-omat-f64",
@@ -18,12 +18,14 @@
           "ms": 345.5
         },
         "uma": {
-          "tag": "ufast",
-          "ms": 533.1
+          "tag": "gen",
+          "ms": 315.6,
+          "alt_ufast_fail": 533.1
         },
-        "floor": "FAIL",
-        "margin_ase": -182.8,
-        "margin_fc": -187.6
+        "floor": "PASS_via_gen",
+        "margin_ase": 34.7,
+        "margin_fc": 29.9,
+        "note": "ufast@1 broken/slow; gen@1 clears floor"
       },
       "2": {
         "ase": {
@@ -93,9 +95,8 @@
       },
       "4": {
         "ase": {
-          "tag": "gen",
-          "ms": 117.98,
-          "note": "ufast pending"
+          "tag": "ufast",
+          "ms": 94.5
         },
         "fc": {
           "tag": "gen",
@@ -105,9 +106,10 @@
           "tag": "ufast",
           "ms": 96.84
         },
-        "floor": "PASS_vs_gen",
-        "margin_ase": 21.14,
-        "margin_fc": 22.1
+        "floor": "FAIL",
+        "margin_ase": -2.34,
+        "margin_fc": 22.1,
+        "note": "W7 uma loses to ASE ufast @4; need W8+ or more"
       }
     }
   },
@@ -793,6 +795,105 @@
       "job": "20989766",
       "metric": "ms_per_eval_python",
       "note": "FLOOR_FAIL vs ASE 350.3 and FC 345.5; E matches general ASE not merge \u2014 devices=1 f64-fast suspect"
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "gmerge",
+      "ngpu": 4,
+      "ms": 98.5,
+      "status": "DONE",
+      "job": "20989764",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "ase",
+      "tag": "ufast",
+      "ngpu": 4,
+      "ms": 94.5,
+      "status": "DONE",
+      "job": "20989765",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "ufast",
+      "ngpu": 1,
+      "ms": 337.7,
+      "status": "DONE",
+      "job": "20989767",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "gmerge",
+      "ngpu": 1,
+      "ms": 326.5,
+      "status": "DONE",
+      "job": "20989772",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "gen",
+      "ngpu": 1,
+      "ms": 325.9,
+      "status": "DONE",
+      "job": "20989774",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "gmerge",
+      "ngpu": 2,
+      "ms": 186.5,
+      "status": "DONE",
+      "job": "20989770",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "water888",
+      "path": "uma",
+      "tag": "gmerge",
+      "ngpu": 4,
+      "ms": 101.05,
+      "status": "DONE",
+      "job": "20989771",
+      "metric": "nvt_pair_ms_per_step",
+      "note": null
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "gen",
+      "ngpu": 1,
+      "ms": 315.6,
+      "status": "DONE",
+      "job": "20989773",
+      "metric": "ms_per_eval_python",
+      "note": null
+    },
+    {
+      "system": "nacl6",
+      "path": "uma",
+      "tag": "gmerge",
+      "ngpu": 4,
+      "ms": 96.47,
+      "status": "DONE",
+      "job": "20989769",
+      "metric": "ms_per_eval_python",
+      "note": null
     }
   ]
 }
