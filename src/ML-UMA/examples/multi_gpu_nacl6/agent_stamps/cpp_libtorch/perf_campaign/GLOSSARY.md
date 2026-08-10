@@ -55,9 +55,13 @@ artifact uses the same `execution_mode` / `merge_mole` as that artifact.
 | ASE/FC `general`+`merge_mole` | `general`, `merge_mole=True` | `*-f64-merge` (measure once, then lock) |
 | ASE/FC `umas_fast_pytorch`+`merge_mole` | `umas_fast_pytorch`, `merge_mole=True` | `*-f64-fast` (measure once, then lock) |
 
-**Hard speed gate (Tier1+):** uma ms ≤ matching ASE **and** ≤ matching FC on
-the gated metric. Clearing only the locked `general` table is **necessary but
-not sufficient** once `merge_mole` / `umas_fast_pytorch` bars exist.
+**Hard speed gate (Tier1+):** uma ms ≤ **matching ASE** on the gated metric.
+Matching **FC** with `merge_mole=True` under FP64 currently **crashes** in
+FairChem (`MOLE.merged_linear_layer` Float vs Double — see
+`ref_ase_fc/fc_merge_mole_fp64_FAIL.json`); treat matching FC as blocked until
+upstream fix. Locked `general` FC remains a secondary floor. Clearing only the
+locked `general` ASE/FC table is **necessary but not sufficient** once matching
+ASE bars exist.
 
 E/F oracles (ASE FP64 @1, frozen geometry):
 

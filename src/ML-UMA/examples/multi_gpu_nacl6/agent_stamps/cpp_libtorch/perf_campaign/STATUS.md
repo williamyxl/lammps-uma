@@ -23,11 +23,11 @@ Honest metric: NaCl `ms_per_eval_python` (ignore SLURM-wall `ms_per_eval`). Wate
 |-------|------|----------|---:|---:|--------|
 | NaCl6 | ASE | `general`+`merge_mole` | **195.7** (`20989338`) | **167.9** (`20989346`) | locked |
 | NaCl6 | ASE | `umas_fast_pytorch`+`merge_mole` | **191.6** (`20989339`) | **164.5** (`20989347`) | locked |
-| NaCl6 | FC | `general`+`merge_mole` | `20989342` | `20989350` | running |
-| NaCl6 | FC | `umas_fast_pytorch`+`merge_mole` | `20989343` | `20989351` | running |
-| water888 | ASE/FC | both settings @2/@4 | — | — | **resubmit** (bad `SLURM_SUBMIT_DIR`) |
+| NaCl6 | FC | `merge_mole=True` (any mode) | — | — | **FAIL** FP64 `Float`/`Double` in `merge_MOLE` (`fc_merge_mole_fp64_FAIL.json`) |
+| water888 | ASE | both settings @2/@4 | `20989439`+ | `20989443`+ | queued (resubmit) |
+| water888 | FC | `merge_mole=True` | — | — | expect same FP64 FAIL as NaCl FC |
 
-**Tier1+ hard gate:** uma ≤ matching ASE **and** ≤ matching FC. Uma W7 already ≤ NaCl matching ASE (`*-f64-fast` @2 159.4 &lt; 191.6; @4 92.4 &lt; 164.5).
+**Tier1+ hard gate:** uma ≤ **matching ASE**. Matching FC is **blocked** until FairChem supports `merge_mole` under FP64 (ASE path works). Uma W7 already ≤ NaCl matching ASE (`*-f64-fast` @2 159.4 &lt; 191.6; @4 92.4 &lt; 164.5). Locked `general` FC remains a secondary floor only.
 
 ## Settings (required)
 

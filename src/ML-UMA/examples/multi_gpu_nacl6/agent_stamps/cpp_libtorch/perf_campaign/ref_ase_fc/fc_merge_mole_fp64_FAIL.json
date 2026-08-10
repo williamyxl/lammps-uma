@@ -1,0 +1,15 @@
+{
+  "stamp": "2026-08-09T20:15:00",
+  "path": "fairchem_lammps_fc",
+  "dtype": "float64",
+  "merge_mole": true,
+  "jobs": [
+    "20989342",
+    "20989343",
+    "20989350",
+    "20989351"
+  ],
+  "error": "RuntimeError: expected scalar type Float but found Double in MOLE.merged_linear_layer einsum (escn_moe.merge_MOLE_model)",
+  "verdict": "FC LAMMPS cannot currently run merge_mole under FP64; ASE FairChem FP64+merge_mole works (NaCl bars locked). Tier1+ matching FC bar blocked until FairChem fix.",
+  "policy": "gate uma *-f64-fast / *-f64-merge vs matching ASE; keep locked general FC as secondary floor only"
+}

@@ -1257,6 +1257,16 @@
         ]
       },
       "metric": "ms_per_eval_python"
+    },
+    "nacl6_fc": {
+      "status": "FAIL_fp64_merge_mole",
+      "note": "FC LAMMPS cannot currently run merge_mole under FP64; ASE FairChem FP64+merge_mole works (NaCl bars locked). Tier1+ matching FC bar blocked until FairChem fix.",
+      "jobs": [
+        "20989342",
+        "20989343",
+        "20989350",
+        "20989351"
+      ]
     }
   }
 }
