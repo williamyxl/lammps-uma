@@ -36,7 +36,12 @@ Coordinates written with 12 significant digits (`.12g`). **Never re-rattle.**
 ## FP64 policy
 
 - **ASE** and **uma/kk double**: FP64 only (`inference_settings_with_dtype("float64")`
-  / `uma-s-1p2-omat-f64`). Do **not** use turbo settings for this campaign.
+  / `uma-s-1p2-omat-f64`). Do **not** use FairChem **`InferenceSettings` turbo**
+  for the product parity recipe below.
+- **Naming:** campaign **Tier1 turbo** = export/run **`umas_fast_pytorch` +
+  `merge_mole`** (`*-f64-fast`). That is a **different** knob from FairChem
+  InferenceSettings turbo. Definitions:
+  [`agent_stamps/cpp_libtorch/perf_campaign/GLOSSARY.md`](agent_stamps/cpp_libtorch/perf_campaign/GLOSSARY.md).
 - **`uma/kk` mixed: DISABLED** — FP32 energy graph with upcast forces; not an
   active path. Historical mixed rows in `results/` are HTML-commented.
 - FairChem FC may build the cell in FP32 inside `lammps_fc` (documented in results).
