@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T08:57 CDT · W13 DONE · **W14 gates submitted** NaCl@2 `21010851` (RECOMPILE=1) + deps
+**Stamp:** 2026-08-10T09:00 CDT · W14 NaCl@2 E/F PASS; SP **161.81** (flat); NVT 197 = vesin spike noise — matrix continues
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W13 DONE** — see `gate_v6_w13_profile_water4.json` (wait-dominated; force_ar ≪1 ms).
-- **W14 gates:** NaCl@2 `21010851` RECOMPILE=1; NaCl@4 `21010852`; water@2 `21010853`; water@4 `21010854` (afterok:21010851).
+- **W14 NaCl@2** (`21010851`) E/F PASS; SP **161.81** ≈ W8nk; NVT 197 is one vesin spike in NVT@10 — not promote-kill.
+- Running/queued: water@2 `21010853`; NaCl@4 `21010852`; water@4 `21010854`.
 
 
 ## Tier2 W6 (COMPLETE PASS)

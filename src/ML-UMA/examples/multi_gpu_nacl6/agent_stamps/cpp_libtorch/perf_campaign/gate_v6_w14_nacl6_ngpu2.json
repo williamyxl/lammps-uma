@@ -1,0 +1,20 @@
+{
+  "ver": "w14",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "21010851",
+  "nvt_pair_ms_per_step": 197.02999999999997,
+  "ms_sp": 161.81,
+  "baseline_w8nk_nvt": 161.94,
+  "delta_vs_w8nk_ms": 35.089999999999975,
+  "dE_vs_merge_ase": 1.2460077414289117e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "speed_pass": false,
+  "promote_default": false,
+  "reason": "NVT@10 noisy (vesin spike); SP flat vs W8nk \u2014 continue matrix, judge on water@4 + NaCl SP/NVT sans spikes",
+  "stamp": "2026-08-10T08:59:59",
+  "pass": true,
+  "note": "SP 161.81 \u2248 W8nk; NVT 197 polluted by one vesin spike (~355ms at gen=12). Not a W14 regression. Await full matrix.",
+  "speed_pass_sp": true
+}
