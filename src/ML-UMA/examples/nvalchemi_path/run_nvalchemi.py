@@ -166,6 +166,13 @@ def main() -> int:
     ap.add_argument("--thermostat-time-fs", type=float, default=100.0,
                     help="Nose-Hoover tau_T in fs; 100 fs == LAMMPS "
                          "`fix nvt temp 300 300 0.1` (Tdamp 0.1 ps, metal units)")
+    ap.add_argument("--warmup", type=int, default=3,
+                    help="untimed forward passes before timing (excludes lazy "
+                         "FP64 cast / MoLE merge / torch.compile cost)")
+    ap.add_argument("--sp-repeats", type=int, default=5,
+                    help="timed single-point repeats; median is reported")
+    ap.add_argument("--md-warmup-steps", type=int, default=2,
+                    help="untimed MD steps before the timed NVT window")
     a = ap.parse_args()
 
     cfg = SYS[a.sysname]
@@ -223,12 +230,32 @@ def main() -> int:
     ctx = HookContext(batch=batch, model=model, global_rank=0, workflow=None)
     for hook in nl_hooks:
         hook(ctx, DynamicsStage.BEFORE_COMPUTE)
-    torch.cuda.synchronize() if device.type == "cuda" else None
-    t0 = time.perf_counter()
-    out = model(batch)
+
+    # Warmup before any timing. The first call pays lazy FP64 weight casting,
+    # the MoLE merge, and torch.compile on the neighbor hook -- ~3.8 s on the
+    # first smoke run. The LAMMPS paths all report cold_start_excluded=true,
+    # so timing the cold call here would compare startup against throughput.
+    for _ in range(max(0, a.warmup)):
+        _w = model(batch)
+        del _w
     if device.type == "cuda":
         torch.cuda.synchronize()
-    rec["sp_ms"] = (time.perf_counter() - t0) * 1e3
+
+    # Single point: median of repeats, warmup excluded.
+    sp_times = []
+    for _ in range(max(1, a.sp_repeats)):
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        out = model(batch)
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        sp_times.append((time.perf_counter() - t0) * 1e3)
+    rec["sp_ms"] = float(np.median(sp_times))
+    rec["sp_ms_min"] = float(np.min(sp_times))
+    rec["sp_ms_all"] = [round(x, 3) for x in sp_times]
+    rec["warmup_calls"] = a.warmup
+    rec["cold_start_excluded"] = True
     e = float(out["energy"].reshape(-1)[0].item())
     # Record the dtype actually used, so a silent FP32 fallback cannot be
     # mistaken for an FP64 result when comparing against the other paths.
@@ -272,16 +299,30 @@ def main() -> int:
     # `fix nvt temp 300 300 0.1` in metal units, i.e. Tdamp = 0.1 ps = 100 fs,
     # so match that exactly rather than taking a default -- thermostat coupling
     # changes the trajectory and would make the NVT comparison unfair.
-    integrator = NVTNoseHoover(
-        model=model, dt=a.timestep_fs, temperature=a.temperature,
-        thermostat_time=a.thermostat_time_fs, n_steps=nsteps,
-    )
+    def make_integrator(n: int):
+        return NVTNoseHoover(
+            model=model, dt=a.timestep_fs, temperature=a.temperature,
+            thermostat_time=a.thermostat_time_fs, n_steps=n,
+        )
+
+    nwarm = max(0, a.md_warmup_steps)
     try:
         if distributed:
             mesh = DistributedManager().initialize_mesh(
                 mesh_shape=(world,), mesh_dim_names=("domain",))
             cut = float(getattr(model, "cutoff", 6.0) or 6.0)
             dcfg = DomainConfig(cutoff=cut, skin=0.5, mesh=mesh)
+            # Untimed warmup steps first: the first MD steps pay halo-exchange
+            # setup and hook compilation, which are startup, not throughput.
+            if nwarm:
+                wi = make_integrator(nwarm)
+                with DomainParallel(dynamics=wi, config=dcfg,
+                                    n_steps=nwarm) as wdyn:
+                    wowned = wdyn.partition(md_batch if rank == 0 else None)
+                    wdyn.run(wowned)
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+            integrator = make_integrator(nsteps)
             with DomainParallel(dynamics=integrator, config=dcfg,
                                 n_steps=nsteps) as dyn:
                 owned = dyn.partition(md_batch if rank == 0 else None)
@@ -293,6 +334,21 @@ def main() -> int:
                     torch.cuda.synchronize()
                 md_s = time.perf_counter() - t1
         else:
+            if nwarm:
+                wi = make_integrator(nwarm)
+                for hook in model.make_neighbor_hooks():
+                    wi.register_hook(hook, stage=DynamicsStage.BEFORE_COMPUTE)
+                wbatch = Batch.from_data_list(
+                    [AtomicData.from_atoms(atoms, dtype=dt_t)]).to(device)
+                wbatch.forces = torch.zeros_like(wbatch.positions)
+                wbatch.energy = torch.zeros(
+                    1, 1, device=device, dtype=wbatch.positions.dtype)
+                wbatch.velocities = torch.zeros_like(wbatch.positions)
+                with wi:
+                    wi.run(wbatch)
+                if device.type == "cuda":
+                    torch.cuda.synchronize()
+            integrator = make_integrator(nsteps)
             for hook in model.make_neighbor_hooks():
                 integrator.register_hook(hook, stage=DynamicsStage.BEFORE_COMPUTE)
             with integrator:
@@ -305,6 +361,8 @@ def main() -> int:
                 md_s = time.perf_counter() - t1
         rec["nvt_ms_per_step"] = md_s * 1e3 / max(1, nsteps)
         rec["nvt_total_s"] = md_s
+        rec["md_warmup_steps"] = nwarm
+        rec["nvt_timing_source"] = "steady_state_warmup_excluded"
         rec["nvt_status"] = "OK"
     except Exception as exc:  # noqa: BLE001
         rec["nvt_status"] = f"FAIL: {type(exc).__name__}: {exc}"[:400]
