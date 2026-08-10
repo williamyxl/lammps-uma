@@ -1,0 +1,19 @@
+{
+  "ver": "tierK",
+  "sys": "water888",
+  "ngpu": 4,
+  "job": "20994400",
+  "ms": 96.092,
+  "baseline_w8fix_ms": 96.21,
+  "delta_vs_w8fix_ms": -0.117999999999995,
+  "ase_ufast": 94.5,
+  "le_ase": false,
+  "floor_fail_vs_ase": true,
+  "dE_vs_merge_ase": 8.185452315956354e-12,
+  "force_max_abs": 4.992769293110655e-06,
+  "ef_pass": true,
+  "UMA_USE_KOKKOS": 0,
+  "pair_style": "uma",
+  "pass": true,
+  "stamp": "2026-08-09T23:23:57"
+}

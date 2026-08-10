@@ -971,10 +971,20 @@
           "rmse": null,
           "max_abs": 4.992769293110655e-06,
           "max_norm_atom": 6.638901104638336e-06,
-          "note": "W8-fix; vs ASE ufast 94.5; delta_vs_w7=-0.64ms"
+          "note": "W8-fix; vs ASE ufast 94.5; delta_vs_w7=-0.64ms",
+          "probes": [
+            {
+              "label": "TierK",
+              "status": "DONE_AB",
+              "ms": 96.092,
+              "job": "20994400",
+              "E": -3143.389377472278,
+              "note": "no-Kokkos; vs ASE +1.59; vs W8fix -0.12"
+            }
+          ]
         }
       }
     }
   },
-  "stamp": "2026-08-09T23:22"
+  "stamp": "2026-08-09T23:23"
 }
