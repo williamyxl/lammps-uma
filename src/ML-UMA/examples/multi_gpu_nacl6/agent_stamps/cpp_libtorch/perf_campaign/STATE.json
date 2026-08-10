@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:16:06",
+  "stamp": "2026-08-10T09:21:44",
   "phase": "V6_from_W8nk",
-  "status": "w15_nacl1_PASS",
+  "status": "w15_water1_submitted",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,7 +128,10 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [],
+  "active_jobs": [
+    "21011642",
+    "21011643"
+  ],
   "tick_log": "tick.log",
   "next_action": "Optional: water@1 composition-specific traced; W17 blocked on FairChem RNG",
   "v2a": {
@@ -1972,5 +1975,10 @@
     "stamp": "2026-08-10T09:16:06",
     "pass": true,
     "promote_default": true
+  },
+  "w15_water": {
+    "export": "21011642",
+    "gate": "21011643",
+    "art": "uma-s-1p2-omat-f64-fast-water648"
   }
 }

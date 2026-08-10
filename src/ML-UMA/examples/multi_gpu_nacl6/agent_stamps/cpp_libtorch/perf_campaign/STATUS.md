@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:16 CDT · **W15 NaCl@1 PASS** NVT 296.5 (was 533; ASE 350) dE=1.255e-10
+**Stamp:** 2026-08-10T09:19 CDT · W15 NaCl@1 PASS · water@1 traced export `21011642` → gate `21011643`
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W15 NaCl@1** (`21011180`) after export `21011179`: E/F=PASS dE=1.255e-10; NVT **296.48** / SP **295.11** (prior fail 533; ASE ufast 350.3).
-- Product multi-GPU remains **W8nk**. Water@1 traced still pending (composition-specific).
+- **W15 NaCl@1 PASS** (296.5 ms). Multi-GPU product **W8nk**.
+- **W15 water@1:** export `21011642` → gate `21011643` (artifact `*-f64-fast-water648`, NaCl traced untouched).
 
 
 ## Tier2 W6 (COMPLETE PASS)
