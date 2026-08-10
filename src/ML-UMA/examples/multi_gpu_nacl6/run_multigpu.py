@@ -373,9 +373,37 @@ def setup_ld_path() -> dict:
     return env
 
 
+def fairchem_knobs_from_env() -> tuple[str, bool]:
+    """Optional ASE/FC InferenceSettings overrides (defaults = product general).
+
+    FAIRCHEM_EXECUTION_MODE: general | umas_fast_pytorch
+    FAIRCHEM_MERGE_MOLE: 0|1|true|false (default false)
+    """
+    mode = os.environ.get("FAIRCHEM_EXECUTION_MODE", "general").strip() or "general"
+    if mode not in ("general", "umas_fast_pytorch"):
+        raise SystemExit(
+            f"FAIRCHEM_EXECUTION_MODE must be general|umas_fast_pytorch, got {mode!r}"
+        )
+    raw = os.environ.get("FAIRCHEM_MERGE_MOLE", "0").strip().lower()
+    merge = raw in ("1", "true", "yes", "on")
+    if mode == "umas_fast_pytorch" and not merge:
+        raise SystemExit(
+            "FAIRCHEM_EXECUTION_MODE=umas_fast_pytorch requires FAIRCHEM_MERGE_MOLE=1"
+        )
+    return mode, merge
+
+
+def apply_fairchem_knobs(settings) -> tuple[str, bool]:
+    mode, merge = fairchem_knobs_from_env()
+    settings.execution_mode = mode
+    settings.merge_mole = merge
+    return mode, merge
+
+
 def fp64_settings(*, external_graph: bool):
     settings = inference_settings_with_dtype("float64")
     settings.external_graph_gen = external_graph
+    apply_fairchem_knobs(settings)
     return settings
 
 
@@ -383,7 +411,7 @@ def dtype_settings(dtype: str, *, external_graph: bool):
     settings = inference_settings_with_dtype(dtype)
     settings.external_graph_gen = external_graph
     settings.activation_checkpointing = False
-    settings.execution_mode = "general"
+    apply_fairchem_knobs(settings)
     return settings
 
 
@@ -529,6 +557,8 @@ def run_ase(atoms: Atoms, ckpt: Path, n_timing: int, ngpus: int) -> dict:
     # Graph-parallel (workers>1) + external_graph=True trips CUDA index asserts on
     # UMA (seen on NGPUS=2). Use internal graph gen for multi-GPU ASE.
     settings = fp64_settings(external_graph=(workers <= 1))
+    mode = settings.execution_mode
+    merge = bool(settings.merge_mole)
     t0 = time.perf_counter()
     # workers>1 → ParallelMLIPPredictUnit (Ray graph-parallel). workers=1 → single GPU.
     predictor = load_predict_unit(
@@ -567,8 +597,11 @@ def run_ase(atoms: Atoms, ckpt: Path, n_timing: int, ngpus: int) -> dict:
         float(np.mean(times) * 1e3),
         load_s=load_s,
         workers=workers,
+        execution_mode=mode,
+        merge_mole=merge,
         multi_gpu_note=(
             f"load_predict_unit(workers={workers}); "
+            f"execution_mode={mode} merge_mole={merge}; "
             + (
                 "ParallelMLIPPredictUnit / Ray graph-parallel"
                 if workers > 1
@@ -589,6 +622,8 @@ def run_fairchem_lammps(
     from fairchem.lammps.lammps_fc import run_lammps_with_fairchem
 
     settings = fp64_settings(external_graph=False)
+    mode = settings.execution_mode
+    merge = bool(settings.merge_mole)
     data = work / "data.lmp"
     write_data(atoms, data, title)
     inp = work / "in.fc"
@@ -661,9 +696,12 @@ run 0
         load_s=load_s,
         fairchem_lmp=str(fc_lmp),
         workers=workers,
+        execution_mode=mode,
+        merge_mole=merge,
         note="lammps_fc builds cell in FP32; not a pure FP64 path",
         multi_gpu_note=(
-            f"predictor workers={workers}; LAMMPS single-process Python bridge"
+            f"predictor workers={workers}; execution_mode={mode} merge_mole={merge}; "
+            "LAMMPS single-process Python bridge"
         ),
     )
     # Persist before teardown — Ray/NCCL cleanup can hang.

@@ -1,0 +1,16 @@
+nacl6 path=ase tag=gmerge @2 job=20989338 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_ase_gmerge_ngpu2
+nacl6 path=ase tag=ufast @2 job=20989339 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_ase_ufast_ngpu2
+water888 path=ase tag=gmerge @2 job=20989340
+water888 path=ase tag=ufast @2 job=20989341
+nacl6 path=fc tag=gmerge @2 job=20989342 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_fc_gmerge_ngpu2
+nacl6 path=fc tag=ufast @2 job=20989343 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_fc_ufast_ngpu2
+water888 path=fc tag=gmerge @2 job=20989344
+water888 path=fc tag=ufast @2 job=20989345
+nacl6 path=ase tag=gmerge @4 job=20989346 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_ase_gmerge_ngpu4
+nacl6 path=ase tag=ufast @4 job=20989347 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_ase_ufast_ngpu4
+water888 path=ase tag=gmerge @4 job=20989348
+water888 path=ase tag=ufast @4 job=20989349
+nacl6 path=fc tag=gmerge @4 job=20989350 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_fc_gmerge_ngpu4
+nacl6 path=fc tag=ufast @4 job=20989351 results=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/ref_ase_fc/nacl6_fc_ufast_ngpu4
+water888 path=fc tag=gmerge @4 job=20989352
+water888 path=fc tag=ufast @4 job=20989353

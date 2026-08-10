@@ -44,36 +44,46 @@ python export_mp_artifact.py --execution-mode umas_fast_pytorch --merge-mole ...
 
 ---
 
-## ASE E/F oracles (canonical)
+## ASE E/F oracles and speed bars
 
-Speed gates reuse **locked** ASE/FC multi-GPU timings; do not re-run for
-iteration. E/F gates use ASE FairChem FP64 @1 on the frozen geometry with the
-**same** `execution_mode` / `merge_mole` as the uma artifact under test.
+Speed and E/F use **matching** FairChem settings: the ASE/FC bar for a uma
+artifact uses the same `execution_mode` / `merge_mole` as that artifact.
 
-| Gate against | ASE settings | Used for |
-|--------------|--------------|----------|
-| ASE `general` | `execution_mode=general`, `merge_mole=False` | Tier0 `*-f64` |
-| ASE `merge_mole=True` | `merge_mole=True` (dtype float64); see stamps | `*-f64-fast` and `*-f64-merge` |
+| Gate against | ASE/FC settings | Used for |
+|--------------|-----------------|----------|
+| ASE/FC `general` | `execution_mode=general`, `merge_mole=False` | Tier0 `*-f64`; **locked** multi-GPU table (do not re-run) |
+| ASE/FC `general`+`merge_mole` | `general`, `merge_mole=True` | `*-f64-merge` (measure once, then lock) |
+| ASE/FC `umas_fast_pytorch`+`merge_mole` | `umas_fast_pytorch`, `merge_mole=True` | `*-f64-fast` (measure once, then lock) |
 
-Oracle stamps (reuse): `oracle_ase_merge_mole.json` (NaCl job `20983514`),
-`oracle_ase_water_merge_mole.json` (water job `20984160`). Rows in those
-stamps are named by settings: `general_merge`, `umas_fast_merge`.
+**Hard speed gate (Tier1+):** uma ms ≤ matching ASE **and** ≤ matching FC on
+the gated metric. Clearing only the locked `general` table is **necessary but
+not sufficient** once `merge_mole` / `umas_fast_pytorch` bars exist.
+
+E/F oracles (ASE FP64 @1, frozen geometry):
+
+| Oracle | Settings | Artifact |
+|--------|----------|----------|
+| ASE `general` | `general`, `merge_mole=False` | Tier0 `*-f64` |
+| ASE `merge_mole=True` | stamps `oracle_ase_merge_mole.json` / water twin | `*-f64-fast`, `*-f64-merge` |
+
+Oracle stamps (reuse): NaCl job `20983514`, water `20984160`. Rows:
+`general_merge`, `umas_fast_merge`.
 
 On NaCl6, ASE `general_merge` and ASE `umas_fast_merge` agree to ~10⁻¹³ eV;
-both sit ~2.1×10⁻⁵ eV above ASE `general`. That gap is the expected MOLE-fuse
-residual — gate `*-f64-fast` / `*-f64-merge` against ASE `merge_mole=True`,
-not against ASE `general`.
+both sit ~2.1×10⁻⁵ eV above ASE `general` (expected MOLE-fuse residual).
 
 | Comparison | Typical `\|ΔE\|` |
 |------------|------------------|
 | `*-f64-fast` or `*-f64-merge` vs ASE `general` | ≈ 2×10⁻⁵ eV (expected; do not FAIL) |
 | same vs ASE `merge_mole=True` | ∼ 10⁻¹⁰–10⁻¹¹ eV (PASS bar) |
 
+Env knobs for ASE/FC reference jobs: `FAIRCHEM_EXECUTION_MODE`,
+`FAIRCHEM_MERGE_MOLE` (see `run_multigpu.py` / water `path_common.py`).
+Defaults remain product `general` / `merge_mole=False`.
+
 ---
 
 ## Legacy phrase decode (do not reuse in new prose)
-
-Older STATUS/STATE lines may contain invented shorthand. Map only:
 
 | Legacy phrase | Means (write this instead) |
 |---------------|----------------------------|

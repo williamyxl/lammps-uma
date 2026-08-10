@@ -38,6 +38,22 @@ def out_dir(path_key: str) -> Path:
     return d
 
 
+def fairchem_knobs_from_env() -> tuple[str, bool]:
+    """Optional overrides: FAIRCHEM_EXECUTION_MODE, FAIRCHEM_MERGE_MOLE."""
+    mode = os.environ.get("FAIRCHEM_EXECUTION_MODE", "general").strip() or "general"
+    if mode not in ("general", "umas_fast_pytorch"):
+        raise SystemExit(
+            f"FAIRCHEM_EXECUTION_MODE must be general|umas_fast_pytorch, got {mode!r}"
+        )
+    raw = os.environ.get("FAIRCHEM_MERGE_MOLE", "0").strip().lower()
+    merge = raw in ("1", "true", "yes", "on")
+    if mode == "umas_fast_pytorch" and not merge:
+        raise SystemExit(
+            "FAIRCHEM_EXECUTION_MODE=umas_fast_pytorch requires FAIRCHEM_MERGE_MOLE=1"
+        )
+    return mode, merge
+
+
 def fp64_settings(*, workers: int, external_graph: bool):
     import sys
 
@@ -47,7 +63,9 @@ def fp64_settings(*, workers: int, external_graph: bool):
     settings = inference_settings_with_dtype("float64")
     settings.external_graph_gen = external_graph
     settings.activation_checkpointing = False
-    settings.execution_mode = "general"
+    mode, merge = fairchem_knobs_from_env()
+    settings.execution_mode = mode
+    settings.merge_mole = merge
     return settings
 
 

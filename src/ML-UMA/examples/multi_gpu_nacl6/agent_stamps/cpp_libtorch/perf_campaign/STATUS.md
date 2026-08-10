@@ -3,9 +3,10 @@
 **Stamp:** 2026-08-09T19:45:51 CDT · Loop **armed** · **W6 COMPLETE PASS**
 **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
-## Locked speed baselines — do **not** re-run ASE/FC
+## Locked speed baselines — `general` only (do **not** re-run)
 
-Campaign speed gates (`le_ase` / `le_fc`) **reuse** these already-documented FP64 runs. Re-run only if geometry, checkpoint, or FairChem stack changes.
+Historical floor (`execution_mode=general`, `merge_mole=False`). Still required;
+**not** sufficient for Tier1+ once matching-settings bars land.
 
 | Suite | path | @1 | @2 | @4 | Source |
 |-------|------|---:|---:|---:|--------|
@@ -14,7 +15,26 @@ Campaign speed gates (`le_ase` / `le_fc`) **reuse** these already-documented FP6
 | water888 | ASE FP64 NVT | 382.09 | 198.19 | 117.98 | `water888/results/COMPARE.md` (jobs 20948821 / 20949177 / 20949180) |
 | water888 | FC LAMMPS NVT | 359.40 | 200.54 | 118.94 | same (20949064 / 20949178 / 20949181) |
 
-Uma-only jobs are what we submit for perf iterations.
+## Matching-settings speed bars (in flight — measure then lock)
+
+Same `execution_mode` / `merge_mole` as the uma artifact under test. Env:
+`FAIRCHEM_EXECUTION_MODE`, `FAIRCHEM_MERGE_MOLE`. See [`GLOSSARY.md`](GLOSSARY.md).
+
+| Suite | path | settings | @2 | @4 | status |
+|-------|------|----------|---:|---:|--------|
+| NaCl6 | ASE | `general`+`merge_mole` | `20989338` | `20989346` | queued |
+| NaCl6 | ASE | `umas_fast_pytorch`+`merge_mole` | `20989339` | `20989347` | queued |
+| NaCl6 | FC | `general`+`merge_mole` | `20989342` | `20989350` | queued |
+| NaCl6 | FC | `umas_fast_pytorch`+`merge_mole` | `20989343` | `20989351` | queued |
+| water888 | ASE | `general`+`merge_mole` | `20989340` | `20989348` | queued |
+| water888 | ASE | `umas_fast_pytorch`+`merge_mole` | `20989341` | `20989349` | queued |
+| water888 | FC | `general`+`merge_mole` | `20989344` | `20989352` | queued |
+| water888 | FC | `umas_fast_pytorch`+`merge_mole` | `20989345` | `20989353` | queued |
+
+Job list: `matching_ase_fc_jobs.txt`. Submit: `submit_matching_ase_fc_bars.sh`.
+
+**Tier1+ hard gate:** uma ≤ matching ASE **and** ≤ matching FC (after those
+rows exist). Clearing only the `general` table is not enough.
 
 ## Settings (required)
 
@@ -56,8 +76,8 @@ ASE@1 (`merge_mole=True`) ms: `general`+merge **367**, `umas_fast_pytorch`+merge
 
 ## Next
 
-1. **W6 COMPLETE**. **W7 in flight** (two-phase geo/edge publish).
-2. Then Tier2 W6→W12 one+gate each until hard ceiling.
+1. **Matching ASE/FC bars** (`general`+`merge_mole`, `umas_fast_pytorch`+`merge_mole`) @2/@4 NaCl+water — measure, lock, then re-gate uma `*-f64-fast`.
+2. **W7 in flight** (two-phase geo/edge publish); then Tier2 W8→W12 until hard ceiling.
 3. devices=1 `umas_fast_pytorch`+`merge_mole` export required for product completeness.
 
 ## Constraints
