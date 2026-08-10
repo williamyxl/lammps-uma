@@ -34,6 +34,64 @@ OOM_PAT = re.compile(
 )
 
 
+class VramSampler:
+    """Poll nvidia-smi during the run to capture peak VRAM per GPU.
+
+    The ceiling this sweep measures is VRAM, so peak used/total must be
+    recorded directly — inferring it from whether the job crashed only tells
+    us pass/fail, not headroom, and gives nothing to extrapolate from.
+    """
+
+    def __init__(self, period_s: float = 0.5):
+        self.period = period_s
+        self._proc = None
+        self.path = None
+
+    def start(self, path: Path):
+        self.path = path
+        script = (
+            "while true; do nvidia-smi --query-gpu=index,memory.used,memory.total "
+            "--format=csv,noheader,nounits; sleep %s; done" % self.period
+        )
+        self._proc = subprocess.Popen(
+            ["bash", "-c", script],
+            stdout=open(path, "w"), stderr=subprocess.DEVNULL, text=True,
+        )
+
+    def stop(self) -> dict:
+        if self._proc is not None:
+            self._proc.terminate()
+            try:
+                self._proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        peak: dict[int, float] = {}
+        total: dict[int, float] = {}
+        if self.path and Path(self.path).is_file():
+            for line in Path(self.path).read_text(errors="ignore").splitlines():
+                parts = [p.strip() for p in line.split(",")]
+                if len(parts) != 3:
+                    continue
+                try:
+                    idx, used, tot = int(parts[0]), float(parts[1]), float(parts[2])
+                except ValueError:
+                    continue
+                peak[idx] = max(peak.get(idx, 0.0), used)
+                total[idx] = tot
+        if not peak:
+            return {}
+        return {
+            "vram_peak_MiB_per_gpu": {str(k): peak[k] for k in sorted(peak)},
+            "vram_total_MiB_per_gpu": {str(k): total[k] for k in sorted(total)},
+            "vram_peak_MiB_max": max(peak.values()),
+            "vram_total_MiB": max(total.values()) if total else None,
+            "vram_headroom_MiB": (max(total.values()) - max(peak.values()))
+            if total else None,
+            "vram_util_frac": round(max(peak.values()) / max(total.values()), 4)
+            if total else None,
+        }
+
+
 def classify(stdout: str, stderr: str, mp_log_dir: Path | None) -> tuple[bool, str]:
     blob = stdout + "\n" + stderr
     if mp_log_dir and mp_log_dir.is_dir():
@@ -105,10 +163,13 @@ print "FINAL_PE = $(pe)"
 
     lmp = os.environ.get("LMP_UMA", str(ROOT / "build-uma/lmp"))
     cmd = [lmp, "-in", inp.name, "-log", log.name]
+    sampler = VramSampler()
+    sampler.start(work / "vram_samples.csv")
     t0 = time.perf_counter()
     r = subprocess.run(cmd, cwd=work, env=os.environ.copy(),
                        capture_output=True, text=True)
     wall = time.perf_counter() - t0
+    vram = sampler.stop()
     (work / "stdout.txt").write_text(r.stdout)
     (work / "stderr.txt").write_text(r.stderr)
 
@@ -121,6 +182,7 @@ print "FINAL_PE = $(pe)"
         "artifact": str(art), "dtype": "float64",
         "pair_style": f"pair_style uma precision double devices {dev}",
     }
+    rec.update(vram)
 
     if r.returncode == 0 and log.is_file():
         text = log.read_text()
@@ -160,7 +222,9 @@ print "FINAL_PE = $(pe)"
     (out / "cell.json").write_text(json.dumps(rec, indent=2) + "\n")
     print(json.dumps({k: rec[k] for k in (
         "n", "natoms", "status", "oom", "functional",
-        "nvt_pair_ms_per_step", "final_T_K", "force_sum_abs") if k in rec}, indent=2))
+        "nvt_pair_ms_per_step", "final_T_K", "force_sum_abs",
+        "vram_peak_MiB_max", "vram_total_MiB", "vram_util_frac") if k in rec},
+        indent=2))
     print(f"NSWEEP_RECORD {out / 'cell.json'}")
     # Exit 0 even on OOM: OOM is a measurement, not a job failure.
     return 0

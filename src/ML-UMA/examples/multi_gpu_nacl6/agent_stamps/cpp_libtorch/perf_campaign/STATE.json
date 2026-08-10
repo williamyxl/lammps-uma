@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T13:33:45",
+  "stamp": "2026-08-10T16:01:35",
   "phase": "V6_W17_cuda_graph",
-  "status": "w17c_queued_monitored",
+  "status": "w17_closed_structural_product_w8nk",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -129,11 +129,10 @@
     }
   },
   "active_jobs": [
-    "21015028",
-    "21015029"
+    "21017619"
   ],
   "tick_log": "tick.log",
-  "next_action": "Drain W17c: poller w17c_poll.sh armed; on terminal run python w17_gate.py --job 21015029 --sys nacl6 --ngpu 2 --ver w17c --write; rc0 -> w17_submit_matrix.sh 21015029; rc1 -> structural close W17, keep W8nk",
+  "next_action": "W17 closed (host-sync in FairChem layer_norm, not fixable by re-export). Product stays W8nk. Active track: NaCl N-sweep max-size on 4xA100 (job 21017619 N=8 seed).",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2069,7 +2068,17 @@
       "torch_version": "2.8.0+cu128",
       "backward_capture_supported": true,
       "residual_risk": "graphed backward never exercised (W17b died in forward)"
-    }
+    },
+    "export_result": "W17_EXPORT_OK (no aten::rand, 4:49)",
+    "gate_result": "CAPTURE_STRUCTURAL_FAIL_HOST_SYNC",
+    "nvt_pair_ms_per_step": 161.18,
+    "delta_vs_w8nk_ms": -0.76,
+    "ef_pass": true,
+    "root_cause": "int(torch.sub(NumToTensor(size),1)) in FairChem uma nn/layer_norm.py under capture",
+    "host_sync_sites_in_TS": 35,
+    "files_affected": 23,
+    "verdict": "W17 CLOSED STRUCTURAL",
+    "promote": false
   },
   "handoff": "HANDOFF.md"
 }

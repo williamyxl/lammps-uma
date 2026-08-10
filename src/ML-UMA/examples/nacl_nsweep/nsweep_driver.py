@@ -105,16 +105,22 @@ def main() -> int:
 
     cells = load_cells()
     if a.status or not a.next:
-        print(f"{'N':>4} {'natoms':>8} {'status':>16} {'oom':>5} {'nvt_ms':>9} "
-              f"{'T_K':>7} {'parity':>14}")
+        print(f"{'N':>4} {'natoms':>8} {'status':>14} {'oom':>5} {'nvt_ms':>9} "
+              f"{'T_K':>6} {'VRAM_GiB':>16} {'use%':>6} {'parity':>14}")
         for n in sorted(cells):
             c = cells[n]
             pr = c.get("parity_rec", {})
             ms = c.get("nvt_pair_ms_per_step")
             T = c.get("final_T_K")
-            print(f"{n:>4} {c.get('natoms', 0):>8} {str(c.get('status')):>16} "
+            pk = c.get("vram_peak_MiB_max")
+            tot = c.get("vram_total_MiB")
+            vram = f"{pk / 1024:.1f}/{tot / 1024:.0f}" if pk and tot else "-"
+            uf = c.get("vram_util_frac")
+            print(f"{n:>4} {c.get('natoms', 0):>8} {str(c.get('status')):>14} "
                   f"{str(c.get('oom')):>5} {(f'{ms:.1f}' if ms else '-'):>9} "
-                  f"{(f'{T:.0f}' if T else '-'):>7} {str(pr.get('parity', '-')):>14}")
+                  f"{(f'{T:.0f}' if T else '-'):>6} {vram:>16} "
+                  f"{(f'{100 * uf:.0f}' if uf else '-'):>6} "
+                  f"{str(pr.get('parity', '-')):>14}")
         good = [n for n, c in cells.items() if ok(c)]
         bad = [n for n, c in cells.items() if not ok(c)]
         if good:
@@ -125,6 +131,15 @@ def main() -> int:
                if c.get("parity_rec", {}).get("parity") == "PASS"]
         if par:
             print(f"max parity-verified N = {max(par)} ({8 * max(par) ** 3} atoms)")
+        # VRAM headroom on the largest passing N tells us whether the ceiling
+        # is near, independently of waiting for the next OOM.
+        if good:
+            top = cells[max(good)]
+            pk, tot = top.get("vram_peak_MiB_max"), top.get("vram_total_MiB")
+            if pk and tot:
+                print(f"peak VRAM at N={max(good)}: {pk / 1024:.1f} GiB / "
+                      f"{tot / 1024:.0f} GiB ({100 * pk / tot:.0f}%), "
+                      f"headroom {(tot - pk) / 1024:.1f} GiB")
         nxt, why = next_n(cells, a.lo, a.hi, a.cap)
         print(f"\nnext: {nxt if nxt else 'DONE'}  ({why})")
 

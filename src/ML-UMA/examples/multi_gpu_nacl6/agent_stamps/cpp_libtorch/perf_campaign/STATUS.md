@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T13:33 CDT · **Handoff** [`HANDOFF.md`](HANDOFF.md) · W17c export `21015028` → NaCl@2 `21015029` (queued; est. start 17:35 CDT)
+**Stamp:** 2026-08-10T16:02 CDT · **Handoff** [`HANDOFF.md`](HANDOFF.md) · **W17 CLOSED STRUCTURAL** — product stays **W8nk**
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v6_w8nk_perf_push_77967fcb` (**CURRENT** — W17 CUDA graph)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -96,7 +96,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W17c in flight:** export `21015028` (capture-safe shapes) → NaCl@2 `21015029` (RECOMPILE=1, graph+edge pad).
+- **W17c DONE:** export `21015028` **OK** (`W17_EXPORT_OK`, no `aten::rand`, 4:49); gate `21015029` **CAPTURE FAIL** → **W17 closed structural**.
+- **Active track:** NaCl N-sweep max-size on 4×A100 — `nacl_nsweep/`, job `21017619` (N=8 seed).
 - Walltimes trimmed for backfill (export 4h→40m, gate 2h→1h); prior exports ran ~5 min. Est. start 17:35 CDT.
 - Drain automation: `w17c_poll.sh` (transition-only log → `w17c_poll.log`), `w17_gate.py` (path tag + E/F + speed → `gate_v6_*.json`).
 - Prior: W17b `21014028` structural fail on `_shape_as_tensor` H2D under capture.
