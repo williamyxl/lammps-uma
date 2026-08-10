@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-09T16:07:47 CDT · Loop **armed** · **Tier1 COMPLETE — turbo PASS vs merge ASE (NaCl+water)**
+**Stamp:** 2026-08-09T19:28:33 CDT · Loop **armed** · **Wave A COMPLETE PASS**
 **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT**)
 
 ## Locked speed baselines — do **not** re-run ASE/FC
@@ -44,10 +44,28 @@ ASE@1 merge oracle ms: general+merge **367**, umas_fast+merge **350** (single GP
 
 ## Next
 
-1. **DONE:** water merge-ASE force gate PASS @2/@4.
-2. Keep pushing speed (W5 / Tier2) with merge-ASE as E/F bar for turbo path.
-3. devices=1 fast re-export still optional.
+1. **Wave A COMPLETE** (W9+W5+attach). Next: Tier2 W6→W12 one+gate each; commit+push Wave A.
+2. Then Tier2 W6→W12 one+gate each until hard ceiling.
+3. devices=1 umas_fast+merge export required for product completeness.
 
 ## Constraints
 
 FP64 · `uma/kk` + Kokkos · 1 MPI · no Ray · full parent NL · no force-reduce skip.
+
+## Wave A unblock (tick71)
+- Water@2 `20985385` still **PENDING (Resources)** — holds water@4 `20985403` (`afterok`).
+- Cancelled dependent `20985386`/`20985387`; **NaCl@4** resubmitted independently as `20985402` (RECOMPILE=0; binary already good from `20984870`).
+- Active queue: `20985385` Resources | `20985402` Priority | `20985403` Dependency.
+
+## Wave A gates (live)
+| Suite | @2 | @4 | E/F vs merge ASE | notes |
+|-------|---:|---:|:----------------:|-------|
+| NaCl6 | **160.9** (`20984870`) | **92.7** (`20985402`) | PASS | W5/W9 |
+| water888 | **164.28** (`20985385`) | **96.25** (`20985403`) | PASS | attach max_e fix |
+
+Wave A **COMPLETE PASS** — both systems @2/@4 speed ≤ ASE/FC + E/F vs merge ASE.
+
+
+## Queue (live)
+- Wave A @2/@4: **COMPLETE PASS**. No pending gate jobs.
+

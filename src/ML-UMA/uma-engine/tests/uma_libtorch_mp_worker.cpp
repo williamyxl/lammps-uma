@@ -230,12 +230,14 @@ int main(int argc, char** argv) {
               : torch::empty({2, 0}, torch::TensorOptions().dtype(torch::kLong).device(dev));
       auto coff_t =
           (nedges > 0)
-              ? torch::from_blob(payload->coff_ptr(rank), {nedges, 3}, torch::kFloat64)
+              ? torch::from_blob(payload->coff_ptr(rank), {nedges, 3}, torch::kInt32)
                     .to(dev, /*non_blocking=*/true)
+                    .to(torch::kFloat64)
                     .contiguous()
               : torch::empty({0, 3},
                              torch::TensorOptions().dtype(torch::kFloat64).device(dev));
       // Tier0/W4: same-stream H2D is ordered before forward; no host sync here.
+      // W5: int32→FP64 cast on device before TorchScript (FairChem float offsets).
 
       pos_t = pos_t.set_requires_grad(true);
       auto pbc_t = torch::tensor({pbc[0] != 0, pbc[1] != 0, pbc[2] != 0},

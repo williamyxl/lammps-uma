@@ -1,29 +1,401 @@
 {
-  "phase": "4_plus_perf_p3c",
-  "stamp": "2026-08-08T19:00:00-05:00",
-  "status": "campaign_PASS",
-  "next": "none — hard ≤ASE/FC closed; optional P4b parent NL/publish or default NCCL",
-  "job_p3c": "20940474",
-  "job_p3c_hang": "20940376",
-  "job_p3a": "20934280",
-  "job_p2": "20933393",
-  "product_backend": "kokkos_libtorch_vesin",
-  "peer_transport": "nccl",
-  "peer_transport_default": "cuda_ipc",
-  "payload_fanout": "payload_shm",
-  "ms": {"1": 321.04, "2": 183.30, "4": 112.04},
-  "p3a_ms": {"1": 320.6, "2": 183.57, "4": 117.63},
-  "p2_ms": {"1": 321.54, "2": 190.80, "4": 140.90},
-  "p1_ms": {"1": 320.34, "2": 264.96, "4": 193.32},
-  "ase_ms": {"1": 396.5, "2": 193.9, "4": 115.2},
-  "fc_ms": {"1": 345.5, "2": 193.2, "4": 118.0},
-  "gap_vs_ase_ms": {"1": -75.46, "2": -10.6, "4": -3.16},
-  "gap_vs_fc_ms": {"1": -24.46, "2": -9.9, "4": -5.96},
-  "E_F_green": true,
-  "self_scale_green": true,
-  "hard_ase_fc_green": true,
-  "max_dF_vs_d1": 0.0,
-  "ms_source": "uma64_pair_log",
-  "canonical": "RESULTS.md",
-  "perf_summary": "../agent_stamps/cpp_libtorch/perf/summary_p3c_20940474.json"
+  "title": "NaCl 6\u00d76\u00d76 multi-GPU parity summary",
+  "natoms": 1728,
+  "structure": "src/ML-UMA/examples/multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz",
+  "reference": "ASE FairChem FP64 @ ngpu=1",
+  "uma_d1_reference": "uma/kk devices=1 @ ngpu=1 (same precision)",
+  "ase_ref_energy_eV_ngpu1": -5830.923720166599,
+  "kokkos_launch": "lmp -k on g ${NGPUS} -sf kk (ntasks=1, no MPI multi-GPU)",
+  "uma_pair_style": "pair_style uma/kk precision <mode> devices ${UMA_DEVICES}",
+  "fairchem_workers": "workers=${NGPUS} in one process",
+  "precision": "ASE + uma/kk double = FP64",
+  "parity_thresholds": {
+    "double": {
+      "abs_dE_max": 1e-08,
+      "force_max_abs_max": 1e-06,
+      "cosine_min": 0.999999999999
+    },
+    "mixed": {
+      "abs_dE_max": 0.0005,
+      "force_max_abs_max": 1e-05,
+      "cosine_min": 0.9999999999
+    }
+  },
+  "parity_gates_summary": {
+    "all_passed": false,
+    "n_checked": 3,
+    "n_passed": 1,
+    "gates": [
+      {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 2.1171432308619842e-05,
+          "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
+          "cosine_vs_uma_d1": 0.999999999999616
+        },
+        "detail": {
+          "abs_dE": false,
+          "force_max_abs": false,
+          "cosine": true
+        },
+        "passed": false
+      },
+      {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 2.117143139912514e-05,
+          "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
+          "cosine_vs_uma_d1": 0.999999999999616
+        },
+        "detail": {
+          "abs_dE": false,
+          "force_max_abs": false,
+          "cosine": true
+        },
+        "passed": false
+      },
+      {
+        "applicable": true,
+        "precision": "mixed",
+        "thresholds": {
+          "abs_dE_max": 0.0005,
+          "force_max_abs_max": 1e-05,
+          "cosine_min": 0.9999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 0.0002967607997561572,
+          "force_max_abs_vs_uma_d1": 7.009506225452711e-07,
+          "cosine_vs_uma_d1": 0.9999999999989734
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true,
+        "oracle": "ase_fairchem_float32_workers1"
+      }
+    ]
+  },
+  "results_parent": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/results",
+  "created_utc": "2026-08-10T00:27:10.423498+00:00",
+  "meta": {
+    "ngpus_present": [
+      1,
+      2,
+      4
+    ],
+    "missing": [],
+    "sources": {
+      "1": {
+        "gpu": null,
+        "checkpoint": "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt",
+        "natoms": null,
+        "ngpus": 1
+      },
+      "2": {
+        "gpu": null,
+        "checkpoint": "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt",
+        "natoms": null,
+        "ngpus": 2
+      },
+      "4": {
+        "gpu": null,
+        "checkpoint": "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt",
+        "natoms": null,
+        "ngpus": 4
+      }
+    }
+  },
+  "rows": [
+    {
+      "path": "ASE FP64",
+      "key": "ase",
+      "ngpu": 1,
+      "uma_devices": 4,
+      "energy_eV": -5830.923720166599,
+      "ms_per_eval": 8708.336877799999,
+      "abs_dE_vs_ase_ngpu1": 0.0,
+      "abs_dE_vs_ase_f64": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "force_max_norm_per_atom": 0.0,
+      "cosine": 1.0,
+      "abs_dE_vs_uma_d1": null,
+      "force_max_abs_vs_uma_d1": null,
+      "cosine_vs_uma_d1": null,
+      "parity_gate": null
+    },
+    {
+      "path": "ASE FP64",
+      "key": "ase",
+      "ngpu": 2,
+      "uma_devices": 4,
+      "energy_eV": -5830.9237201665965,
+      "ms_per_eval": 17546.826601,
+      "abs_dE_vs_ase_ngpu1": 2.7284841053187847e-12,
+      "abs_dE_vs_ase_f64": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "force_max_norm_per_atom": 0.0,
+      "cosine": 1.0,
+      "abs_dE_vs_uma_d1": null,
+      "force_max_abs_vs_uma_d1": null,
+      "cosine_vs_uma_d1": null,
+      "parity_gate": null
+    },
+    {
+      "path": "ASE FP64",
+      "key": "ase",
+      "ngpu": 4,
+      "uma_devices": 4,
+      "energy_eV": -5830.923720166596,
+      "ms_per_eval": 11263.506174,
+      "abs_dE_vs_ase_ngpu1": 3.637978807091713e-12,
+      "abs_dE_vs_ase_f64": 0.0,
+      "force_mae": 0.0,
+      "force_rmse": 0.0,
+      "force_max_abs": 0.0,
+      "force_max_norm_per_atom": 0.0,
+      "cosine": 1.0,
+      "abs_dE_vs_uma_d1": null,
+      "force_max_abs_vs_uma_d1": null,
+      "cosine_vs_uma_d1": null,
+      "parity_gate": null
+    },
+    {
+      "path": "FairChem FC",
+      "key": "fc",
+      "ngpu": 1,
+      "uma_devices": 4,
+      "energy_eV": -5830.923715251117,
+      "ms_per_eval": 4648.704194999999,
+      "abs_dE_vs_ase_ngpu1": 4.915482350043021e-06,
+      "abs_dE_vs_ase_f64": 4.915482350043021e-06,
+      "force_mae": null,
+      "force_rmse": null,
+      "force_max_abs": null,
+      "force_max_norm_per_atom": null,
+      "cosine": null,
+      "abs_dE_vs_uma_d1": null,
+      "force_max_abs_vs_uma_d1": null,
+      "cosine_vs_uma_d1": null,
+      "parity_gate": null
+    },
+    {
+      "path": "FairChem FC",
+      "key": "fc",
+      "ngpu": 2,
+      "uma_devices": 4,
+      "energy_eV": -5830.923715251116,
+      "ms_per_eval": 10364.6971226,
+      "abs_dE_vs_ase_ngpu1": 4.915483259537723e-06,
+      "abs_dE_vs_ase_f64": 4.915480531053618e-06,
+      "force_mae": null,
+      "force_rmse": null,
+      "force_max_abs": null,
+      "force_max_norm_per_atom": null,
+      "cosine": null,
+      "abs_dE_vs_uma_d1": null,
+      "force_max_abs_vs_uma_d1": null,
+      "cosine_vs_uma_d1": null,
+      "parity_gate": null
+    },
+    {
+      "path": "FairChem FC",
+      "key": "fc",
+      "ngpu": 4,
+      "uma_devices": 4,
+      "energy_eV": -5830.923715251116,
+      "ms_per_eval": 9861.448192599999,
+      "abs_dE_vs_ase_ngpu1": 4.915483259537723e-06,
+      "abs_dE_vs_ase_f64": 4.915479621558916e-06,
+      "force_mae": null,
+      "force_rmse": null,
+      "force_max_abs": null,
+      "force_max_norm_per_atom": null,
+      "cosine": null,
+      "abs_dE_vs_uma_d1": null,
+      "force_max_abs_vs_uma_d1": null,
+      "cosine_vs_uma_d1": null,
+      "parity_gate": null
+    },
+    {
+      "path": "uma/kk double",
+      "key": "uma_double",
+      "ngpu": 1,
+      "uma_devices": 1,
+      "energy_eV": -5830.923720166722,
+      "ms_per_eval": 6153.0069828,
+      "abs_dE_vs_ase_ngpu1": 1.227817847393453e-10,
+      "abs_dE_vs_ase_f64": 1.227817847393453e-10,
+      "force_mae": 1.5158049994882126e-07,
+      "force_rmse": 2.1794267593834002e-07,
+      "force_max_abs": 4.99965972469707e-07,
+      "force_max_norm_per_atom": 7.673305594281034e-07,
+      "cosine": 0.9999999999990611,
+      "abs_dE_vs_uma_d1": 0.0,
+      "force_max_abs_vs_uma_d1": 0.0,
+      "cosine_vs_uma_d1": 1.0,
+      "parity_gate": {
+        "applicable": true,
+        "precision": "double",
+        "passed": true,
+        "note": "devices=1 baseline (self)"
+      }
+    },
+    {
+      "path": "uma/kk double",
+      "key": "uma_double",
+      "ngpu": 2,
+      "uma_devices": 2,
+      "energy_eV": -5830.923741338154,
+      "ms_per_eval": 10415.710878400001,
+      "abs_dE_vs_ase_ngpu1": 2.117155509040458e-05,
+      "abs_dE_vs_ase_f64": 2.1171557818888687e-05,
+      "force_mae": 1.5608185680551355e-07,
+      "force_rmse": 2.207880509508902e-07,
+      "force_max_abs": 5.881311022082336e-07,
+      "force_max_norm_per_atom": 7.673305593203198e-07,
+      "cosine": 0.9999999999990395,
+      "abs_dE_vs_uma_d1": 2.1171432308619842e-05,
+      "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
+      "cosine_vs_uma_d1": 0.999999999999616,
+      "parity_gate": {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 2.1171432308619842e-05,
+          "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
+          "cosine_vs_uma_d1": 0.999999999999616
+        },
+        "detail": {
+          "abs_dE": false,
+          "force_max_abs": false,
+          "cosine": true
+        },
+        "passed": false
+      }
+    },
+    {
+      "path": "uma/kk double",
+      "key": "uma_double",
+      "ngpu": 4,
+      "uma_devices": 4,
+      "energy_eV": -5830.923741338153,
+      "ms_per_eval": 12650.997924799998,
+      "abs_dE_vs_ase_ngpu1": 2.117155418090988e-05,
+      "abs_dE_vs_ase_f64": 2.1171557818888687e-05,
+      "force_mae": 1.5608185680546466e-07,
+      "force_rmse": 2.207880509506993e-07,
+      "force_max_abs": 5.881311022359892e-07,
+      "force_max_norm_per_atom": 7.673305594008186e-07,
+      "cosine": 0.9999999999990398,
+      "abs_dE_vs_uma_d1": 2.117143139912514e-05,
+      "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
+      "cosine_vs_uma_d1": 0.999999999999616,
+      "parity_gate": {
+        "applicable": true,
+        "precision": "double",
+        "thresholds": {
+          "abs_dE_max": 1e-08,
+          "force_max_abs_max": 1e-06,
+          "cosine_min": 0.999999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 2.117143139912514e-05,
+          "force_max_abs_vs_uma_d1": 1.0000000000287557e-06,
+          "cosine_vs_uma_d1": 0.999999999999616
+        },
+        "detail": {
+          "abs_dE": false,
+          "force_max_abs": false,
+          "cosine": true
+        },
+        "passed": false
+      }
+    },
+    {
+      "path": "uma/kk mixed",
+      "key": "uma_mixed",
+      "ngpu": 1,
+      "uma_devices": 1,
+      "energy_eV": -5830.982421875,
+      "ms_per_eval": 5840.7010078,
+      "abs_dE_vs_ase_ngpu1": 0.05870170840080391,
+      "abs_dE_vs_ase_f64": 0.05870170840080391,
+      "force_mae": 1.0548093579429537e-06,
+      "force_rmse": 1.3967095758195002e-06,
+      "force_max_abs": 7.24342707256187e-06,
+      "force_max_norm_per_atom": 7.47877339227164e-06,
+      "cosine": 0.99999999996143,
+      "abs_dE_vs_uma_d1": 0.0,
+      "force_max_abs_vs_uma_d1": 0.0,
+      "cosine_vs_uma_d1": 1.0,
+      "parity_gate": {
+        "applicable": true,
+        "precision": "mixed",
+        "passed": true,
+        "note": "devices=1 baseline (self)"
+      }
+    },
+    {
+      "path": "uma/kk mixed",
+      "key": "uma_mixed",
+      "ngpu": 2,
+      "uma_devices": 2,
+      "energy_eV": -5830.923468866556,
+      "ms_per_eval": 24284.849453,
+      "abs_dE_vs_ase_ngpu1": 0.00025130004360107705,
+      "abs_dE_vs_ase_f64": 0.00025130004087259294,
+      "force_mae": 1.0607787323582755e-06,
+      "force_rmse": 1.403905431209802e-06,
+      "force_max_abs": 7.243427072728403e-06,
+      "force_max_norm_per_atom": 7.4787733921872285e-06,
+      "cosine": 0.9999999999610202,
+      "abs_dE_vs_uma_d1": 0.0002967607997561572,
+      "force_max_abs_vs_uma_d1": 7.009506225452711e-07,
+      "cosine_vs_uma_d1": 0.9999999999989734,
+      "parity_gate": {
+        "applicable": true,
+        "precision": "mixed",
+        "thresholds": {
+          "abs_dE_max": 0.0005,
+          "force_max_abs_max": 1e-05,
+          "cosine_min": 0.9999999999
+        },
+        "metrics": {
+          "abs_dE_vs_uma_d1": 0.0002967607997561572,
+          "force_max_abs_vs_uma_d1": 7.009506225452711e-07,
+          "cosine_vs_uma_d1": 0.9999999999989734
+        },
+        "detail": {
+          "abs_dE": true,
+          "force_max_abs": true,
+          "cosine": true
+        },
+        "passed": true,
+        "oracle": "ase_fairchem_float32_workers1"
+      }
+    }
+  ]
 }

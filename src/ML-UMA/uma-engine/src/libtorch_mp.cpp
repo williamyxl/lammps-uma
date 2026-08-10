@@ -185,12 +185,23 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
               << kokkos_peer::SharedPeerGatherSlot::transport_name(transport)
               << " shm_bytes=" << bytes << "\n";
   }
-  // Geometry/edge payload shm (pipe-tax cut).
+  // Geometry/edge payload shm (pipe-tax cut). W5: size max_e from atoms*max_neighbors.
   {
     rt->impl_->payload_path = rt->impl_->shm_path + "_payload";
-    rt->impl_->payload =
-        PayloadShm::create_file(rt->impl_->payload_path.c_str(), num_devices);
+    int64_t n_hint = PayloadShm::kMaxN;
+    if (const char* e = std::getenv("UMA_STRUCTURE_NATOMS")) {
+      if (*e) n_hint = std::strtoll(e, nullptr, 10);
+    } else if (const char* e = std::getenv("UMA_MP_NATOMS")) {
+      if (*e) n_hint = std::strtoll(e, nullptr, 10);
+    }
+    if (n_hint < 1) n_hint = PayloadShm::kMaxN;
+    const int64_t max_e =
+        PayloadShm::choose_max_e(n_hint, metadata.max_neighbors);
+    rt->impl_->payload = PayloadShm::create_file(
+        rt->impl_->payload_path.c_str(), num_devices, max_e);
     rt->impl_->payload->hdr->world = num_devices;
+    std::cerr << "uma LibtorchMpRuntime: payload max_e=" << max_e
+              << " n_hint=" << n_hint << "\n";
 #if defined(UMA_ENGINE_USE_CUDA)
     // V3: pin payload for faster worker H2D (pageable→device was part of wait).
     {
@@ -415,7 +426,10 @@ void LibtorchMpRuntime::rebuild_neighbors_full(torch::Device build_dev) {
     auto center_i = vg.edge_index.index({0});
     auto neighbor_j = vg.edge_index.index({1});
     edge_index_ = torch::stack({neighbor_j, center_i}, 0).contiguous();
-    cell_offsets_ = vg.shifts.to(build_dev, compute_dtype_).contiguous();
+    // W5: keep int32 image offsets until shm pack (cast on worker for model).
+    cell_offsets_ = vg.shifts.to(build_dev).contiguous();
+    // W9: publish the same wrapped frame vesin used (single wrap inside vesin).
+    pos0_ = vg.wrapped_pos.to(build_dev, compute_dtype_).contiguous();
     return;
   }
 #endif
@@ -456,7 +470,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   using clock = std::chrono::steady_clock;
   const auto t0 = clock::now();
 
-  pos0_ = wrap_positions_to_cell(pos0_, cell0_, pbc0_);
+  // W9: no parent CPU wrap — vesin wraps once on GPU and updates pos0_.
   const auto t_wrap = clock::now();
   rebuild_neighbors_full(build_dev);
   const auto t_nl = clock::now();
@@ -465,7 +479,11 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   // wake once gen is published; holding mu across pack/memcpy caused multi-10ms
   // ms_pub stalls under MD (water888 @4). Mutex unlock = release fence for gen.
   auto eidx_full = edge_index_.to(torch::kCPU).contiguous();
-  auto coff_full = cell_offsets_.to(torch::kCPU, torch::kFloat64).contiguous();
+  // W5: int32 image offsets through shm (exact in FP64 after worker cast).
+  auto coff_full =
+      cell_offsets_.defined()
+          ? cell_offsets_.to(torch::kCPU, torch::kInt32).contiguous()
+          : torch::Tensor();
   auto pos_cpu = pos0_.to(torch::kCPU, torch::kFloat64).contiguous();
   auto z_cpu = z0_.to(torch::kCPU, torch::kLong).contiguous();
   auto cell_cpu = cell0_.to(torch::kCPU, torch::kFloat64).contiguous();
@@ -507,7 +525,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   // Publish geometry + shards once into payload shm (pipe only wakes workers).
   PayloadShm* pay = impl_->payload;
   std::vector<int64_t*> eidx_ptrs(static_cast<size_t>(num_devices_));
-  std::vector<double*> coff_ptrs(static_cast<size_t>(num_devices_));
+  std::vector<int32_t*> coff_ptrs(static_cast<size_t>(num_devices_));
   for (int r = 0; r < num_devices_; ++r) {
     eidx_ptrs[static_cast<size_t>(r)] = pay->eidx_ptr(r);
     coff_ptrs[static_cast<size_t>(r)] = pay->coff_ptr(r);
@@ -524,15 +542,15 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   std::memcpy(pay->z_ptr(), z_cpu.data_ptr<int64_t>(),
               static_cast<size_t>(n) * sizeof(int64_t));
   const int64_t n_edges = eidx_full.size(1);
-  const double* coff_ptr =
-      (coff_full.defined() && coff_full.numel() > 0) ? coff_full.data_ptr<double>()
+  const int32_t* coff_ptr =
+      (coff_full.defined() && coff_full.numel() > 0) ? coff_full.data_ptr<int32_t>()
                                                      : nullptr;
   const auto t_pack0 = clock::now();
   if (!graph_shard::pack_shards_cpu(eidx_full.data_ptr<int64_t>(), coff_ptr, n_edges, n,
-                                    num_devices_, PayloadShm::kMaxE, pay->hdr->nedges,
+                                    num_devices_, pay->max_e, pay->hdr->nedges,
                                     eidx_ptrs.data(), coff_ptrs.data())) {
     throw std::runtime_error(
-        "LibtorchMpRuntime: pack_shards_cpu failed (nedges > kMaxE?)");
+        "LibtorchMpRuntime: pack_shards_cpu failed (nedges > max_e?)");
   }
   const auto t_pack1 = clock::now();
   pthread_mutex_lock(&pay->hdr->mu);

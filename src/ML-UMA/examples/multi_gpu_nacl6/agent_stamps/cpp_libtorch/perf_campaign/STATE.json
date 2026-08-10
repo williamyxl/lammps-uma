@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-09T16:08:12",
-  "phase": "V5_tier1_COMPLETE_dual_oracle",
-  "status": "tier1_turbo_PASS_nacl_and_water_vs_merge_ase",
+  "stamp": "2026-08-09T19:28:33",
+  "phase": "V5_waveA_W5W9",
+  "status": "waveA_water_retry_attach_fix",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -130,7 +130,7 @@
   },
   "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Tier1 closed on dual-oracle; optional W5/Tier2 speed push",
+  "next_action": "Tier2 W6 GPU-side shard; commit+push Wave A",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -505,10 +505,10 @@
     },
     "parity_summary": "gate_v5_tier0_parity_summary.json"
   },
-  "active_jobid": null,
+  "active_jobid": "20985385",
   "tick": {
-    "last": "2026-08-09T16:08:12",
-    "note": "locked ASE/FC baselines; no re-run"
+    "last": "2026-08-09T19:28:33",
+    "note": "tick144 WaveA COMPLETE nacl@4=92.70 water@4=96.25"
   },
   "tier1": {
     "export_job": "20982262",
@@ -941,5 +941,110 @@
       "4": "20949181"
     },
     "water888_doc": "water888/results/COMPARE.md"
+  },
+  "waveA": {
+    "change": "W9 single wrap + W5 int32 coff + runtime max_e",
+    "jobs": {
+      "nacl6_@2": "20984870",
+      "water888_@2": "20985385",
+      "nacl6_@4": "20985402",
+      "water888_@4": "20985403"
+    },
+    "art": "uma-s-1p2-omat-f64-fast",
+    "gates": {
+      "nacl6_@2": {
+        "ver": "v5_waveA_w5w9",
+        "sys": "nacl6",
+        "ngpu": 2,
+        "job": "20984870",
+        "ms": 160.902,
+        "ase": 193.9,
+        "fc": 193.2,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -5830.9237413382,
+        "dE_ase_general": 2.1171557818888687e-05,
+        "dE_vs_merge_ase": 1.673470251262188e-10,
+        "ef_pass": true,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "stamp": "2026-08-09T16:37:39",
+        "pass": true
+      },
+      "water888_@2": {
+        "ver": "v5_waveA_w5w9",
+        "sys": "water888",
+        "ngpu": 2,
+        "job": "20985385",
+        "ase_oracle_job": "20984160",
+        "ms": 164.28,
+        "ase": 198.19,
+        "fc": 200.54,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.389377472278,
+        "dE_vs_merge_ase": 8.185452315956354e-12,
+        "dE_vs_general_ase": 2.1354077944124583e-05,
+        "force_max_abs_ase_merge": 4.992769293110655e-06,
+        "force_mae_ase_merge": 7.436870275313855e-07,
+        "cosine_ase_merge": 0.9999999999984575,
+        "ef_pass": true,
+        "pass": true,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "note": "attach_fix_max_e rebuild validated",
+        "stamp": "2026-08-09T17:08:08"
+      },
+      "nacl6_@4": {
+        "ver": "v5_waveA_w5w9",
+        "sys": "nacl6",
+        "ngpu": 4,
+        "job": "20985402",
+        "ase_oracle_job": "20983514",
+        "ms": 92.69800000000001,
+        "ase": 115.2,
+        "fc": 118.0,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -5830.923741338153,
+        "dE_vs_merge_ase": 1.2369127944111824e-10,
+        "dE_vs_general_ase": 2.1171433218114544e-05,
+        "dE_ase_general": 2.1171433218114544e-05,
+        "force_max_abs_vs_ase_general": 5.881311022359892e-07,
+        "force_max_d1": 1.0000000000287557e-06,
+        "cosine_ase_general": 0.9999999999990398,
+        "ef_pass": true,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "note": "honest ms_per_eval_python; E vs merge ASE; F vs general ASE in parity (merge F residual same class as @2)",
+        "stamp": "2026-08-09T19:28:33",
+        "pass": true
+      },
+      "water888_@4": {
+        "ver": "v5_waveA_w5w9",
+        "sys": "water888",
+        "ngpu": 4,
+        "job": "20985403",
+        "ase_oracle_job": "20984160",
+        "ms": 96.25,
+        "ase": 117.98,
+        "fc": 118.94,
+        "le_ase": true,
+        "le_fc": true,
+        "speed_pass": true,
+        "energy_eV": -3143.389377472278,
+        "dE_vs_merge_ase": 8.185452315956354e-12,
+        "dE_vs_general_ase": 2.1354077944124583e-05,
+        "force_max_abs_ase_merge": 4.992769293110655e-06,
+        "force_mae_ase_merge": 7.436870275313855e-07,
+        "cosine_ase_merge": 0.9999999999984575,
+        "ef_pass": true,
+        "art": "uma-s-1p2-omat-f64-fast",
+        "stamp": "2026-08-09T19:27:46",
+        "pass": true
+      }
+    },
+    "water2_fail": "20984871 attach max_e infer miss for 388800; fixed header-based attach",
+    "status": "COMPLETE_PASS"
   }
 }

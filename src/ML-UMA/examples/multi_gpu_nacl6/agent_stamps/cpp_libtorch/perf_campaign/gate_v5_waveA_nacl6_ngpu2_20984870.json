@@ -1,0 +1,19 @@
+{
+  "ver": "v5_waveA_w5w9",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "20984870",
+  "ms": 160.902,
+  "ase": 193.9,
+  "fc": 193.2,
+  "le_ase": true,
+  "le_fc": true,
+  "speed_pass": true,
+  "energy_eV": -5830.9237413382,
+  "dE_ase_general": 2.1171557818888687e-05,
+  "dE_vs_merge_ase": 1.673470251262188e-10,
+  "ef_pass": true,
+  "art": "uma-s-1p2-omat-f64-fast",
+  "stamp": "2026-08-09T16:37:39",
+  "pass": true
+}

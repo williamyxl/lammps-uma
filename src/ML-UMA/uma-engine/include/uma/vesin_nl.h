@@ -32,10 +32,11 @@ inline void require_cuda_tensor(const torch::Tensor& t, const char* name) {
 }
 
 // Fractional wrap on device — mirrors graspa / neighbor_list_pbc wrap.
-inline torch::Tensor wrap_positions_cuda(const torch::Tensor& pos_cuda,
-                                         const torch::Tensor& cell_cuda,
-                                         const torch::Tensor& pbc_cuda,
-                                         torch::ScalarType float_dtype) {
+// Optional inv_cell skips linalg_inv when the caller already has it (W9).
+inline torch::Tensor wrap_positions_cuda(
+    const torch::Tensor& pos_cuda, const torch::Tensor& cell_cuda,
+    const torch::Tensor& pbc_cuda, torch::ScalarType float_dtype,
+    const torch::Tensor& inv_cell_opt = torch::Tensor()) {
   require_cuda_tensor(pos_cuda, "pos_cuda");
   require_cuda_tensor(cell_cuda, "cell_cuda");
   require_cuda_tensor(pbc_cuda, "pbc_cuda");
@@ -46,7 +47,11 @@ inline torch::Tensor wrap_positions_cuda(const torch::Tensor& pos_cuda,
     throw std::runtime_error("pos_cuda must be [N, 3]");
   }
 
-  auto inv_cell = torch::linalg_inv(cell);
+  auto inv_cell =
+      (inv_cell_opt.defined() && inv_cell_opt.scalar_type() == float_dtype &&
+       inv_cell_opt.device() == pos.device())
+          ? inv_cell_opt
+          : torch::linalg_inv(cell);
   auto frac = pos.matmul(inv_cell);
 
   torch::Tensor pbc_mask;
@@ -131,11 +136,13 @@ inline VesinGraphDevice vesin_build_graph_cuda_impl(torch::Tensor pos_cuda,
                                                     bool full_directed,
                                                     torch::ScalarType float_dtype) {
   // vesin-torch cell_list requires float64 points/box regardless of MLIP dtype.
+  // W9: wrap once; reuse for vesin + wrapped_pos (product path is FP64).
   constexpr torch::ScalarType kVesinComputeDtype = torch::kFloat64;
-  auto pos_wrapped =
-      wrap_positions_cuda(pos_cuda, cell_cuda, pbc_cuda, kVesinComputeDtype);
-  auto pos_vesin = pos_wrapped.contiguous();
   auto cell_vesin = cell_cuda.to(kVesinComputeDtype).contiguous();
+  auto inv_cell = torch::linalg_inv(cell_vesin);
+  auto pos_wrapped = wrap_positions_cuda(pos_cuda, cell_cuda, pbc_cuda,
+                                         kVesinComputeDtype, inv_cell);
+  auto pos_vesin = pos_wrapped.contiguous();
   auto pbc_vesin = pbc_cuda.contiguous();
 
   auto nl = c10::make_intrusive<vesin_torch::NeighborListHolder>(
@@ -160,8 +167,10 @@ inline VesinGraphDevice vesin_build_graph_cuda_impl(torch::Tensor pos_cuda,
   auto shifts = S;
   auto shifts_cart =
       shifts_cart_from_unit_shifts(shifts, cell_cuda, float_dtype);
-  auto wrapped_pos =
-      wrap_positions_cuda(pos_cuda, cell_cuda, pbc_cuda, float_dtype);
+  // Same wrapped frame; cast only if MLIP dtype differs from vesin FP64.
+  auto wrapped_pos = (float_dtype == kVesinComputeDtype)
+                         ? pos_wrapped
+                         : pos_wrapped.to(float_dtype);
 
   if (max_neighbors > 0 && edge_index.size(1) > 0) {
     // Re-index i/j after possible dim fix; use current edge_index rows.
