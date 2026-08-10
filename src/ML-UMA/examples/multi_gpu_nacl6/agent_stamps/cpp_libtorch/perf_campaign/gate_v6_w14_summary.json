@@ -1,0 +1,34 @@
+{
+  "ver": "w14",
+  "stamp": "2026-08-10T09:05:49",
+  "change": "async_pin_d2h_stream_sync",
+  "ef_all_pass": true,
+  "promote_default": false,
+  "floor_water4_clear": false,
+  "water4_gain_vs_w8nk_ms": 0.46000000000000796,
+  "nacl4_regress_gt1ms": true,
+  "reason": "NO_PROMOTE: water@4 gain 0.46ms <1 and still >ASE; NaCl@4 NVT +2.14ms",
+  "cells": {
+    "nacl6_@2": {
+      "nvt": 197.02999999999997,
+      "sp": 161.81,
+      "job": "21010851"
+    },
+    "nacl6_@4": {
+      "nvt": 94.23200000000001,
+      "sp": 94.41,
+      "job": "21010852"
+    },
+    "water888_@2": {
+      "nvt": 165.33,
+      "sp": 166.65,
+      "job": "21010853"
+    },
+    "water888_@4": {
+      "nvt": 95.28399999999999,
+      "sp": 100.74,
+      "job": "21010854"
+    }
+  },
+  "product_remains": "W8nk"
+}

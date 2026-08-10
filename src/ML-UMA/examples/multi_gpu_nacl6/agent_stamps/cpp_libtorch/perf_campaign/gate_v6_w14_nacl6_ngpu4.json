@@ -1,0 +1,18 @@
+{
+  "ver": "w14",
+  "sys": "nacl6",
+  "ngpu": 4,
+  "job": "21010852",
+  "nvt_pair_ms_per_step": 94.23200000000001,
+  "ms_sp": 94.41,
+  "baseline_w8nk_nvt": 92.097,
+  "delta_vs_w8nk_ms": 2.1350000000000193,
+  "ase_ufast": 164.5,
+  "le_ase": true,
+  "delta_vs_ase_ms": -70.26799999999999,
+  "dE_vs_merge_ase": 1.2460077414289117e-10,
+  "force_max_abs": 4.999896874996468e-07,
+  "ef_pass": true,
+  "stamp": "2026-08-10T09:05:49",
+  "pass": true
+}

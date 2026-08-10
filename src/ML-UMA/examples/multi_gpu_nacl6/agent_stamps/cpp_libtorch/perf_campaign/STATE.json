@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T09:00:42",
+  "stamp": "2026-08-10T09:05:49",
   "phase": "V6_from_W8nk",
-  "status": "w14_nacl2_PASS_sp_flat_nvt_noisy",
+  "status": "w14_NO_PROMOTE_product_W8nk",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -128,14 +128,9 @@
       "note": "NCCL default OK; water@4 improved 145->126 but still +8 vs ASE"
     }
   },
-  "active_jobs": [
-    "21010851",
-    "21010852",
-    "21010853",
-    "21010854"
-  ],
+  "active_jobs": [],
   "tick_log": "tick.log",
-  "next_action": "Gate W14 E/F + NVT vs W8nk; promote if water@4\u226494.5 or \u22651ms gain",
+  "next_action": "W15 devices=1 *-f64-fast re-export; W16 skip (force_ar negligible)",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -1875,6 +1870,76 @@
     "speed_pass": true,
     "promote_default": false,
     "stamp": "2026-08-10T09:00:42",
+    "pass": true
+  },
+  "w14_summary": {
+    "ver": "w14",
+    "stamp": "2026-08-10T09:05:49",
+    "change": "async_pin_d2h_stream_sync",
+    "ef_all_pass": true,
+    "promote_default": false,
+    "floor_water4_clear": false,
+    "water4_gain_vs_w8nk_ms": 0.46000000000000796,
+    "nacl4_regress_gt1ms": true,
+    "reason": "NO_PROMOTE: water@4 gain 0.46ms <1 and still >ASE; NaCl@4 NVT +2.14ms",
+    "cells": {
+      "nacl6_@2": {
+        "nvt": 197.02999999999997,
+        "sp": 161.81,
+        "job": "21010851"
+      },
+      "nacl6_@4": {
+        "nvt": 94.23200000000001,
+        "sp": 94.41,
+        "job": "21010852"
+      },
+      "water888_@2": {
+        "nvt": 165.33,
+        "sp": 166.65,
+        "job": "21010853"
+      },
+      "water888_@4": {
+        "nvt": 95.28399999999999,
+        "sp": 100.74,
+        "job": "21010854"
+      }
+    },
+    "product_remains": "W8nk"
+  },
+  "w14_nacl6_@4": {
+    "ver": "w14",
+    "sys": "nacl6",
+    "ngpu": 4,
+    "job": "21010852",
+    "nvt_pair_ms_per_step": 94.23200000000001,
+    "ms_sp": 94.41,
+    "baseline_w8nk_nvt": 92.097,
+    "delta_vs_w8nk_ms": 2.1350000000000193,
+    "ase_ufast": 164.5,
+    "le_ase": true,
+    "delta_vs_ase_ms": -70.26799999999999,
+    "dE_vs_merge_ase": 1.2460077414289117e-10,
+    "force_max_abs": 4.999896874996468e-07,
+    "ef_pass": true,
+    "stamp": "2026-08-10T09:05:49",
+    "pass": true
+  },
+  "w14_water888_@4": {
+    "ver": "w14",
+    "sys": "water888",
+    "ngpu": 4,
+    "job": "21010854",
+    "nvt_pair_ms_per_step": 95.28399999999999,
+    "ms_sp": 100.74,
+    "baseline_w8nk_nvt": 95.744,
+    "delta_vs_w8nk_ms": -0.46000000000000796,
+    "ase_ufast": 94.5,
+    "le_ase": false,
+    "delta_vs_ase_ms": 0.7839999999999918,
+    "dE_vs_merge_ase": 8.185452315956354e-12,
+    "force_max_abs": 4.992769293110655e-06,
+    "ef_pass": true,
+    "stamp": "2026-08-10T09:05:49",
     "pass": true
   }
 }

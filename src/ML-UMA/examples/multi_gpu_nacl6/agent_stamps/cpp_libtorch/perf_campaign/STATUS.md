@@ -1,6 +1,6 @@
 # uma/kk perf campaign — living status
 
-**Stamp:** 2026-08-10T09:00 CDT · W14 NaCl@2 E/F PASS; SP **161.81** (flat); NVT 197 = vesin spike noise — matrix continues
+**Stamp:** 2026-08-10T09:05 CDT · **W14 NO_PROMOTE** · product stays **W8nk** · water@4 95.28 (ΔW8nk -0.46; still +0.78 vs ASE)
 **Matrix:** [`MATRIX.md`](MATRIX.md) · **Settings docs:** [`settings_docs/`](settings_docs/README.md) · **State:** `STATE.json` · Plan: `v5_max_perf_push_82db7365.plan.md` (**CURRENT** — Tier K after W8-fix @4)
 
 ## Locked speed baselines — `general` only (do **not** re-run)
@@ -87,8 +87,8 @@ FP64 · 1 MPI · no Ray · full parent NL · no force-reduce skip.
 Wave A **COMPLETE PASS**.
 
 ## Queue (live)
-- **W14 NaCl@2** SP flat; **water@2** NVT **165.33** (ΔW8nk +0.51) E/F PASS.
-- Waiting: NaCl@4 `21010852`; water@4 `21010854`.
+- **W14 COMPLETE / NO_PROMOTE** — E/F PASS; water@4 NVT **95.28** (W8nk 95.74, ASE 94.5); NaCl@4 NVT **94.23** (W8nk 92.10, +2.14).
+- Product remains **W8nk**. Next: W15 devices=1 ufast export (W16 skip — force_ar ≪1 ms in W13).
 
 
 ## Tier2 W6 (COMPLETE PASS)
