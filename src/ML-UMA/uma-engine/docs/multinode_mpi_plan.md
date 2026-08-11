@@ -326,8 +326,24 @@ flowchart TD
 ```
 
 ### M0 — Build and launch scaffold
-Build `build-uma-mpi/lmp` (`BUILD_MPI=ON`, `PKG_KOKKOS=ON`). Bind one GPU per rank (`srun --gpus-per-task=1`, `-k on g 1 -sf kk`). Verify a non-UMA Kokkos pair style runs 2 nodes × 4 ranks.
-**Gate:** 8-rank LJ NVT reproduces the serial trajectory.
+
+Build `build-uma-mn/lmp` with `BUILD_MPI=ON` and **`PKG_KOKKOS=OFF`**. Bind one
+GPU per rank (`srun --gpus-per-task=1`). Verify a non-UMA pair style runs
+2 nodes × 4 ranks.
+
+**Kokkos is OFF for M0–M5.** The shipped product is `pair_style uma …
+(W8-fix NCCL, **no Kokkos**)` with `UMA_USE_KOKKOS=0`, and §8's own table says
+Kokkos is *not* needed for multi-node correctness: a plain `BUILD_MPI=ON`
+non-Kokkos LAMMPS with `pair_style uma` and one GPU per rank is functionally
+equivalent. Enabling it here would validate a configuration we do not ship,
+put the M2 zero-copy handoff on M0's critical path, and make any M0–M5 failure
+ambiguous between the scaffold and Kokkos. It is introduced **at M6**, where
+the Scheme C halo genuinely needs `pack_forward_comm_kokkos` + CUDA-aware MPI
+(`UMA_MN_KOKKOS=1`).
+
+**Gate:** 8-rank LJ NVT reproduces the serial trajectory (1e-6 relative on
+final temperature and PE; 100 LJ steps under a different decomposition diverge
+chaotically at round-off, while a real decomposition bug is orders larger).
 
 ### M0.5 — Full-precision output (prerequisite for every later gate)
 
@@ -364,7 +380,11 @@ otherwise every downstream parity claim is limited by file formatting.
 Extend [`export_wrapper.py`](../python/export_wrapper.py) to return `(node_energy[N], total_E)`; carry per-atom element references and `denorm` through `postprocess.cpp`. Export `uma-s-1p2-omat-f64-fast-dd`.
 **Gate:** `|Σ node_e − E_total| ≤ 1e-12` relative, on NaCl6 and water888. Serial forces unchanged.
 
-### M2 — Zero-copy device handoff (Kokkos gate)
+### M2 — Zero-copy device handoff (Kokkos gate) — **deferred to just before M6**
+
+> Rev 2: this milestone only matters if Kokkos is in the picture, and Kokkos is
+> now off until M6. Run it immediately before M6, not between M1 and M3.
+> M3/M4/M5 do not depend on it.
 `PairUMAKokkos::compute` passes `atomKK->k_x.view<DeviceType>()` to a new `Predictor::predict_device`, receives device forces, no host staging. Fence Kokkos ↔ Torch stream.
 **Gate:** bit-identical E/F vs the host path; measurable drop in the pair-style prologue.
 

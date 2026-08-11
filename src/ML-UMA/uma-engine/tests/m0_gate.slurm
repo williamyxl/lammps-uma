@@ -13,9 +13,14 @@
 
 # M0 GATE (plan sec 9): "8-rank LJ NVT reproduces the serial trajectory."
 #
-# Deliberately uses a NON-UMA Kokkos pair style (lj/cut/kk). The point is to
-# prove the multi-node launch scaffold works -- MPI build, one GPU per rank,
-# 2 nodes x 4 ranks, Kokkos on device -- BEFORE any UMA code is involved.
+# Deliberately uses a NON-UMA pair style (lj/cut). The point is to prove the
+# multi-node launch scaffold works -- MPI build, one GPU per rank,
+# 2 nodes x 4 ranks -- BEFORE any UMA code is involved.
+#
+# NO KOKKOS. The product recipe is 'no Kokkos' (UMA_USE_KOKKOS=0), and plan
+# sec 8 states Kokkos is not needed for multi-node correctness. It is
+# introduced only at M6 for the halo exchange. Testing the scaffold with
+# '-k on -sf kk' here would validate a configuration we do not ship.
 # If this fails, nothing downstream can be trusted, and the failure is in the
 # scaffold rather than in the potential.
 set -uo pipefail
@@ -61,9 +66,9 @@ EOF
 
 echo "=== serial reference (1 rank) ==="
 "${LMP}" -in in.lj -log log.serial 2>&1 | tail -3
-echo "=== 8 ranks, 2 nodes, one GPU per rank, Kokkos ==="
+echo "=== 8 ranks, 2 nodes, one GPU per rank (no Kokkos) ==="
 srun --ntasks=8 --gpus-per-task=1 --cpu-bind=cores \
-  "${LMP}" -k on g 1 -sf kk -in in.lj -log log.mpi8 2>&1 | tail -3
+  "${LMP}" -in in.lj -log log.mpi8 2>&1 | tail -3
 
 python3 - <<'PY'
 import re, json, pathlib
