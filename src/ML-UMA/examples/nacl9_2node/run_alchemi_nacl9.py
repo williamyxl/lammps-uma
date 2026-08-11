@@ -49,6 +49,12 @@ def main() -> int:
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--sp-repeats", type=int, default=3)
     ap.add_argument("--md-warmup-steps", type=int, default=2)
+    ap.add_argument("--strategy", default="graph_partition",
+                    choices=("graph_partition", "halo"),
+                    help="halo replicates owned+ghost per rank, so per-rank VRAM "
+                         "does NOT fall with rank count (measured 37.2 GiB/rank "
+                         "at 2 ranks -> OOM). graph_partition shards the node set, "
+                         "which is what nvalchemi's docs recommend for eSCN/UMA.")
     a = ap.parse_args()
 
     job = os.environ.get("SLURM_JOB_ID", "manual")
@@ -97,45 +103,64 @@ def main() -> int:
         "temperature_K": a.temperature, "timestep_fs": a.timestep_fs,
         "thermostat_time_fs": a.thermostat_time_fs, "job": job,
         "merge_mole": True, "integrator": "NVTNoseHoover",
-        "strategy": "halo (DomainConfig default)",
-        "cold_start_excluded": True,
+                "cold_start_excluded": True,
     }
 
     dt_t = getattr(torch, a.dtype)
     data = AtomicData.from_atoms(atoms, dtype=dt_t)   # float32 default -> pass dtype
     batch = Batch.from_data_list([data]).to(device)
-    nl_hooks = list(model.make_neighbor_hooks())
-    ctx = HookContext(batch=batch, model=model, global_rank=rank, workflow=None)
-    for h in nl_hooks:
-        h(ctx, DynamicsStage.BEFORE_COMPUTE)
 
-    for _ in range(max(0, a.warmup)):
-        _w = model(batch)
-        del _w
-    torch.cuda.synchronize()
-    sp = []
-    for _ in range(max(1, a.sp_repeats)):
+    # The standalone single point calls model(batch) directly, i.e. the FULL
+    # system on EVERY rank with no decomposition -- DomainParallel is not
+    # involved until the MD block below. At 5832 atoms that needs ~37 GiB/rank
+    # and OOMs on a 40 GiB A100 regardless of --strategy, which is exactly what
+    # the first two smoke runs hit. Skip it when the system is too large for a
+    # single GPU and let the decomposed MD block produce E/F instead.
+    sp_atom_cap = int(os.environ.get("ALCHEMI_SP_ATOM_CAP", "2048"))
+    run_sp = len(atoms) <= sp_atom_cap
+    out = None
+    if run_sp:
+        nl_hooks = list(model.make_neighbor_hooks())
+        ctx = HookContext(batch=batch, model=model, global_rank=rank,
+                          workflow=None)
+        for h in nl_hooks:
+            h(ctx, DynamicsStage.BEFORE_COMPUTE)
+        for _ in range(max(0, a.warmup)):
+            _w = model(batch)
+            del _w
         torch.cuda.synchronize()
-        t0 = time.perf_counter()
-        out = model(batch)
-        torch.cuda.synchronize()
-        sp.append((time.perf_counter() - t0) * 1e3)
-    rec["sp_ms"] = float(np.median(sp))
-    rec["sp_ms_all"] = [round(x, 2) for x in sp]
+        sp = []
+        for _ in range(max(1, a.sp_repeats)):
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            out = model(batch)
+            torch.cuda.synchronize()
+            sp.append((time.perf_counter() - t0) * 1e3)
+        rec["sp_ms"] = float(np.median(sp))
+        rec["sp_ms_all"] = [round(x, 2) for x in sp]
+    else:
+        rec["sp_skipped"] = (
+            f"natoms={len(atoms)} > {sp_atom_cap}: undecomposed single point "
+            f"needs the whole system on one GPU (~37 GiB at 5832 atoms)")
+        del batch
 
-    e = float(out["energy"].reshape(-1)[0].item())
-    f = out["forces"].detach().to(torch.float64).cpu().numpy()
-    rec["energy_eV"] = e
-    rec["energy_per_atom_eV"] = e / len(atoms)
+    if out is not None:
+        e = float(out["energy"].reshape(-1)[0].item())
+        f = out["forces"].detach().to(torch.float64).cpu().numpy()
+    else:
+        e, f = None, None
     rec["param_dtype"] = str(next(
         p.dtype for p in model.predict_unit.model.parameters()
         if p.is_floating_point()))
     rec["precision_ok"] = rec["param_dtype"] == f"torch.{a.dtype}"
-    rec["force_absmax"] = float(np.abs(f).max())
-    rec["force_sum_abs"] = float(np.abs(f.sum(axis=0)).max())
-    rec.update(periodicity_report(f))
+    if e is not None and f is not None:
+        rec["energy_eV"] = e
+        rec["energy_per_atom_eV"] = e / len(atoms)
+        rec["force_absmax"] = float(np.abs(f).max())
+        rec["force_sum_abs"] = float(np.abs(f.sum(axis=0)).max())
+        rec.update(periodicity_report(f))
 
-    if ORACLE_NPZ.is_file():
+    if ORACLE_NPZ.is_file() and f is not None:
         o = np.load(ORACLE_NPZ)
         fr, er = o["forces"], float(o["energy_eV"])
         if fr.shape == f.shape:
@@ -177,7 +202,11 @@ def main() -> int:
             mesh = DistributedManager().initialize_mesh(
                 mesh_shape=(world,), mesh_dim_names=("domain",))
             cut = float(getattr(model, "cutoff", 6.0) or 6.0)
-            dcfg = DomainConfig(cutoff=cut, skin=0.5, mesh=mesh)
+            from nvalchemi.distributed.config import StrategyKind
+            strat = (StrategyKind.GRAPH_PARTITION
+                     if a.strategy == "graph_partition" else StrategyKind.HALO)
+            dcfg = DomainConfig(cutoff=cut, skin=0.5, mesh=mesh, strategy=strat)
+            rec["strategy"] = str(strat.value)
             if nwarm:
                 with DomainParallel(dynamics=mk(nwarm), config=dcfg,
                                     n_steps=nwarm) as wd:
@@ -220,7 +249,8 @@ def main() -> int:
     if rank == 0:
         d = EX / "results" / f"alchemi_ngpu{a.ngpu}_{job}"
         d.mkdir(parents=True, exist_ok=True)
-        np.savez(d / "forces.npz", forces=f, energy_eV=np.array(e))
+        if f is not None:
+            np.savez(d / "forces.npz", forces=f, energy_eV=np.array(e))
         (d / "timing.json").write_text(json.dumps(rec, indent=2) + "\n")
         print(json.dumps(rec, indent=2))
         print(f"ALCHEMI_RECORD {d / 'timing.json'}")
