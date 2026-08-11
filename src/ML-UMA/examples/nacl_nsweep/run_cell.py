@@ -192,12 +192,16 @@ print "FINAL_PE = $(pe)"
             rec["sp_ms"] = blocks[1].get("pair_ms_per_step")
             rec["nvt_pair_ms_per_step"] = blocks[2].get("pair_ms_per_step")
             rec["nvt_loop_ms_per_step"] = blocks[2].get("loop_ms_per_step")
-        for key, pat in (("energy_eV", r"FIRST_PE = (\S+)"),
-                         ("final_T_K", r"FINAL_T = (\S+)"),
-                         ("final_PE_eV", r"FINAL_PE = (\S+)")):
-            m = re.search(pat, text)
-            if m:
-                rec[key] = float(m.group(1))
+        # Require a numeric value: the log also contains the echoed input line
+        # (`print "FIRST_PE = $(pe)"`), and \S+ matched that literal, raising
+        # ValueError on '$(pe)"' and masking the real failure.
+        num = r"([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)"
+        for key, pat in (("energy_eV", rf"FIRST_PE = {num}"),
+                         ("final_T_K", rf"FINAL_T = {num}"),
+                         ("final_PE_eV", rf"FINAL_PE = {num}")):
+            hits = re.findall(pat, text)
+            if hits:
+                rec[key] = float(hits[-1])
         if dump.is_file():
             frames, _ = parse_lammps_dump_frames(dump)
             f = frames[0]

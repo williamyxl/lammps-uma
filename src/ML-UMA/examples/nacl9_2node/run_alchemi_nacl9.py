@@ -78,8 +78,12 @@ def main() -> int:
         tf32=False, activation_checkpointing=False, merge_mole=True,
         compile=False, external_graph_gen=False)
     settings.base_precision_dtype = getattr(torch, a.dtype)
+    # fairchem asserts device in ["cpu","cuda"] -- a "cuda:N" string fails.
+    # torch.cuda.set_device pins the rank's GPU, so bare "cuda" is correct.
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
     model = UMAWrapper.from_checkpoint(
-        str(CKPT), task_name="omat", device=str(device),
+        str(CKPT), task_name="omat", device=device.type,
         inference_settings=settings)
     eff = model.predict_unit.inference_settings.base_precision_dtype
     if eff is not getattr(torch, a.dtype):
