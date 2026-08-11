@@ -231,6 +231,15 @@ int main(int argc, char** argv) {
       int32_t gen = 0;
       read_all(STDIN_FILENO, &gen, sizeof(gen));
 
+      // W18: instrument the block between the wake and t_fwd0. W13 showed
+      // ~33.7 ms/step (35% of the step) inside ms_wait_workers that no counter
+      // covers; ms_fwd/ms_bwd only bracket the model call. Optimizing an
+      // unmeasured region is guesswork, so these land before any change.
+      using w18_clock = std::chrono::steady_clock;
+      const auto t_w18_h2d0 = w18_clock::now();
+      double ms_h2d = 0.0, ms_wshard = 0.0, ms_pad = 0.0, ms_prep = 0.0;
+      double ms_bar_pre_bwd = 0.0, ms_post = 0.0;
+
       // Parent does not rewrite payload until all ranks return ok — safe to read
       // after gen matches without holding the mutex through H2D.
       pthread_mutex_lock(&payload->hdr->mu);
@@ -272,17 +281,23 @@ int main(int argc, char** argv) {
             torch::from_blob(payload->coff_full_ptr(), {n_edges_full, 3}, torch::kInt32)
                 .to(dev, /*non_blocking=*/true)
                 .contiguous();
+        ms_h2d = std::chrono::duration<double, std::milli>(
+                     w18_clock::now() - t_w18_h2d0).count();
+        const auto t_w18_shard0 = w18_clock::now();
         auto shard = uma::graph_shard::shard_edges(eidx_full, coff_full, n, world, rank);
         eidx_t = shard.edge_index;
         // W5: int32→FP64 cast on device before TorchScript.
         coff_t = shard.cell_offsets.to(torch::kFloat64).contiguous();
         nedges = static_cast<int32_t>(eidx_t.size(1));
+        ms_wshard = std::chrono::duration<double, std::milli>(
+                       w18_clock::now() - t_w18_shard0).count();
       } else {
         eidx_t = torch::empty({2, 0}, torch::TensorOptions().dtype(torch::kLong).device(dev));
         coff_t = torch::empty({0, 3},
                               torch::TensorOptions().dtype(torch::kFloat64).device(dev));
       }
       // W10: optional fixed-shape edge pad (high-water; unlocks W11 CUDA graph).
+      const auto t_w18_pad0 = w18_clock::now();
       {
         const char* pad_e = std::getenv("UMA_EDGE_PAD");
         if (pad_e && std::string(pad_e) == "1") {
@@ -302,13 +317,18 @@ int main(int argc, char** argv) {
           nedges = static_cast<int32_t>(eidx_t.size(1));
         }
       }
+      ms_pad = std::chrono::duration<double, std::milli>(
+                   w18_clock::now() - t_w18_pad0).count();
       // Tier0/W4: same-stream H2D is ordered before forward; no host sync here.
 
+      const auto t_w18_prep0 = w18_clock::now();
       pos_t = pos_t.set_requires_grad(true);
       auto pbc_t = torch::tensor({pbc[0] != 0, pbc[1] != 0, pbc[2] != 0},
                                  torch::TensorOptions().dtype(torch::kBool).device(dev));
       auto ch = torch::tensor(charge, torch::TensorOptions().dtype(torch::kLong).device(dev));
       auto sp = torch::tensor(spin, torch::TensorOptions().dtype(torch::kLong).device(dev));
+      ms_prep = std::chrono::duration<double, std::milli>(
+                    w18_clock::now() - t_w18_prep0).count();
 
       using clock = std::chrono::steady_clock;
       double escale = 1.0 / static_cast<double>(world);
@@ -352,8 +372,16 @@ int main(int argc, char** argv) {
           energy_loc = uma::undo_element_references(energy_loc, z_use, batch, refs);
         }
         auto e_for_grad = energy_loc.reshape({-1}).sum() * escale;
+        // W18: time the barrier separately. It sits between the fwd and bwd
+        // timers, so its cost was previously invisible in both -- a prime
+        // suspect for the 33.7 ms unaccounted block. W12 showed removing it
+        // does NOT help (the wait reappears in the backward NCCL collective),
+        // so measure it rather than delete it.
         if (!skip_barrier) {
+          const auto t_bar0 = w18_clock::now();
           uma::PeerContext::instance().slot().barrier(rank);
+          ms_bar_pre_bwd = std::chrono::duration<double, std::milli>(
+                               w18_clock::now() - t_bar0).count();
         }
         const auto t_bwd0 = clock::now();
         auto grads =
@@ -502,6 +530,7 @@ int main(int argc, char** argv) {
         path_tag = "eager";
       }
 
+      const auto t_w18_post0 = w18_clock::now();
       const char* skip_fred = std::getenv("UMA_SKIP_FORCE_GP_REDUCE");
       double ms_fred = 0.0;
       if (skip_fred && std::string(skip_fred) == "1") {
@@ -546,10 +575,23 @@ int main(int argc, char** argv) {
 #else
       const bool forces_d2h_async = false;
 #endif
+      ms_post = std::chrono::duration<double, std::milli>(
+                    w18_clock::now() - t_w18_post0).count();
+      // W18: ms_accounted should track the parent's ms_wait_workers to within
+      // a couple of ms. A residual gap means there is still hidden cost.
+      const double ms_accounted = ms_h2d + ms_wshard + ms_pad + ms_prep +
+                                  ms_fwd + ms_bar_pre_bwd + ms_bwd + ms_post;
       std::cerr << "PERF_TICK rank=" << rank << " world=" << world
                 << " nedges=" << nedges << " path=" << path_tag
                 << " ms_fwd=" << ms_fwd
                 << " ms_bwd=" << ms_bwd << " ms_force_ar=" << ms_fred
+                << " ms_h2d=" << ms_h2d
+                << " ms_wshard=" << ms_wshard
+                << " ms_pad=" << ms_pad
+                << " ms_prep=" << ms_prep
+                << " ms_bar_pre_bwd=" << ms_bar_pre_bwd
+                << " ms_post=" << ms_post
+                << " ms_accounted=" << ms_accounted
                 << " ms_compute≈" << (ms_fwd + ms_bwd + ms_fred)
 #if defined(UMA_ENGINE_USE_CUDA)
                 << " d2h=" << (forces_d2h_async ? "async_pin" : "sync_cpu")
