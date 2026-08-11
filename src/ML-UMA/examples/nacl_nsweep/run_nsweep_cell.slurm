@@ -92,10 +92,20 @@ if [[ ! -f "${ART}/model_mp_w${DEVICES}_n${NATOMS}_r0.pt" ]]; then
     fi
   done
 fi
-test -f "${ART}/model_traced.pt" || \
-  PYTHONPATH="${ENG}/python:${PYTHONPATH:-}" python "${ENG}/python/w15_export_traced_fast.py" \
-    --checkpoint "${CKPT}" --output "${ART}" --atoms "${XYZ}" \
-    --dtype float64 --task omat --device cuda --out-name model_traced.pt || true
+# Single-GPU traced export ONLY for N<=6. The traced export builds the whole
+# graph on one GPU; N=6 (1728 atoms) is the measured maximum for one A100 40GB.
+# At N=8 it OOMed (37.10 GiB allocated of 39.49) AFTER all four MP shards had
+# already exported fine, so it was blocking the 4-GPU run for no reason.
+# The MP path does not need model_traced.pt.
+TRACED_MAX_N=${TRACED_MAX_N:-6}
+if [[ "${N}" -le "${TRACED_MAX_N}" ]]; then
+  test -f "${ART}/model_traced.pt" || \
+    PYTHONPATH="${ENG}/python:${PYTHONPATH:-}" python "${ENG}/python/w15_export_traced_fast.py" \
+      --checkpoint "${CKPT}" --output "${ART}" --atoms "${XYZ}" \
+      --dtype float64 --task omat --device cuda --out-name model_traced.pt || true
+else
+  echo "skip traced export: N=${N} > ${TRACED_MAX_N} (single-GPU OOM limit on A100 40GB)"
+fi
 
 # 3) LAMMPS NVT @300K on N GPUs -------------------------------------------
 python "${EX}/run_cell.py" --n "${N}" --data "${DATA}" \

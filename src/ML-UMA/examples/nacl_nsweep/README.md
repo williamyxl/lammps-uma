@@ -30,6 +30,19 @@ UMA_USE_KOKKOS=0 · NCCL · FP64 · umas_fast_pytorch + merge_mole
 4. **Parity** — vs ASE FP64 `umas_fast_pytorch`+`merge_mole`:
    `|ΔE| ≤ 1e-6 eV` and `max|ΔF| ≤ 1e-5 eV/Å`.
 
+## Single-GPU limit (hard constraint)
+
+**N=6 (1728 atoms) is the maximum for one A100 40GB.** Do not run N>6 on a
+single GPU. Measured: N=8 (4096 atoms) OOMs in the single-GPU traced export at
+37.10 GiB allocated of 39.49 GiB, and the ASE FP64 oracle OOMs at N=9 (5832).
+
+This limit applies to the *single-GPU* stages only -- the traced export and the
+ASE oracle. The 4-rank MP export at N=8 succeeded (all four
+`model_mp_w4_n4096_r*.pt` shards valid), because the MP path shards edges
+across ranks. Cells above N=6 therefore skip the traced export
+(`TRACED_MAX_N=6`) and run multi-GPU; `nsweep_driver.submit()` refuses a
+1-GPU cell above N=6.
+
 ## Search
 
 Binary search: probe **N=8**, then **N=16**. If 16 survives, double the bracket

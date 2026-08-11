@@ -81,10 +81,20 @@ def next_n(cells: dict[int, dict], lo_seed: int, hi_seed: int,
     return mid, f"bisect ({lo},{hi})"
 
 
-def submit(n: int, nsteps: int, dep: str | None) -> str:
+# Measured single-GPU ceiling on an A100 40GB: N=6 (1728 atoms) fits, N=8
+# (4096) OOMs in the traced export at 37.10/39.49 GiB. Any cell above this must
+# run multi-GPU, where the MP path shards edges across ranks.
+SINGLE_GPU_MAX_N = 6
+
+
+def submit(n: int, nsteps: int, dep: str | None, devices: int = 4) -> str:
+    if devices == 1 and n > SINGLE_GPU_MAX_N:
+        raise SystemExit(
+            f"refusing N={n} on 1 GPU: single-GPU max is N={SINGLE_GPU_MAX_N} "
+            f"on A100 40GB (measured OOM at N=8)")
     cmd = ["sbatch", "--parsable",
            f"--job-name=nsw-n{n}",
-           f"--export=ALL,NVAL={n},NSTEPS={nsteps}"]
+           f"--export=ALL,NVAL={n},NSTEPS={nsteps},UMA_DEVICES={devices}"]
     if dep:
         cmd.append(f"--dependency=afterany:{dep}")
     cmd.append(str(EX / "run_nsweep_cell.slurm"))
