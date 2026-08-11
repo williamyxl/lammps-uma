@@ -100,6 +100,21 @@ def main() -> int:
     rec["nvt_pair_ms_per_step"] = t.get("nvt_pair_ms_per_step")
     rec["nsteps"] = t.get("nsteps")
     rec["energy_eV"] = t.get("energy_eV")
+    rec["timing_source_internal"] = "lammps Pair/Loop timers (cross-check)"
+
+    # Authoritative timing: measured in the SLURM script around the bash
+    # command, outside LAMMPS and outside any in-code counter.
+    slurm_log = CAMP / "logs" / f"v7-{a.wave}-{a.sysname}-n{a.ngpu}-{a.job}.out"
+    if slurm_log.is_file():
+        txt = slurm_log.read_text(errors="ignore")
+        m = re.search(r"SHELL_TIMING .*", txt)
+        if m:
+            for k, cast in (("sp_pass_s", float), ("full_pass_s", float),
+                            ("nvt_ms_per_step_shell", float)):
+                mm = re.search(rf"\b{k}=([0-9.eE+-]+)", m.group(0))
+                if mm:
+                    rec[f"shell_{k}"] = cast(mm.group(1))
+            rec["timing_source"] = "shell (SLURM script, external to LAMMPS)"
 
     # ---- per-atom E/F parity ----
     oe = ORACLE_E.get(a.sysname)
