@@ -200,7 +200,11 @@ def main() -> int:
     atoms = read(str(cfg["xyz"]))
     assert len(atoms) == cfg["natoms"], f"{len(atoms)} != {cfg['natoms']}"
 
-    model = build_model(cfg["task"], str(device), a.dtype)
+    # fairchem asserts device in ["cpu","cuda"], so str(device) == "cuda:1"
+    # fails on every non-zero rank. Pin the rank's GPU and pass the bare type.
+    if device.type == "cuda":
+        torch.cuda.set_device(device)
+    model = build_model(cfg["task"], device.type, a.dtype)
     model.model_config.active_outputs = {"energy", "forces"}
 
     rec: dict = {
