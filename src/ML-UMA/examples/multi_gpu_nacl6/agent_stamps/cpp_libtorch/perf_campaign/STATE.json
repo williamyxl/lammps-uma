@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T21:58:45",
+  "stamp": "2026-08-10T22:15:48",
   "phase": "V6_W17_cuda_graph",
-  "status": "v7_w18_closed_accounting_solved_product_w8nk",
+  "status": "v7_closed_hard_ceiling_product_w8nk",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -132,7 +132,7 @@
     "21017619"
   ],
   "tick_log": "tick.log",
-  "next_action": "W18 closed. ms_post is the only remaining engine-side target (30-73 ms/step). W19/W20 invalidated by measurement. Before any promote claim, fix the timing methodology: >=3 repeats per cell, compare medians.",
+  "next_action": "V7 closed at the hard ceiling. Product stays W8nk. Remaining levers are OUTSIDE the engine: FairChem model cost (not ours), or multi-node scaling per uma-engine/docs/multinode_mpi_plan.md. Do not reopen same-node engine waves without new evidence.",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2120,5 +2120,26 @@
       "note": "W18 is timers-only so the true delta is ~0; observed spread is run-to-run noise. The +-1 ms promote threshold is INSIDE this band, so single-sample promotes are not trustworthy -- require repeats."
     },
     "promote": false
-  }
+  },
+  "v7_w21": {
+    "wave": "W21 (ms_post) \u2014 CLOSED BEFORE SUBMIT, by analysis of W18 data",
+    "hypothesis": "ms_post (30-73 ms/step) is post-processing work worth optimizing",
+    "verdict": "REJECTED \u2014 ms_post is a synchronization point, not work",
+    "evidence": [
+      "ms_post minus all_reduce is ~100% of ms_post (all_reduce = 0.027 ms)",
+      "the only cudaStreamSynchronize in the step lives inside the ms_post region",
+      "no GPU sync inside the ms_fwd/ms_bwd timers -> those are CPU LAUNCH times",
+      "ms_post halves 2->4 GPUs (70.1->30.4) although D2H and all_reduce volumes are IDENTICAL at both rank counts; it tracks per-rank GPU work (fwd 69.0->40.4)"
+    ],
+    "implication": "ms_fwd/ms_bwd understate GPU cost; ms_post is the drain of async FairChem kernels. Removing/moving the sync relocates the wait, it does not remove it \u2014 the same lesson as W12 for the barrier.",
+    "true_budget_nacl6_ngpu4": {
+      "model_fwd_bwd_incl_drain_ms": 87.98,
+      "force_all_reduce_ms": 0.028,
+      "h2d_shard_prep_barrier_ms": 0.99,
+      "total_wait_ms": 89.75,
+      "engine_controllable_pct": 1.1
+    },
+    "promote": false
+  },
+  "v7_verdict": "V7 CLOSED. Engine-controllable overhead is 1.1% of the step (1.02 of 89.75 ms at nacl6@4); 98% is FairChem model execution we do not own. W19/W20 invalidated by W18 measurement; W21 rejected by analysis. No further same-node engine optimization is worth GPU hours."
 }

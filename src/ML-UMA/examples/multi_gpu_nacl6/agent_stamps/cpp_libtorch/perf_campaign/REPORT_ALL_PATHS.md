@@ -1,6 +1,6 @@
 # Four-path comparison — energy, per-atom force, timing
 
-**Generated:** 2026-08-10 21:58:23  
+**Generated:** 2026-08-10 22:16:28  
 **Precision:** FP64 · **Ensemble:** NVT 300 K · **Oracle:** ASE FP64 `umas_fast_pytorch`+`merge_mole`
 
 Parity gate: `|dE| <= 1e-6 eV` **and** per-atom `max|dF| <= 1e-5 eV/A`. Net force `|sum F|` is deliberately not used: it is bit-identical under sign inversion.
@@ -14,6 +14,7 @@ Oracle energy: `-5830.923741338` eV
 | Path | GPUs | Energy (eV) | \|dE\| | max/atom \|dF\| | mean \|dF\| | >tol | Verdict |
 |---|---:|---:|---:|---:|---:|---:|:---:|
 | ALCHEMI (nvalchemi) | 1 | -5830.923741 | 1.70e-10 | 1.69e-14 | 3.36e-15 | 0 | **PASS** |
+| ALCHEMI (nvalchemi) | 2 | -5830.923741 | 1.67e-10 | 1.69e-14 | 3.36e-15 | 0 | **PASS** |
 | LibTorch UMA LAMMPS (W8nk) | 1 | -5830.923741 | 4.46e-11 | 7.79e-07 | 3.33e-07 | 0 | **PASS** |
 | LibTorch UMA LAMMPS (W8nk) | 2 | -5830.923741 | 4.64e-11 | 7.79e-07 | 3.33e-07 | 0 | **PASS** |
 | LibTorch UMA LAMMPS (W8nk) | 4 | -5830.923741 | 4.55e-11 | 7.79e-07 | 3.33e-07 | 0 | **PASS** |
@@ -41,6 +42,7 @@ Oracle energy: `-3143.389377472` eV
 | Path | GPUs | Energy (eV) | \|dE\| | max/atom \|dF\| | mean \|dF\| | >tol | Verdict |
 |---|---:|---:|---:|---:|---:|---:|:---:|
 | ALCHEMI (nvalchemi) | 1 | -3143.382963 | 6.41e-03 | 1.01e-02 | 5.66e-04 | 648 | **FAIL** |
+| ALCHEMI (nvalchemi) | 2 | -3143.382963 | 6.41e-03 | 1.01e-02 | 5.66e-04 | 648 | **FAIL** |
 | LibTorch UMA LAMMPS (W8nk) | 2 | -3143.389377 | 8.19e-12 | 6.64e-06 | 1.82e-06 | 0 | **PASS** |
 | LibTorch UMA LAMMPS (W8nk) | 4 | -3143.389377 | 8.19e-12 | 6.64e-06 | 1.82e-06 | 0 | **PASS** |
 | LibTorch UMA V7 [w18] | 1 | -3143.389377 | 8.19e-12 | 6.64e-06 | 1.82e-06 | 0 | **PASS** |

@@ -1,4 +1,10 @@
-# V7 — uma-engine optimization campaign
+# V7 — uma-engine optimization campaign  ·  **CLOSED**
+
+> **Outcome:** W18 (instrument) DONE. W19/W20 invalidated by W18's own numbers.
+> W21 (`ms_post`) rejected before submit: `ms_post` is a `cudaStreamSynchronize`
+> draining async FairChem kernels, not post-processing work.
+> **Engine-controllable overhead is 1.1% of the step** (1.02 of 89.75 ms at
+> nacl6@4); the other 98% is FairChem model execution. Product stays **W8nk**.
 
 **Opened:** 2026-08-10 · **Branch:** `uma-kokkos-mlip` · **Product floor:** W8nk (unchanged until a wave promotes)
 
@@ -140,3 +146,46 @@ bars (`STATE.json:baselines_locked`, `matching_ase_fc`). Do not re-run them.
 - **ASE single-GPU oracle ceiling**: OOMs at 5832 atoms on 40 GB
   (measured, job 21023795 — 37.38 GiB in use, needed +3.21 GiB). Oracles above
   ~4096 atoms need multi-GPU.
+
+
+---
+
+## 7. Closure (post-W18 analysis)
+
+### Why W21 was rejected without spending GPU hours
+
+`ms_post` looked like the last big target at 30–73 ms/step. It is not work:
+
+| Evidence | Meaning |
+|---|---|
+| `ms_post − all_reduce ≈ ms_post` (all_reduce = 0.027 ms) | the NCCL collective is negligible |
+| the step's only `cudaStreamSynchronize` sits inside the `ms_post` region | `ms_post` is a drain point |
+| no GPU sync inside the `ms_fwd`/`ms_bwd` timers | those measure **CPU launch**, not GPU execution |
+| `ms_post` halves 2→4 GPUs (70.1→30.4) while D2H and all_reduce volumes are **identical** at both rank counts | it tracks per-rank GPU work (fwd 69.0→40.4), i.e. it is a sync |
+
+Moving or removing the sync relocates the wait rather than removing it — the
+same lesson W12 taught for the pre-backward barrier.
+
+### True budget (nacl6@4)
+
+| Component | ms | % |
+|---|---:|---:|
+| FairChem model fwd+bwd (launch + drained execution) | 87.98 | 98.0% |
+| force all-reduce (NCCL) | 0.028 | 0.03% |
+| h2d + shard + prep + barrier | 0.99 | 1.10% |
+| **total wait** | **89.75** | 100% |
+
+**Engine-controllable: 1.1%.** Even a perfect engine cannot move the bar
+meaningfully; the water@4 gap to the ASE floor (~1.2 ms) is the same order as
+the entire remaining engine overhead.
+
+### Measurement caveat carried forward
+
+W18 is timers-only, so its true speed delta is ~0, yet observed deltas vs W8nk
+spanned −1.19…+3.24 ms (std 1.86). **The ±1 ms promote threshold is inside the
+noise band.** Any future wave must use ≥3 repeats per cell and compare medians.
+
+### Remaining levers (outside this campaign)
+
+- FairChem model cost — not ours; would need upstream work.
+- Multi-node scaling — `uma-engine/docs/multinode_mpi_plan.md` (still PLAN).
