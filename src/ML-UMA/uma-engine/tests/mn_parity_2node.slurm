@@ -41,6 +41,14 @@ export LD_LIBRARY_PATH="${VESIN}:${TORCH_LIB}:/usr/local/cuda/lib64:${LD_LIBRARY
 export UMA_USE_KOKKOS=0 UMA_MP_NATOMS=4096 UMA_STRUCTURE_NATOMS=4096
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n1)
 export MASTER_PORT=$((29700 + RANDOM % 300))
+# PMIx from the conda env (v2.13) fought slurm's PMIx over gds/shmem2 temp
+# files: 'PMIX_ERR_FILE_OPEN_FAILURE in gds_shmem2.c', srun rc=14, no ranks.
+# Give PMIx a writable per-job tmpdir and disable the shmem2 GDS component
+# (fall back to the hash GDS), the standard workaround for this clash.
+export TMPDIR=${SLURM_TMPDIR:-/tmp/pmix_${SLURM_JOB_ID}}
+mkdir -p "${TMPDIR}"
+export PMIX_MCA_gds=hash
+export PMIX_MCA_ptl_tcp_if_include=""  # let PMIx auto-pick, avoid mgmt NIC hang
 
 echo "JOBID=${SLURM_JOB_ID} nodes=${SLURM_JOB_NUM_NODES} ntasks=${SLURM_NTASKS}"
 test -x "${LMP}" || { echo "MN_FAIL missing ${LMP}"; exit 1; }
