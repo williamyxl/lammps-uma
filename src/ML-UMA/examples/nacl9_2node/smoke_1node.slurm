@@ -25,6 +25,9 @@ export MASTER_PORT=$((29800 + RANDOM % 200))
 export OMP_NUM_THREADS=8
 echo "JOBID=${SLURM_JOB_ID} smoke nodes=1 ntasks=${SLURM_NTASKS}"
 cd "${EX}"
-python build_nacl9_replicated.py
-srun --cpu-bind=cores python run_alchemi_nacl9.py --ngpu "${SLURM_NTASKS}" --nsteps 5 --strategy graph_partition
+export NACL_TAG=${NACL_TAG:-nacl8rep}
+export ALCHEMI_SP_ATOM_CAP=${ALCHEMI_SP_ATOM_CAP:-4096}
+N_FROM_TAG=${NACL_TAG#nacl}; N_FROM_TAG=${N_FROM_TAG%rep}
+python build_nacl9_replicated.py --n "${N_FROM_TAG}"
+srun --cpu-bind=cores python run_alchemi_nacl9.py --ngpu "${SLURM_NTASKS}" --nsteps 10 --strategy graph_partition
 echo "SMOKE_RC=$?"

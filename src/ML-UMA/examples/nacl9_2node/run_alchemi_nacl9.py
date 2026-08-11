@@ -21,8 +21,9 @@ EX = Path(__file__).resolve().parent
 NVPATH = EX.parent / "nvalchemi_path"
 CKPT = Path(os.environ.get(
     "UMA_CHECKPOINT", "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt"))
-XYZ = EX / "structures/nacl9rep_rattle.extxyz"
-ORACLE_NPZ = EX / "oracle_ase_nacl9rep_merge.npz"
+TAG = os.environ.get("NACL_TAG", "nacl9rep")
+XYZ = EX / f"structures/{TAG}_rattle.extxyz"
+ORACLE_NPZ = EX / f"oracle_ase_{TAG}_merge.npz"
 DE_TOL, DF_TOL = 1e-6, 1e-5
 
 
@@ -97,7 +98,7 @@ def main() -> int:
     model.model_config.active_outputs = {"energy", "forces"}
 
     rec: dict = {
-        "path": "alchemi", "sys": "nacl9rep", "natoms": len(atoms),
+        "path": "alchemi", "sys": TAG, "natoms": len(atoms),
         "ngpu": a.ngpu, "world_size": world, "nnodes": nnodes,
         "dtype": a.dtype, "task": "omat", "nsteps": a.nsteps,
         "temperature_K": a.temperature, "timestep_fs": a.timestep_fs,
@@ -247,7 +248,7 @@ def main() -> int:
     rec["vram_peak_GiB"] = round(torch.cuda.max_memory_allocated() / 1024**3, 2)
 
     if rank == 0:
-        d = EX / "results" / f"alchemi_ngpu{a.ngpu}_{job}"
+        d = EX / "results" / f"alchemi_{TAG}_ngpu{a.ngpu}_{job}"
         d.mkdir(parents=True, exist_ok=True)
         if f is not None:
             np.savez(d / "forces.npz", forces=f, energy_eV=np.array(e))
