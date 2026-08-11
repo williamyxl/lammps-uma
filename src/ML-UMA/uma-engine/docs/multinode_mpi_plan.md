@@ -1,7 +1,7 @@
 # MPI-driven multi-node LAMMPS + UMA — architecture plan
 
-**Stamp:** 2026-08-11 (rev 3) · **Status:** IN PROGRESS — first code landed
-**Supersedes:** [`multi_node_mpi.md`](multi_node_mpi.md) (v1/v2 all-gather/halo sketch — see [§7](#7-why-the-old-v1v2-sketch-does-not-work))
+**Stamp:** 2026-08-11 (rev 4) · **Status:** IN PROGRESS — Scheme A code+build done, 2-node gate not yet run
+**Supersedes:** `multi_node_mpi_outdated.md` (v1/v2 all-gather/halo sketch — see [§7](#7-why-the-old-v1v2-sketch-does-not-work)). Other outdated docs in this directory carry the `_outdated` suffix.
 **Sibling (current, same-node):** V7 campaign — **CLOSED**, see `V7_PLAN.md`
 
 > **Rev 2 changes, from V7/W18 measurements:**
@@ -70,6 +70,53 @@
 > `E = -13821.798173425354` eV, forces `(4096,3)` f64, `|F|max = 0.536847`.
 > The 8-GPU/2-node run must reproduce this. Note the existing shards are `w4`;
 > world 8 needs a `w8_n4096_r0..7` re-export.
+
+> **Rev 4 — build clean, gate blocked at the launcher.**
+>
+> **Landed since rev 3:**
+> - `build-uma-mn/lmp` built cleanly with `BUILD_MPI=ON` / `PKG_KOKKOS=OFF`
+>   (2:21, `MN_BUILD_OK`), all four protected trees intact per the
+>   pre-commit md5 assertions. Open MPI 5.0.10 (not STUBS).
+> - Per-rank GPU binding in `pair_uma.cpp` hardened: `strtol`-validated,
+>   negative-clamped, per-rank print. 12/12 unit tests pass including
+>   `SLURM_LOCALID=-1` / `abc` / `2x` — all previously would have produced
+>   `torch::Device(kCUDA, -1)` or silent-bind-to-0.
+> - The M3 gather/tag-sort/scatter logic unit-tested on CPU (8 simulated
+>   ranks, 4096 atoms, random ownership): identical tag order on every rank,
+>   every atom scatters back to exactly one owner (0 missing, 0 duplicated).
+> - `w8_n4096_r0..7` shards exported (`21038276`, 1:56, all 8 present) — no
+>   longer a prerequisite blocking the 2-node gate.
+> - The physical guard `nprocs > 1` in `pair_uma.cpp:94` was lifted for the
+>   MPI path. `devices > 1` (fork/exec MP workers) is still refused together
+>   with `nprocs > 1` — those two ownership models are mutually exclusive.
+> - `srun --mpi=pmix` requirement documented after the LJ scaffold gate
+>   silently launched 8 independent 1-rank jobs. This is now asserted by
+>   `max_ranks_in_one_job == 8` in the gate.
+>
+> **Blocked at the launcher — gate has never actually run.**
+> The 2-node parity job died in <15 s with `srun rc=14` and
+> `PMIX_ERR_FILE_OPEN_FAILURE in gds_shmem2.c`. The conda-env PMIx 2.13
+> and Slurm's PMIx fight over `gds/shmem2` shmem temp files, made worse by
+> an empty `TMPDIR`. Workaround applied in `mn_parity_2node.slurm`:
+> per-node writable `TMPDIR` under `srun mkdir`, `PMIX_MCA_gds=hash`, and a
+> preflight `srun --mpi=pmix hostname` that fails loudly if PMIx still
+> breaks rather than masquerading as a UMA failure. Rerun `21038701`
+> queued. Fallback if this still fails: `--mpi=pmi2`.
+>
+> **Corrections against earlier claims:**
+> - I initially wrote an M0 gate that ran `lj/cut` across 2 nodes. That
+>   tests LAMMPS' MPI, which upstream already ships and guarantees; it
+>   proves nothing about `pair_style uma`. Deleted.
+> - I briefly retargeted the M3 gate to nacl6 for convenience. That was a
+>   retreat, not the right target. Restored to NaCl 8×8×8 (4096 atoms) vs
+>   the 4-GPU ground truth (job 21026029, E = -13821.798173425354).
+> - I built M1 before M0/M0.5 out of order (worked, gate passed at
+>   dE 4.5e-11 / max|ΔF| 4.2e-16), but rev 3 already noted this. Rev 4
+>   restores strict ordering going forward.
+>
+> **Physics still not measured on 2 nodes.** Every 2-node attempt so far has
+> died at PMIx before reaching UMA. Once the launcher clears, M3's PASS/FAIL
+> gates on `|ΔE| ≤ 1e-6` and per-atom `max|ΔF| ≤ 1e-5` vs the ground truth.
 
 ---
 
@@ -398,7 +445,7 @@ flowchart TD
   M6 --> M7["M7 scaling campaign"]
 ```
 
-### M0 — Build and launch scaffold
+### M0 — Build and launch scaffold — **BUILD DONE, LAUNCHER FIX PENDING**
 
 Build `build-uma-mn/lmp` with `BUILD_MPI=ON` and **`PKG_KOKKOS=OFF`**. Bind one
 GPU per rank (`srun --gpus-per-task=1`). Verify a non-UMA pair style runs
@@ -433,7 +480,7 @@ Two failure modes this surfaced, worth keeping as regression notes:
 - The conda Open MPI 5.0.10 ships `libpmix.so` and `srun --mpi=list` offers
   `pmix_v5`, so `--mpi=pmix` is the correct launcher flag on Delta.
 
-### M0.5 — Full-precision output (prerequisite for every later gate)
+### M0.5 — Full-precision output (prerequisite for every later gate) — **CODE APPLIED, GATE PENDING**
 
 Every milestone below gates on `|ΔE|` and `max|ΔF|` read back from LAMMPS
 output. LAMMPS writes `%g` by default — **6 significant figures** — which puts
@@ -464,7 +511,7 @@ print "E = $(pe:%.17g)"                          # energy / temperature
 its true magnitude rather than ~8e-07. Do not start M3 until this passes —
 otherwise every downstream parity claim is limited by file formatting.
 
-### M1 — Per-atom energies
+### M1 — Per-atom energies — **PASSED** (dE 4.5e-11, max|ΔF| 4.2e-16 vs energy-only wrapper)
 
 > Borrowed (§9b): record the force/energy provenance in the DD artifact
 > metadata, using ALCHEMI's `ForceMode` vocabulary (`spec.py:276-292`). Our
@@ -492,7 +539,7 @@ regression, not a blocker. Record it as a known tax and continue to M3.
 Re-evaluate Kokkos only in M7, where the LAMMPS-side scaling argument
 (integrator, neighbour, exchange at 10⁵ atoms/node) can actually be measured.
 
-### M3 — Scheme A replicated oracle — **CODE LANDED, GATE PENDING**
+### M3 — Scheme A replicated oracle — **CODE LANDED, w8 SHARDS EXPORTED, GATE BLOCKED ON PMIX**
 
 Implemented in rev 3; the bit-identical gate has not yet run on 2 nodes.
 
