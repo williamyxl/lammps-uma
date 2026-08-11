@@ -157,7 +157,9 @@ class SharedPeerGatherSlot {
     delete this;
   }
 
-  int world() const { return shm_->world; }
+  // Under the MPI bootstrap there is no shm segment, so fall back to the
+  // world recorded at init_nccl_external time.
+  int world() const { return shm_ ? shm_->world : external_world_; }
 
   // Worker-only: allocate CUDA send buffer, publish IPC handle, open remotes.
   // No-op for shm/nccl transport or if already initialized.
@@ -239,6 +241,94 @@ class SharedPeerGatherSlot {
 #endif
     ipc_ready_ = false;
     if (!nccl_ready_) my_rank_ = -1;
+  }
+
+  // Multi-node: bootstrap ncclComm from an EXTERNALLY supplied unique id.
+  //
+  // The shm path below publishes ncclUniqueId through /dev/shm, which is
+  // node-local: a rank on node B cannot read node A's shm file. MPI is the one
+  // channel that exists across nodes before NCCL is up, so the caller
+  // (MPI_Bcast of the id from rank 0) hands the id in here directly.
+  //
+  // Everything downstream -- the collectives, the dedicated NCCL stream, the
+  // W1-W8 optimisations -- is unchanged. NCCL already spans nodes on its own:
+  // ncclCommInitRank picks NVLink intra-node and IB inter-node transparently.
+  //
+  // device_index: the GPU this rank owns. The shm path assumes cudaSetDevice(0)
+  // because each forked worker is exec'd with CUDA_VISIBLE_DEVICES pinned to a
+  // single GPU. Under MPI the rank sees all local GPUs, so the index must be
+  // passed explicitly or every rank on a node would bind GPU 0.
+  void init_nccl_external(int rank, int world, const void *unique_id,
+                          int device_index) {
+#if !defined(UMA_ENGINE_USE_NCCL)
+    (void)rank; (void)world; (void)unique_id; (void)device_index;
+    throw std::runtime_error("SharedPeerGatherSlot: nccl requested without NCCL");
+#else
+    if (nccl_ready_) return;
+    if (rank < 0 || world < 1 || rank >= world) {
+      throw std::runtime_error("init_nccl_external: bad rank/world");
+    }
+    if (unique_id == nullptr) {
+      throw std::runtime_error("init_nccl_external: null ncclUniqueId");
+    }
+    my_rank_ = rank;
+    external_world_ = world;
+#if defined(UMA_ENGINE_USE_CUDA)
+    if (device_index >= 0) cudaSetDevice(device_index);
+#endif
+    ncclUniqueId id;
+    std::memcpy(&id, unique_id, sizeof(id));
+    ncclResult_t nr = ncclCommInitRank(&comm_, world, id, rank);
+    if (nr != ncclSuccess) {
+      throw std::runtime_error(std::string("init_nccl_external ncclCommInitRank: ") +
+                               ncclGetErrorString(nr));
+    }
+#if defined(UMA_ENGINE_USE_CUDA)
+    // Same W8 setup as the shm path: dedicated NCCL stream + events so the
+    // Torch default stream orders against it. Reused verbatim so the W1-W8
+    // optimisations behave identically under MPI.
+    if (cudaStreamCreateWithFlags(&nccl_stream_, cudaStreamNonBlocking) !=
+        cudaSuccess) {
+      throw std::runtime_error("cudaStreamCreate(nccl_stream) failed");
+    }
+    if (cudaEventCreateWithFlags(&nccl_done_evt_, cudaEventDisableTiming) !=
+        cudaSuccess) {
+      throw std::runtime_error("cudaEventCreate(nccl_done_evt) failed");
+    }
+    if (cudaEventCreateWithFlags(&torch_done_evt_, cudaEventDisableTiming) !=
+        cudaSuccess) {
+      throw std::runtime_error("cudaEventCreate(torch_done_evt) failed");
+    }
+#endif
+    nccl_ready_ = true;
+    std::cerr << "SharedPeerGatherSlot: nccl ready (mpi bootstrap) rank="
+              << rank << " world=" << world << " dev=" << device_index << "\n";
+#endif
+  }
+
+  // Size of the opaque id the caller must broadcast (ncclUniqueId).
+  static size_t unique_id_bytes() {
+#if defined(UMA_ENGINE_USE_NCCL)
+    return sizeof(ncclUniqueId);
+#else
+    return 0;
+#endif
+  }
+
+  // Rank 0 only: generate the id to broadcast. Caller owns the buffer.
+  static void make_unique_id(void *out) {
+#if !defined(UMA_ENGINE_USE_NCCL)
+    (void)out;
+    throw std::runtime_error("make_unique_id: built without NCCL");
+#else
+    ncclUniqueId id;
+    ncclResult_t nr = ncclGetUniqueId(&id);
+    if (nr != ncclSuccess) {
+      throw std::runtime_error(std::string("ncclGetUniqueId: ") +
+                               ncclGetErrorString(nr));
+    }
+    std::memcpy(out, &id, sizeof(id));
+#endif
   }
 
   // Worker-only: bootstrap ncclComm from shared unique id. No-op unless nccl.
@@ -808,6 +898,8 @@ class SharedPeerGatherSlot {
   std::vector<void*> remote_dev_ptrs_;
   bool ipc_ready_ = false;
   int my_rank_ = -1;
+  // World size when bootstrapped over MPI (no shm segment to read it from).
+  int external_world_ = 0;
 
   // Process-local NCCL state.
 #if defined(UMA_ENGINE_USE_NCCL)
