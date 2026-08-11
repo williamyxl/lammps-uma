@@ -20,6 +20,7 @@ import argparse
 import json
 import os
 import time
+import pathlib
 from pathlib import Path
 
 import numpy as np
@@ -29,7 +30,9 @@ EX = Path(__file__).resolve().parent
 CKPT = Path(os.environ.get(
     "UMA_CHECKPOINT", "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt"))
 TAG = os.environ.get("NACL_TAG", "nacl8rep")
-XYZ = EX / f"structures/{TAG}_rattle.extxyz"
+# UMA_XYZ lets a caller point at any structure (e.g. the nacl_nsweep
+# ground-truth box) so ALCHEMI runs the SAME atoms as the LibTorch reference.
+XYZ = pathlib.Path(os.environ.get("UMA_XYZ", str(EX / f"structures/{TAG}_rattle.extxyz")))
 
 
 def main() -> int:
