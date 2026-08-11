@@ -22,8 +22,16 @@
 namespace uma {
 
 struct PayloadShm {
-  // LIM (perf campaign): single-node product caps. Raising either requires
-  // resizing the fixed mmap layout + revalidation. Multi-node is out of scope.
+  // Caps for the SAME-NODE shm transport (parent forks workers, geometry moves
+  // through this mmap). Raising either requires resizing the fixed layout +
+  // revalidation.
+  //
+  // This transport is inherently node-local: /dev/shm is not visible across
+  // nodes. The multi-node path does NOT use it -- under one rank per GPU the
+  // LAMMPS rank IS the worker, geometry arrives through LAMMPS' own domain
+  // decomposition, and NCCL is bootstrapped via MPI_Bcast
+  // (SharedPeerGatherSlot::init_nccl_external). kMaxWorld therefore bounds the
+  // same-node fork/exec fan-out, not the multi-node world size.
   static constexpr int kMaxWorld = 8;
   static constexpr int64_t kMaxN = 8192;
   // W6: full-graph edge ceiling (was 512K per-rank; full publish needs headroom).

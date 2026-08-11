@@ -55,6 +55,17 @@ class PairUMA : public Pair {
   double cutoff;
   int precision;    // PRECISION_MIXED or PRECISION_DOUBLE
   int num_devices;  // graph-parallel GPU count (1 = traced Predictor)
+  // Multi-node: one MPI rank per GPU. Each rank evaluates its own LAMMPS
+  // subdomain and contributes E/F for the atoms it owns; the global energy is
+  // summed over ranks by LAMMPS' own eng_vdwl reduction.
+  int mn_world;   // MPI world size when > 1
+  int mn_rank;    // this rank
+  bool mn_active; // true when running one-rank-per-GPU multi-node
+  // Scratch for the multi-node global gather. Tag ordering makes the assembled
+  // system identical on every rank, so all ranks build the same graph.
+  std::vector<int> mn_tag, mn_tag_all, mn_counts, mn_displs, mn_order;
+  std::vector<int> mn_z_all, mn_z_sorted;
+  std::vector<double> mn_pos_all, mn_pos_sorted, mn_force_sorted;
   bool devices_explicit;  // true if pair_style set devices N
 
   uma::Predictor *predictor;
