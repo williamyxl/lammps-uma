@@ -84,10 +84,10 @@ thermo_modify norm no
 
 # (1) warmup + first-frame E+F dump
 dump 1 all custom 1 {dump_sp.name} id type x y z fx fy fz
-dump_modify 1 sort id
+dump_modify 1 sort id format float %.17g
 run 0
 undump 1
-print "FIRST_PE = $(pe)"
+print "FIRST_PE = $(pe:%.17g)"
 
 # (2) timed SP proxy: 1 NVE step → Pair ms (advances; NVT timing still valid)
 fix _sp all nve

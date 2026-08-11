@@ -146,10 +146,10 @@ thermo_style custom step temp pe ke etotal
 thermo_modify norm no
 
 dump 1 all custom 1 {dump.name} id type x y z fx fy fz
-dump_modify 1 sort id
+dump_modify 1 sort id format float %.17g
 run 0
 undump 1
-print "FIRST_PE = $(pe)"
+print "FIRST_PE = $(pe:%.17g)"
 
 fix _sp all nve
 run 1
@@ -157,8 +157,8 @@ unfix _sp
 
 fix 1 all nvt temp 300.0 300.0 0.1
 run {a.nsteps}
-print "FINAL_T = $(temp)"
-print "FINAL_PE = $(pe)"
+print "FINAL_T = $(temp:%.17g)"
+print "FINAL_PE = $(pe:%.17g)"
 """)
 
     lmp = os.environ.get("LMP_UMA", str(ROOT / "build-uma/lmp"))
@@ -193,7 +193,7 @@ print "FINAL_PE = $(pe)"
             rec["nvt_pair_ms_per_step"] = blocks[2].get("pair_ms_per_step")
             rec["nvt_loop_ms_per_step"] = blocks[2].get("loop_ms_per_step")
         # Require a numeric value: the log also contains the echoed input line
-        # (`print "FIRST_PE = $(pe)"`), and \S+ matched that literal, raising
+        # (`print "FIRST_PE = $(pe:%.17g)"`), and \S+ matched that literal, raising
         # ValueError on '$(pe)"' and masking the real failure.
         num = r"([-+]?\d+\.?\d*(?:[eE][-+]?\d+)?)"
         for key, pat in (("energy_eV", rf"FIRST_PE = {num}"),
