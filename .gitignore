@@ -64,3 +64,5 @@ src/Makefile.package.settings-e
 build-uma-v7/
 src/ML-UMA/uma-engine/build-cpp-mp-v7/
 frozen/
+build-uma-mn/
+src/ML-UMA/uma-engine/build-cpp-mp-mn/

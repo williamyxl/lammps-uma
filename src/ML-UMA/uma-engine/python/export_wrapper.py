@@ -147,3 +147,82 @@ def clone_prepared_model(model: HydraModel) -> HydraModel:
 
 def make_traced_export_wrapper(model: HydraModel, dataset_name: str) -> EnergyExportWrapper:
     return EnergyExportWrapper(clone_prepared_model(model), dataset_name, traceable=True)
+
+
+class NodeEnergyExportWrapper(EnergyExportWrapper):
+    """M1 (multi-node DD): return per-atom energies alongside the total.
+
+    Spatial decomposition needs ``E_local = sum_{i in local} e_i``. FairChem
+    computes per-node energies internally (``compute_energy`` in
+    ``escn_md.py``: ``node_energy = energy_block(scalar_embedding)``) but
+    ``reduce_node_to_system`` collapses them before the head returns, and the
+    energy-only wrapper exposes only that scalar.
+
+    Rather than fork the model, capture the energy block's output with a
+    forward hook. The hook sees exactly the tensor that is about to be reduced,
+    so ``sum(node_energy) == total`` holds by construction and stays inside the
+    autograd graph -- required, because forces come from
+    ``grad(E, pos)`` and a detached copy would silently zero them.
+
+    Post-processing is per-atom linear (``denorm_energy`` is ``E*rmsd + mean``
+    with ``mean = 0``; ``undo_element_references`` is a per-atom scatter_add),
+    so the identity survives it. See plan sec 4.2.
+    """
+
+    def __init__(self, model: HydraModel, dataset_name: str, traceable: bool = False):
+        super().__init__(model, dataset_name, traceable)
+        self._node_energy: torch.Tensor | None = None
+        self._hook_handle = None
+        self._register_energy_hook()
+
+    def _find_energy_block(self) -> nn.Module | None:
+        """Locate the head's energy_block, which maps [N, C] -> [N, 1]."""
+        for module in self.inner.modules():
+            blk = getattr(module, "energy_block", None)
+            if blk is not None and isinstance(blk, nn.Module):
+                return blk
+        return None
+
+    def _register_energy_hook(self) -> None:
+        blk = self._find_energy_block()
+        if blk is None:
+            raise RuntimeError(
+                "NodeEnergyExportWrapper: no energy_block found; cannot expose "
+                "per-atom energies (model layout changed?)")
+
+        def _capture(_module, _inputs, output):
+            # Keep the graph: forces are grad(E, pos).
+            self._node_energy = output.view(-1)
+
+        self._hook_handle = blk.register_forward_hook(_capture)
+
+    def forward(
+        self,
+        pos: torch.Tensor,
+        atomic_numbers: torch.Tensor,
+        cell: torch.Tensor,
+        pbc: torch.Tensor,
+        edge_index: torch.Tensor,
+        cell_offsets: torch.Tensor,
+        charge: torch.Tensor,
+        spin: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(node_energy[N], total_energy)``."""
+        self._node_energy = None
+        total = super().forward(
+            pos, atomic_numbers, cell, pbc, edge_index, cell_offsets, charge, spin
+        )
+        node_e = self._node_energy
+        if node_e is None:
+            raise RuntimeError(
+                "NodeEnergyExportWrapper: energy_block hook did not fire")
+        return node_e, total
+
+
+def make_node_energy_export_wrapper(
+    model: HydraModel, dataset_name: str
+) -> NodeEnergyExportWrapper:
+    """M1 factory: DD export wrapper returning (node_energy, total_energy)."""
+    return NodeEnergyExportWrapper(
+        clone_prepared_model(model), dataset_name, traceable=True
+    )
