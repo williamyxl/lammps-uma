@@ -45,10 +45,12 @@ export MASTER_PORT=$((29700 + RANDOM % 300))
 # files: 'PMIX_ERR_FILE_OPEN_FAILURE in gds_shmem2.c', srun rc=14, no ranks.
 # Give PMIx a writable per-job tmpdir and disable the shmem2 GDS component
 # (fall back to the hash GDS), the standard workaround for this clash.
-export TMPDIR=${SLURM_TMPDIR:-/tmp/pmix_${SLURM_JOB_ID}}
-mkdir -p "${TMPDIR}"
+# Per-node writable tmpdir for PMIx shmem, and force the hash GDS so it never
+# touches the gds/shmem2 file that failed cross-node. TMPDIR must exist on
+# EVERY node, so create it under srun, not just on the batch host.
+export TMPDIR=/tmp/pmix_${SLURM_JOB_ID}
+srun --ntasks-per-node=1 mkdir -p "${TMPDIR}" 2>/dev/null || mkdir -p "${TMPDIR}"
 export PMIX_MCA_gds=hash
-export PMIX_MCA_ptl_tcp_if_include=""  # let PMIx auto-pick, avoid mgmt NIC hang
 
 echo "JOBID=${SLURM_JOB_ID} nodes=${SLURM_JOB_NUM_NODES} ntasks=${SLURM_NTASKS}"
 test -x "${LMP}" || { echo "MN_FAIL missing ${LMP}"; exit 1; }
@@ -74,6 +76,14 @@ dump_modify     1 sort id format float %.17g
 run             0
 print "MN_ENERGY = \$(pe:%.17g)"
 EOF
+
+echo "=== PMIx launch sanity (2 nodes) before the real run ==="
+if ! srun --mpi=pmix --ntasks=8 hostname > pmix_check.txt 2>&1; then
+  echo "MN_FAIL PMIx launch broken:"; grep -iE 'PMIX_ERR|error' pmix_check.txt | head -3
+  echo "  -> retry with --mpi=pmi2 or report to admins; UMA code was not reached"
+  exit 1
+fi
+echo "PMIx OK: $(sort -u pmix_check.txt | grep -c gpu) distinct nodes"
 
 echo "=== 8 ranks / 2 nodes, devices 8 (w8 MP shards) ==="
 srun --mpi=pmix --ntasks=8 --gpus-per-task=1 --cpu-bind=cores \
