@@ -33,7 +33,7 @@
 #include "kokkos.h"
 #endif
 
-#include <algorithm>  // std::sort for the multi-node tag ordering
+#include <algorithm>  // std::stable_sort for the multi-node tag ordering
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>  // brace-init list in the M0 device-binding loop
@@ -226,7 +226,9 @@ void PairUMA::compute(int eflag, int vflag)
     // Sort into tag order: identical on every rank regardless of who owns what.
     mn_order.resize(static_cast<size_t>(natoms_global));
     for (int i = 0; i < natoms_global; i++) mn_order[i] = i;
-    std::sort(mn_order.begin(), mn_order.end(),
+    // stable_sort: tags are unique so ordering is deterministic either way,
+    // but this makes the "identical order on every rank" invariant explicit.
+    std::stable_sort(mn_order.begin(), mn_order.end(),
               [&](int a, int b) { return mn_tag_all[a] < mn_tag_all[b]; });
 
     mn_pos_sorted.resize(static_cast<size_t>(natoms_global) * 3);
