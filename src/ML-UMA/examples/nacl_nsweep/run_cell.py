@@ -215,7 +215,15 @@ print "FINAL_PE = $(pe)"
         rec["functional"] = bool(
             rec.get("nvt_pair_ms_per_step")
             and T is not None and np.isfinite(T) and 100.0 < T < 900.0
-            and rec.get("force_sum_abs", 1.0) < 1e-6
+            # Net force must vanish, but this is read back from the LAMMPS TEXT
+            # dump, which writes 6 significant figures. Per-component rounding
+            # accumulates over N atoms: modelled 1.4e-5 vs observed 3.7e-5 at
+            # N=4096, i.e. the residual is write precision, not physics. A fixed
+            # 1e-6 gate is tighter than the file format can express and wrongly
+            # flagged a clean 4-GPU run. Scale with sqrt(N), 10x margin over the
+            # model. For a true force check use the per-atom oracle comparison,
+            # which is insensitive to a common-mode offset.
+            and rec.get("force_sum_abs", 1.0) < max(1e-6, 3e-6 * natoms**0.5)
         )
         rec["status"] = "OK" if rec["functional"] else "RAN_BUT_SUSPECT"
     else:
