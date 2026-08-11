@@ -37,7 +37,6 @@ cd "${EX}"
 export NACL_TAG=${NACL_TAG:-nacl8rep}
 # The standalone single point runs the FULL system on every rank (no
 # decomposition); 4096 atoms needs ~32 GiB, which fits a 40 GiB A100.
-export ALCHEMI_SP_ATOM_CAP=${ALCHEMI_SP_ATOM_CAP:-4096}
 N_FROM_TAG=${NACL_TAG#nacl}; N_FROM_TAG=${N_FROM_TAG%rep}
 python build_nacl9_replicated.py --n "${N_FROM_TAG}"
 

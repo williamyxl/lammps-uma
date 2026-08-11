@@ -37,11 +37,9 @@ scontrol show hostnames "$SLURM_JOB_NODELIST"
 cd "${EX}"
 # NACL_TAG selects the box: nacl8rep (4096) or nacl9rep (5832).
 export NACL_TAG=${NACL_TAG:-nacl8rep}
-# The standalone single point runs the FULL system on every rank (no
-# decomposition), so it is memory-capped separately from the MD block.
-# Measured scaling: ~19.3 GiB fixed + 3.13 GiB/1000 atoms -> 4096 atoms
-# needs ~32 GiB, which fits a 40 GiB A100; 5832 (~37.5) does not reliably.
-export ALCHEMI_SP_ATOM_CAP=${ALCHEMI_SP_ATOM_CAP:-4096}
+# No SP cap anymore: the runner does the single point through DomainParallel,
+# so it is decomposed across all ranks like MD. The old undecomposed
+# model(batch) that OOMed a full node is gone.
 N_FROM_TAG=${NACL_TAG#nacl}; N_FROM_TAG=${N_FROM_TAG%rep}
 python build_nacl9_replicated.py --n "${N_FROM_TAG}"
 
