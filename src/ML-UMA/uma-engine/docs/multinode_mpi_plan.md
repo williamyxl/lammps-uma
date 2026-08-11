@@ -1,8 +1,21 @@
 # MPI-driven multi-node LAMMPS + UMA — architecture plan
 
-**Stamp:** 2026-08-09 · **Status:** PLAN (no code written yet)
+**Stamp:** 2026-08-11 (rev 2) · **Status:** PLAN (no code written yet)
 **Supersedes:** [`multi_node_mpi.md`](multi_node_mpi.md) (v1/v2 all-gather/halo sketch — see [§7](#7-why-the-old-v1v2-sketch-does-not-work))
-**Sibling (current, same-node):** `.cursor/plans/v5_max_perf_push_82db7365.plan.md`
+**Sibling (current, same-node):** V7 campaign — **CLOSED**, see `V7_PLAN.md`
+
+> **Rev 2 changes, from V7/W18 measurements:**
+> 1. §3 — this is a **capacity** project, not a performance one. V7 measured
+>    engine-controllable overhead at **1.1 %** of the step, so the old
+>    "escape the publish-path overhead" motivation in §6.1 is retired.
+> 2. §5C — the ~23 ms/step halo cost is **~26 % added** on top of ~88 ms of
+>    FairChem GPU math, not "same order as `ms_wait`". Justified by reach, not speed.
+> 3. **New M0.5 precision gate** — LAMMPS' default `%g` output floors force
+>    parity at ~8.7e-07, which is *looser* than M5's own `max|ΔF| ≤ 1e-9` gate.
+>    M5/M6 cannot pass without full-precision output.
+> 4. §9 M2 — the Kokkos gate now has a **pre-committed fallback** instead of
+>    "reopen §8".
+> 5. §9 M7 — re-baseline the ceiling against the live N-sweep.
 
 ---
 
@@ -108,6 +121,28 @@ Measured consequence — the Phase-G OOM sweep in `examples/multi_node_nacl6/res
 
 **N\* = 10 → ~8 000 atoms is the practical ceiling**, and adding GPUs does not raise it. Anything at MD-relevant scale (10⁵–10⁶ atoms) requires real spatial decomposition, which requires MPI.
 
+**This is the only justification for the project.** V7 (see `V7_PLAN.md`) closed
+the same-node engine at a hard ceiling: after instrumenting every phase of the
+worker step, engine-controllable overhead is **1.02 ms of an 89.75 ms step —
+1.1 %** (nacl6@4). The other 98 % is FairChem model execution we do not own.
+
+| nacl6@4 component | ms | % |
+|---|---:|---:|
+| FairChem model fwd+bwd (launch + drained GPU execution) | 87.98 | 98.0 |
+| force all-reduce (NCCL) | 0.028 | 0.03 |
+| h2d + shard + prep + barrier | 0.99 | 1.10 |
+| **total wait** | **89.75** | 100 |
+
+So multi-node must be justified by **reach, not speed**. Expect *worse*
+per-step time than the same-node path (§5C) in exchange for system sizes that
+are otherwise unreachable. Any milestone that claims a speedup is
+mis-specified.
+
+Independent confirmation of the capacity table above (V7-era N-sweep,
+`examples/nacl_nsweep/`): NaCl 8³ = 4096 atoms on 4×A100-40GB runs at
+**24.4/40 GiB (61 %)**, NVT 189.7 ms/step, no OOM — consistent with N=8 PASS,
+and it adds the VRAM fraction the original Phase-G sweep never recorded.
+
 ---
 
 ## 4. What UMA-S-1.2 actually requires from a decomposition
@@ -186,7 +221,15 @@ Halo blow-up at 6 Å:
 | 96 | 1.42× |
 | 192 | 1.19× |
 
-First-order comm model at 8 000 local atoms/rank (`L ≈ 56 Å`, ~6 300 ghosts, 9.2 kB/atom): ≈58 MB per exchange, ×4 layers ×2 directions ≈ **0.46 GB/step/rank**. At ~20 GB/s effective that is ~23 ms/step — same order as the current `ms_wait`, and it overlaps with compute. Plus 8 latency-bound all-reduces of 3 doubles.
+First-order comm model at 8 000 local atoms/rank (`L ≈ 56 Å`, ~6 300 ghosts, 9.2 kB/atom): ≈58 MB per exchange, ×4 layers ×2 directions ≈ **0.46 GB/step/rank**. At ~20 GB/s effective that is ~23 ms/step. Plus 8 latency-bound all-reduces of 3 doubles.
+
+**Read that as a cost, not a wash.** Measured per-rank compute is ~88 ms
+(§3), so 23 ms of new halo traffic is **~26 % added per-step cost** before any
+overlap. Overlapping the exchange with the local-only part of each block can
+hide some of it, but the honest planning assumption is that Scheme C is
+*slower per step* than same-node `devices=4` and buys **capacity**. The M7
+gate is therefore weak-scaling efficiency and total atoms — never a
+step-time win against the same-node path.
 
 ### Comparison
 
@@ -219,7 +262,7 @@ flowchart TB
 
 Five deliberate departures from the same-node design:
 
-1. **One process per GPU, and that process is the LAMMPS rank.** No fork/exec workers, no `/dev/shm` payload, no pipes. `LibtorchMpRuntime`'s entire publish path disappears — along with `ms_nl`/`ms_pub`/`ms_pack` parent overhead that Tier 0/2 has been fighting.
+1. **One process per GPU, and that process is the LAMMPS rank.** No fork/exec workers, no `/dev/shm` payload, no pipes. `LibtorchMpRuntime`'s entire publish path disappears. **Do not sell this as a performance win:** W18 measured that whole path at **0.99 ms of an 89.75 ms step (1.1 %)**, so removing it is a *simplification*, worth having because the MPI design needs it anyway — not a reason to undertake the work.
 2. **LAMMPS owns the neighbor list.** Ghosts carry image-shifted absolute coordinates, so `cell_offsets ≡ 0` and `edge_distance_vec = pos[src] − pos[tgt]` directly. Vesin and the PBC wrap logic are not needed on this path. `edge_index[1] ∈ [0, nlocal)`, `edge_index[0] ∈ [0, nlocal+nghost)` maps exactly onto FairChem's `(neighbor, center)` convention with `node_offset = 0`.
 3. **`newton pair on`** plus `Pair::pack_reverse_comm` to fold ghost forces back — the opposite of today's `newton off`.
 4. **NCCL bootstrapped over MPI** (`ncclGetUniqueId` on rank 0 → `MPI_Bcast` → `ncclCommInitRank`) instead of through `/dev/shm`. Everything downstream in [`shared_peer.h`](../include/uma/shared_peer.h) and the `uma_peer` autograd ops is reused unchanged, including the W1–W8 optimisations.
@@ -272,7 +315,8 @@ with an explicit fence between the Kokkos execution space and the Torch stream. 
 
 ```mermaid
 flowchart TD
-  M0["M0 build + launch scaffold"] --> M1["M1 per-atom energy export"]
+  M0["M0 build + launch scaffold"] --> M05["M0.5 full-precision output"]
+  M05 --> M1["M1 per-atom energy export"]
   M1 --> M2["M2 zero-copy device handoff"]
   M2 --> M3["M3 Scheme A replicated oracle"]
   M3 --> M4["M4 global all-reduce over MPI"]
@@ -285,13 +329,54 @@ flowchart TD
 Build `build-uma-mpi/lmp` (`BUILD_MPI=ON`, `PKG_KOKKOS=ON`). Bind one GPU per rank (`srun --gpus-per-task=1`, `-k on g 1 -sf kk`). Verify a non-UMA Kokkos pair style runs 2 nodes × 4 ranks.
 **Gate:** 8-rank LJ NVT reproduces the serial trajectory.
 
+### M0.5 — Full-precision output (prerequisite for every later gate)
+
+Every milestone below gates on `|ΔE|` and `max|ΔF|` read back from LAMMPS
+output. LAMMPS writes `%g` by default — **6 significant figures** — which puts
+a floor under any force comparison:
+
+| quantity | value |
+|---|---:|
+| LibTorch UMA nacl6@4 reported max per-atom \|ΔF\| | 7.79e-07 |
+| dump rounding limit at 6 sig figs | 8.66e-07 |
+
+Those are the same number: the reported "error" was the text format, not the
+computation. For contrast ALCHEMI, read straight from tensors with no dump,
+shows 1.69e-14 on the same system. The same effect produced a spurious
+net-force flag at N=8 (`|Σ F|` 3.7e-5 purely from rounding over 4096 atoms).
+
+**M5's gate of `max|ΔF| ≤ 1e-9` is three orders tighter than the default
+output can express, so M5 and M6 cannot pass as written.**
+
+Fix (already applied to the same-node runners, commit `b62dc1c924`):
+
+```
+dump_modify <id> sort id format float %.17g     # exact double round-trip
+print "E = $(pe:%.17g)"                          # energy / temperature
+```
+
+**Gate:** on NaCl6, a serial run's dump round-trips to the tensor values to
+`≤ 1e-15` relative; re-measured `max|ΔF|` vs the FP64 oracle is reported at
+its true magnitude rather than ~8e-07. Do not start M3 until this passes —
+otherwise every downstream parity claim is limited by file formatting.
+
 ### M1 — Per-atom energies
 Extend [`export_wrapper.py`](../python/export_wrapper.py) to return `(node_energy[N], total_E)`; carry per-atom element references and `denorm` through `postprocess.cpp`. Export `uma-s-1p2-omat-f64-fast-dd`.
 **Gate:** `|Σ node_e − E_total| ≤ 1e-12` relative, on NaCl6 and water888. Serial forces unchanged.
 
 ### M2 — Zero-copy device handoff (Kokkos gate)
 `PairUMAKokkos::compute` passes `atomKK->k_x.view<DeviceType>()` to a new `Predictor::predict_device`, receives device forces, no host staging. Fence Kokkos ↔ Torch stream.
-**Gate:** bit-identical E/F vs the host path; measurable drop in the pair-style prologue. **If this fails, Kokkos loses its main justification — reopen §8.**
+**Gate:** bit-identical E/F vs the host path; measurable drop in the pair-style prologue.
+
+**Pre-committed fallback if M2 fails** (do not reopen §8 mid-campaign): drop
+Kokkos from the multi-node product path and proceed with plain
+`BUILD_MPI=ON` + `pair_style uma`, routing the halo through the non-Kokkos
+`Comm` path with explicit host staging. §8's own table already establishes
+this is *functionally equivalent* for correctness; the cost is 8 extra
+device↔host transfers of the largest tensor per step, which is a throughput
+regression, not a blocker. Record it as a known tax and continue to M3.
+Re-evaluate Kokkos only in M7, where the LAMMPS-side scaling argument
+(integrator, neighbour, exchange at 10⁵ atoms/node) can actually be measured.
 
 ### M3 — Scheme A replicated oracle
 Lift `nprocs > 1`. Tag-ordered `MPI_Allgatherv` of positions; every rank evaluates the full system; each keeps `nlocal` forces; energy on rank 0.
@@ -311,7 +396,17 @@ Shrink to `comm_modify cutoff 6.0`. Register `uma_dist::halo_gather(x, plan) -> 
 
 ### M7 — Scaling campaign
 Weak scaling at fixed atoms/rank (target 5–8 k) across 1/2/4/8 nodes; strong scaling at fixed total N. Baselines: serial UMA, same-node `devices=4`, FairChem ASE FP64 where it fits.
-**Gate:** weak-scaling efficiency ≥ 70 % to 8 nodes; total atoms ≥ 10× the current N\* = 8 000 ceiling.
+**Gate:** weak-scaling efficiency ≥ 70 % to 8 nodes; total atoms ≥ 10× the
+same-node ceiling.
+
+**Re-baseline before setting the target.** The N\* = 8 000 figure comes from
+the original Phase-G sweep, which recorded only PASS/OOM. The V7-era N-sweep
+(`examples/nacl_nsweep/`) now records peak VRAM per cell and is still
+bisecting: NaCl 8³ = 4096 atoms sits at 24.4/40 GiB (61 %) on 4 GPUs, so the
+true same-node ceiling is **above** 4096 and not yet pinned. Take the target
+from the finished sweep, not from this document. Also report step time against
+same-node `devices=4` **as context, not as a gate** — Scheme C is expected to
+lose on step time and win on reachable size (§5C).
 
 ---
 
@@ -326,6 +421,8 @@ Weak scaling at fixed atoms/rank (target 5–8 k) across 1/2/4/8 nodes; strong s
 | Torch stream vs Kokkos execution space races | Wrong forces, non-deterministic | Explicit fences in M2; the W8 NCCL-stream race (`MATRIX.md` §W8 probe) is the precedent |
 | No virial anywhere in `pair_uma` | NPT impossible at any rank count | Out of scope here; file separately — UMA has `regress_stress` via autograd on the cell |
 | Same-node `devices>1` and MPI both active | fork/exec before CUDA init breaks under MPI | Forbid `devices>1` when `nprocs>1`; error at `init_style` |
+| Parity gates limited by output formatting, not physics | M5/M6 "pass" or "fail" for the wrong reason | **M0.5**: `%.17g` on dumps and `$(pe:%.17g)`; verified round-trip before M3 |
+| Timing deltas smaller than run-to-run noise | False promote/regress calls | W18 measured std 1.86 ms on an instrumentation-only change, i.e. a ±1 ms threshold sits **inside** the noise. Require ≥3 repeats per cell and compare medians |
 
 ## 11. Explicitly out of scope
 
