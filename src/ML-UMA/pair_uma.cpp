@@ -35,6 +35,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>  // brace-init list in the M0 device-binding loop
 
 using namespace LAMMPS_NS;
 
@@ -257,18 +258,31 @@ void PairUMA::load_predictor()
         // the launcher already pins one GPU per task (srun --gpus-per-task=1),
         // device_count() is 1 and the modulo correctly yields index 0.
         int local_rank = comm->me;
-        const char *lr = nullptr;
         for (const char *v : {"SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
                               "MV2_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
-          if ((lr = std::getenv(v)) != nullptr && *lr) break;
-          lr = nullptr;
+          const char *lr = std::getenv(v);
+          if (lr == nullptr || *lr == '\0') continue;
+          // strtol, not atoi: atoi cannot distinguish "abc" from "0", which
+          // would silently bind every rank to cuda:0.
+          char *end = nullptr;
+          const long parsed = std::strtol(lr, &end, 10);
+          if (end == lr || *end != '\0' || parsed < 0) {
+            if (comm->me == 0 && screen)
+              fprintf(screen, "uma: ignoring malformed %s='%s'\n", v, lr);
+            continue;
+          }
+          local_rank = static_cast<int>(parsed);
+          break;
         }
-        if (lr) local_rank = std::atoi(lr);
         const int ndev = static_cast<int>(torch::cuda::device_count());
-        const int idx = (ndev > 0) ? (local_rank % ndev) : 0;
+        // Clamp defensively: a negative local_rank would yield a negative
+        // device index, and ndev==0 would divide by zero.
+        const int idx = (ndev > 0 && local_rank >= 0) ? (local_rank % ndev) : 0;
         device = torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(idx));
-        if (screen && comm->me == 0)
-          fprintf(screen, "uma: binding rank %d -> cuda:%d of %d visible\n",
+        // Every rank prints: the whole point is to confirm ranks land on
+        // DIFFERENT GPUs, which a rank-0-only message cannot show.
+        if (screen)
+          fprintf(screen, "uma: rank %d -> cuda:%d (of %d visible)\n",
                   comm->me, idx, ndev);
       } else {
         device = torch::Device(torch::kCPU);
