@@ -1,6 +1,6 @@
 # MPI-driven multi-node LAMMPS + UMA — architecture plan
 
-**Stamp:** 2026-08-11 (rev 4) · **Status:** IN PROGRESS — Scheme A code+build done, 2-node gate not yet run
+**Stamp:** 2026-08-11 (rev 5) · **Status:** IN PROGRESS — migrating to a faster HPC; resume at phase MG then M0.5
 **Supersedes:** `multi_node_mpi_outdated.md` (v1/v2 all-gather/halo sketch — see [§7](#7-why-the-old-v1v2-sketch-does-not-work)). Other outdated docs in this directory carry the `_outdated` suffix.
 **Sibling (current, same-node):** V7 campaign — **CLOSED**, see `V7_PLAN.md`
 
@@ -666,6 +666,132 @@ fall with rank count. **Scheme C only pays off if the ghost set is genuinely
 `O(nlocal · 1.2–1.9)`** (§5C), so M6 must measure extended/local directly
 rather than assume decomposition implies memory scaling. That measurement is
 already an M6 gate; ALCHEMI is the cautionary case for why.
+
+---
+
+## 9c. Phase MG — HPC migration (do this first on the new site)
+
+**Why it exists:** rev 5 mid-project. Delta's `gpuA100x4` had ~2900 pending
+jobs, so the 2-node parity gates (`21038701`, `21038856`, `21038857`) were
+never scheduled. Moving to a faster HPC; those three jobs stay on Delta. The
+plan resumes at **M0.5** immediately after MG.
+
+**Scope:** re-establish the runtime, do NOT re-run any milestone that already
+passed on Delta (M1 gate result stands; source code carried via git). Full
+handoff detail lives in `MIGRATION.md` at the repo root — this section is the
+sequenced version.
+
+```mermaid
+flowchart LR
+  MG0["MG0 clone repo"] --> MG1["MG1 conda envs (uma312 + nvalchemi312)"]
+  MG1 --> MG2["MG2 place checkpoint, set UMA_CHECKPOINT"]
+  MG2 --> MG3["MG3 build product build-uma/lmp"]
+  MG3 --> MG4["MG4 build MN build-uma-mn/lmp"]
+  MG4 --> MG5["MG5 site adaptation (account/partition/PMIx)"]
+  MG5 --> MG6["MG6 export w8_n4096 shards"]
+  MG6 --> M05["resume M0.5"]
+```
+
+### MG0 — Clone
+```bash
+git clone https://github.com/williamyxl/lammps-uma.git
+git -C lammps-uma checkout uma-kokkos-mlip
+```
+**Gate:** HEAD is at least `bc1056bc92` (the migration commit).
+
+### MG1 — Recreate the two conda envs
+`uma312` and `nvalchemi312` are **mutually exclusive** — fairchem caps
+`torch<2.9`, `nvalchemi-toolkit-ops` floors it at `>=2.11`. Both are needed
+because they drive different comparison paths.
+
+```bash
+conda create -n uma312 python=3.12 pip
+conda activate uma312 && pip install --extra-index-url   https://download.pytorch.org/whl/cu128 torch==2.8.0   fairchem-core==2.21.0 ase numpy
+
+conda create -n nvalchemi312 python=3.12 pip
+conda activate nvalchemi312 && pip install --extra-index-url   https://download.pytorch.org/whl/cu128 --extra-index-url   https://pypi.nvidia.com 'nvalchemi-toolkit[uma,ase]' 'setuptools<81'
+```
+**Gate:** `python -c "import torch, fairchem"` clean in `uma312`;
+`python -c "import nvalchemi"` clean in `nvalchemi312`; both report
+`torch.__version__ == 2.8.0+cu128`.
+
+### MG2 — Checkpoint
+Place `uma-s-1p2.pt` (2.3 GB, FairChem UMA-S 1.2) at any path and export:
+```bash
+export UMA_CHECKPOINT=/path/to/uma-s-1p2.pt
+```
+**Gate:** the file loads: `python -c "import torch; torch.load('$UMA_CHECKPOINT', map_location='cpu', weights_only=False)"` returns without error.
+
+### MG3 — Product build
+```bash
+bash scripts/build_lammps_uma.sh    # -> build-uma/lmp
+```
+**Gate:** `build-uma/lmp -h | grep -i 'MPI v'` shows real MPI (not `MPI STUBS`); `pair_style uma` listed in `-h` output.
+
+### MG4 — Multi-node build (isolated)
+```bash
+bash scripts/build_lammps_uma_mn.sh # -> build-uma-mn/lmp
+```
+The script writes only `build-uma-mn/` and `uma-engine/build-cpp-mp-mn/`, and
+asserts protected trees (`build-uma`, `build-uma-v7`, both `build-cpp-mp`)
+are byte-identical after — set `MP_BUILD_DIR` if the site prefers a
+different location.
+**Gate:** `MN_BUILD_OK <md5>` and all `intact:` lines pass in the log.
+
+### MG5 — Site adaptation
+Every SLURM script has Delta-specific `#SBATCH --account=bbpl-delta-gpu` /
+`--partition=gpuA100x4`. Edit those for the new site. Also verify:
+- The launcher flag: Delta used `srun --mpi=pmix` with a
+  `PMIX_MCA_gds=hash` + per-node `TMPDIR` workaround. If the new site's
+  Slurm/PMIx pair is clean, the workaround is a no-op; if it breaks
+  differently, `--mpi=pmi2` is the fallback.
+- `torch.cuda.nccl.version()` reports NCCL, and `libnccl.so` is on
+  `LD_LIBRARY_PATH` — needed by the MN NCCL-over-MPI bootstrap.
+
+**Gate:** a trivial 2-node `srun --mpi=<flag> hostname` prints two distinct
+node names. Do NOT proceed to MG6 without this.
+
+### MG6 — Regenerate the `w8_n4096` shards
+```bash
+sbatch src/ML-UMA/uma-engine/tests/mn_w8_export.slurm
+```
+Two waves of 4 exports on one 4-GPU node, ~2 min end-to-end on Delta.
+**Gate:** `8/8` `model_mp_w8_n4096_r*.pt` present under
+`src/ML-UMA/examples/nacl_nsweep/artifacts/nacl8/`.
+
+### MG7 — Resume the plan at M0.5
+The pending Delta jobs are dropped. Reopen M0.5 first (it needs re-verifying
+on the new hardware because output-format handling can vary), then M3:
+
+```bash
+# M0.5 gate: check that %.17g dump/print round-trips
+python src/ML-UMA/uma-engine/tests/test_m05_precision.py
+
+# M3 gate: 8x8x8 / 2 nodes / 8 GPU vs the 4-GPU ground truth
+sbatch src/ML-UMA/uma-engine/tests/mn_parity_2node.slurm
+```
+
+Anything below M3 (M4 bootstrap, M5, M6, M7) proceeds unchanged after M3
+passes.
+
+### What MG deliberately skips
+
+- **M1 is NOT re-run.** Its gate passed on Delta (`dE 4.5e-11`,
+  `max|ΔF| 4.2e-16` vs energy-only wrapper) and the wrapper code is under
+  git. The V7 W18 instrumentation and NodeEnergyExportWrapper travel intact.
+- **63 GB of `uma-engine/artifacts/`** is not re-exported wholesale; only
+  what MG6 or specific milestones need is generated on demand.
+- **`frozen/v6_5d50357634/`** binaries are not carried; the frozen recipe
+  can be reconstructed by checking out `5d50357634` and rebuilding, but
+  nothing below depends on it.
+
+### Delta jobs that stay behind
+
+| Job | Description | Reopen as |
+|---|---|---|
+| `21038701` | LibTorch mn_parity_2n (M3 gate) | resubmit under MG7 |
+| `21038856` | ALCHEMI 4-GPU nacl8 (1 node ground truth) | rerun on new site |
+| `21038857` | ALCHEMI 8-GPU nacl8 (2 nodes) | rerun on new site |
 
 ---
 
