@@ -109,7 +109,8 @@ def main() -> int:
         txt = slurm_log.read_text(errors="ignore")
         m = re.search(r"SHELL_TIMING .*", txt)
         if m:
-            for k, cast in (("sp_pass_s", float), ("full_pass_s", float),
+            for k, cast in (("pass_a_s", float), ("pass_b_s", float),
+                            ("nsteps_a", int), ("nsteps_b", int), ("dn", int),
                             ("nvt_ms_per_step_shell", float)):
                 mm = re.search(rf"\b{k}=([0-9.eE+-]+)", m.group(0))
                 if mm:

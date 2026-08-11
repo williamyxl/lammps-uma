@@ -66,26 +66,36 @@ cd "${EX}"
 # parsed into timing.json for cross-checking, but SHELL_* below is the
 # authoritative wall time for this cell.
 #
-# Two invocations so SP and NVT are separated at the shell level:
-#   pass 1: NSTEPS=0 -> warmup + single point only
-#   pass 2: NSTEPS=N -> warmup + single point + NVT
-# NVT wall = (pass2 - pass1), i.e. the added cost of N NVT steps.
+# Differential method. Each invocation runs: run 0 (warmup+dump) + run 1 (NVE
+# SP probe) + run NSTEPS (NVT). Two passes at different NSTEPS; everything
+# except the NVT block is common and cancels in the difference:
+#   pass A: NSTEPS=NA        pass B: NSTEPS=NB
+#   ms/step = (tB - tA) * 1000 / (NB - NA)
+# Divide by the STEP DELTA, not NB: pass A already performs NA NVT steps.
+#
+# NB must be large enough that the NVT block dominates run-to-run startup
+# jitter. At NB=10 the signal was only ~5% of an 11 s wall, which is why the
+# shell number disagreed with the LAMMPS Pair timer by ~2.6x.
 # ---------------------------------------------------------------------------
+NA=${NSTEPS_A:-2}
+NB=${NSTEPS_B:-$(( NST > 50 ? NST : 50 ))}
+DN=$(( NB - NA ))
+
 T0=$(date +%s.%N)
-python run_path_uma.py --ngpus "${NG}" --uma-devices "${NG}" --nsteps 1 \
-  > "${UMA_MP_LOG_DIR}/../sp_pass.out" 2>&1
-RC_SP=$?
+python run_path_uma.py --ngpus "${NG}" --uma-devices "${NG}" --nsteps "${NA}" \
+  > "$(dirname ${UMA_MP_LOG_DIR})/passA.out" 2>&1
+RC_A=$?
 T1=$(date +%s.%N)
 
-python run_path_uma.py --ngpus "${NG}" --uma-devices "${NG}" --nsteps "${NST}"
+python run_path_uma.py --ngpus "${NG}" --uma-devices "${NG}" --nsteps "${NB}"
 RC=$?
 T2=$(date +%s.%N)
 
-SHELL_SP_S=$(echo "$T1 - $T0" | bc -l)
-SHELL_FULL_S=$(echo "$T2 - $T1" | bc -l)
-SHELL_NVT_MS_PER_STEP=$(echo "($T2 - $T1 - ($T1 - $T0)) * 1000 / ${NST}" | bc -l)
+SHELL_A_S=$(echo "$T1 - $T0" | bc -l)
+SHELL_B_S=$(echo "$T2 - $T1" | bc -l)
+SHELL_NVT_MS_PER_STEP=$(echo "($SHELL_B_S - $SHELL_A_S) * 1000 / ${DN}" | bc -l)
 
-printf 'SHELL_TIMING wave=%s sys=%s ngpu=%s nsteps=%s sp_pass_s=%.3f full_pass_s=%.3f nvt_ms_per_step_shell=%.3f rc_sp=%d rc=%d\n' \
-  "${WAVE}" "${SYS}" "${NG}" "${NST}" "${SHELL_SP_S}" "${SHELL_FULL_S}" \
-  "${SHELL_NVT_MS_PER_STEP}" "${RC_SP}" "${RC}"
+printf 'SHELL_TIMING wave=%s sys=%s ngpu=%s nsteps_a=%d nsteps_b=%d dn=%d pass_a_s=%.3f pass_b_s=%.3f nvt_ms_per_step_shell=%.3f rc_a=%d rc=%d\n' \
+  "${WAVE}" "${SYS}" "${NG}" "${NA}" "${NB}" "${DN}" "${SHELL_A_S}" "${SHELL_B_S}" \
+  "${SHELL_NVT_MS_PER_STEP}" "${RC_A}" "${RC}"
 echo "V7_CELL_DONE wave=${WAVE} sys=${SYS} ngpu=${NG} rc=${RC}"
