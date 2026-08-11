@@ -72,7 +72,12 @@ echo "serial rc=$?"
 grep -iE 'binding rank|Total wall time|ERROR' out.serial log.serial 2>/dev/null | head -4
 
 echo "=== 8 ranks / 2 nodes (expect the documented refusal on EVERY rank) ==="
-srun --ntasks=8 --gpus-per-task=1 --cpu-bind=cores \
+# --mpi=pmix is REQUIRED. Without it srun launches N independent 1-rank
+# LAMMPS jobs instead of one N-rank job: each prints "1 by 1 by 1 MPI
+# processor grid", the nprocs>1 guard never fires, and the gate silently
+# "passes" while testing nothing. Verified: the conda Open MPI 5.0.10 ships
+# libpmix.so and `srun --mpi=list` offers pmix_v5.
+srun --mpi=pmix --ntasks=8 --gpus-per-task=1 --cpu-bind=cores \
   "${LMP}" -in in.uma -log log.mpi8 > out.mpi8 2>&1
 echo "mpi8 rc=$?"
 
@@ -84,6 +89,22 @@ mpi = pathlib.Path("out.mpi8").read_text(errors="ignore")
 rec = {"gate": "M0 — UMA path under MPI"}
 rec["serial_ok"] = ("ERROR" not in ser) or ("Total wall time" in ser)
 
+# Did srun actually form ONE 8-rank job? A grid of "1 by 1 by 1" means it
+# launched 8 separate serial jobs, which would make every check below
+# meaningless. Require a real multi-rank decomposition.
+import re as _re
+grids = _re.findall(r"(\d+) by (\d+) by (\d+) MPI processor grid", mpi)
+rec["mpi_grids_seen"] = ["x".join(g) for g in grids[:3]]
+rec["n_grid_lines"] = len(grids)
+prod = [int(a) * int(b) * int(c) for a, b, c in grids]
+rec["max_ranks_in_one_job"] = max(prod) if prod else 0
+rec["single_8rank_job"] = rec["max_ranks_in_one_job"] == 8
+# Distinct GPUs: one line per rank, and the cuda index must vary.
+binds = _re.findall(r"uma: rank (\d+) -> cuda:(\d+) \(of (\d+) visible\)", mpi)
+rec["bind_lines"] = len(binds)
+rec["distinct_ranks"] = len({b[0] for b in binds})
+rec["distinct_gpus"] = len({b[1] for b in binds})
+
 # Every rank must hit the documented single-rank guard.
 guard = re.findall(r"currently supports a single MPI rank", mpi)
 rec["guard_hits"] = len(guard)
@@ -93,7 +114,8 @@ bad = [w for w in ("Segmentation fault", "signal", "CUDA error",
                    "out of memory", "std::bad_alloc") if w in mpi]
 rec["crash_markers"] = bad
 rec["clean_refusal"] = (len(guard) >= 1) and not bad
-rec["pass"] = bool(rec["serial_ok"] and rec["clean_refusal"])
+rec["pass"] = bool(rec["serial_ok"] and rec["clean_refusal"]
+                   and rec["single_8rank_job"])
 pathlib.Path("m0_gate_result.json").write_text(json.dumps(rec, indent=2) + "\n")
 print(json.dumps(rec, indent=2))
 print("M0 GATE:", "PASS" if rec["pass"] else "FAIL")
