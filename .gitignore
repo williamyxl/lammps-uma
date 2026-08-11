@@ -61,3 +61,6 @@ src/Makefile.package.settings-e
 /install/x64-GUI-MSVC
 /install
 .Rhistory
+build-uma-v7/
+src/ML-UMA/uma-engine/build-cpp-mp-v7/
+frozen/

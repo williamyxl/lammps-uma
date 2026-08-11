@@ -41,7 +41,9 @@ cmake --build "${LAMMPS_BUILD}" -j"${JOBS}"
 
 # Process-per-rank MP worker (EXCLUDE_FROM_ALL under LAMMPS add_subdirectory).
 # Prefer building into uma-engine/build-cpp-mp so UMA_LIBTORCH_MP_WORKER is stable.
-ENG_MP_BUILD="${ENG}/build-cpp-mp"
+# MP_BUILD_DIR overrides it so an experimental build (V7) cannot clobber the
+# worker binary that already-queued jobs are going to exec.
+ENG_MP_BUILD="${MP_BUILD_DIR:-${ENG}/build-cpp-mp}"
 mkdir -p "${ENG_MP_BUILD}"
 cmake -S "${ENG}" -B "${ENG_MP_BUILD}" \
   -DCMAKE_PREFIX_PATH="${TORCH_CMAKE}" \
