@@ -61,18 +61,42 @@ def run_case(name: str, xyz: Path) -> dict:
     atoms = read(str(xyz))
     pred = build()
 
-    # prepare_for_inference installs the umas_fast_pytorch conversions
-    # (SO2 conv rewrite + model._unified_radial_mlp). Reaching into
-    # pred.model.module before that runs yields a model whose forward raises
-    # AttributeError: 'eSCNMDMoeBackbone' object has no attribute
-    # '_unified_radial_mlp'. Drive one real predict first so the model is in the
-    # same prepared state the export path uses.
-    a0 = AtomicData.from_ase(atoms, task_name="omat").to("cuda")
-    pred.predict(a0)
+    # Two ordering constraints, both learned the hard way:
+    #  1. prepare_for_inference installs the umas_fast_pytorch conversions
+    #     (SO2 rewrite + model._unified_radial_mlp). Touching pred.model.module
+    #     before it runs gives a model whose forward raises AttributeError.
+    #  2. MLIPPredictUnit._lazy_init calls prepare_for_inference (predict.py:460)
+    #     BEFORE move_to_device (predict.py:464), so at that moment the weights
+    #     are still on CPU. Handing it CUDA data makes merge_MOLE_model fail with
+    #     'index is on cuda:0, different from other tensors on cpu'.
+    # Drive the warmup through FAIRChemCalculator with CPU-side atoms, exactly
+    # as the campaign oracle does, and let fairchem own the device move.
+    from fairchem.core import FAIRChemCalculator
+
+    warm = atoms.copy()
+    warm.calc = FAIRChemCalculator(pred, task_name="omat")
+    _ = float(warm.get_potential_energy())
     model = pred.model.module if hasattr(pred.model, "module") else pred.model
 
-    base = make_traced_export_wrapper(model, "omat").to("cuda").eval()
-    node = make_node_energy_export_wrapper(model, "omat").to("cuda").eval()
+    # clone_prepared_model deep-copies, so the wrapper owns its own parameter
+    # set. .to("cuda") must run AFTER construction (same order as
+    # export_mp_artifact.py:174) or the weights stay on CPU while inputs are on
+    # GPU -> 'index is on cuda:0, different from other tensors on cpu'.
+    base = make_traced_export_wrapper(model, "omat")
+    base = base.to("cuda").eval()
+    node = make_node_energy_export_wrapper(model, "omat")
+    node = node.to("cuda").eval()
+    for nm, w in (("base", base), ("node", node)):
+        pdev = {p.device.type for p in w.parameters()}
+        bdev = {b.device.type for b in w.buffers()}
+        cpu_params = [n for n, p in w.named_parameters() if p.device.type != "cuda"]
+        cpu_bufs = [n for n, b in w.named_buffers() if b.device.type != "cuda"]
+        print(f"[{nm}] param devices={pdev} buffer devices={bdev}", flush=True)
+        if cpu_params:
+            print(f"[{nm}] CPU PARAMS: {cpu_params[:6]}", flush=True)
+        if cpu_bufs:
+            print(f"[{nm}] CPU BUFFERS: {cpu_bufs[:6]}", flush=True)
+
 
     a = AtomicData.from_ase(atoms, task_name="omat")
     a = a.to("cuda")
@@ -124,7 +148,10 @@ def main() -> int:
         try:
             r = run_case(name, xyz)
         except Exception as exc:  # noqa: BLE001
-            r = {"case": name, "error": f"{type(exc).__name__}: {exc}"[:400]}
+            import traceback
+            print("FULL TRACEBACK:", traceback.format_exc(), flush=True)
+            r = {"case": name, "error": f"{type(exc).__name__}: {exc}"[:400],
+                 "traceback": traceback.format_exc()}
         out.append(r)
         print(json.dumps(r, indent=2), flush=True)
 
