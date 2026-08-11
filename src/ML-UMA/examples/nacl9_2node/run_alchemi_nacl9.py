@@ -119,9 +119,20 @@ def main() -> int:
             if device.type == "cuda":
                 torch.cuda.synchronize()
             rec["sp_ms"] = (time.perf_counter() - t0) * 1e3
-            full = dp.gather(owned)   # rank 0 gets the whole system
+            # Energy is a GLOBAL/PER_GRAPH output already reduced across ranks
+            # inside compute(); it comes from the returned ModelOutputs dict.
+            # gather() reconstructs the per-ATOM arrays (positions/forces) but
+            # does not carry the system scalar, so reading full.energy gave 0.0.
+            def _scalar(x):
+                return float(np.asarray(x.detach().cpu()).reshape(-1)[0])
+            e_out = None
+            for k in ("energy", "total_energy", "energies"):
+                if isinstance(out, dict) and k in out and out[k] is not None:
+                    e_out = _scalar(out[k])
+                    break
+            full = dp.gather(owned)   # rank 0 gets the whole atom set
             if rank == 0 and full is not None:
-                e = float(np.asarray(full.energy.detach().cpu()).reshape(-1)[0])
+                e = e_out if e_out is not None else _scalar(full.energy)
                 f = full.forces.detach().to(torch.float64).cpu().numpy()
                 rec["energy_eV"] = e
                 rec["energy_per_atom_eV"] = e / len(atoms)
