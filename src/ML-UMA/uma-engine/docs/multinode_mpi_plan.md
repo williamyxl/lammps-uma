@@ -377,6 +377,12 @@ its true magnitude rather than ~8e-07. Do not start M3 until this passes —
 otherwise every downstream parity claim is limited by file formatting.
 
 ### M1 — Per-atom energies
+
+> Borrowed (§9b): record the force/energy provenance in the DD artifact
+> metadata, using ALCHEMI's `ForceMode` vocabulary (`spec.py:276-292`). Our
+> wrapper is `FRAMEWORK_FROM_NODE_ENERGY`; stock UMA is `MODEL_INTERNAL`. The
+> distinction decides whether forces are already reduced or are the caller's
+> responsibility, and getting it wrong is silent.
 Extend [`export_wrapper.py`](../python/export_wrapper.py) to return `(node_energy[N], total_E)`; carry per-atom element references and `denorm` through `postprocess.cpp`. Export `uma-s-1p2-omat-f64-fast-dd`.
 **Gate:** `|Σ node_e − E_total| ≤ 1e-12` relative, on NaCl6 and water888. Serial forces unchanged.
 
@@ -407,10 +413,21 @@ Add an MPI/NCCL-backed backend to `SharedPeerGatherSlot` (`ncclGetUniqueId` → 
 **Gate:** with the reduction forced through MPI at 1 rank, results are bit-identical to serial; at N ranks under Scheme A, still bit-identical.
 
 ### M5 — Scheme B fat-halo exactness proof
+
+> Borrowed (§9b): accumulate `E_local` behind an explicit `i < nlocal` guard at
+> the summation site, as `mliap_unified.cpp:250-255` does, and assert
+> `Σ_ranks E_local == E_serial` so an inherited double-count or half-factor
+> fails loudly at one line.
 `newton pair on`, `comm_modify cutoff 24.0`, `E_local = Σ_{i<nlocal} e_i`, autograd over the extended set, `Pair::pack_reverse_comm` for ghost forces. Small systems only.
 **Gate:** NaCl6 at 2/4 ranks matches serial to `|ΔE| ≤ 1e-10`, `max|ΔF| ≤ 1e-9`. Record the measured extended/local ratio to confirm the §5 arithmetic. This milestone is a **correctness proof, not a product** — it validates ownership, reverse comm, and the global reductions before adding halo exchange.
 
 ### M6 — Scheme C halo exchange
+
+> Borrowed (§9b): give the halo plan its own `skin` and rebuild it with
+> `skin/2` migration hysteresis (ALCHEMI `config.py:77-121`), otherwise the
+> plan is rebuilt every step. Measure extended/local directly — ALCHEMI's two
+> strategies both kept a full-size working set per rank and OOMed, so
+> decomposition does not imply memory scaling.
 Shrink to `comm_modify cutoff 6.0`. Register `uma_dist::halo_gather(x, plan) -> x_ext` (forward: owned→ghost; backward: scatter-add ghost grads to owners), routed through `pack_forward_comm_kokkos` / `pack_reverse_comm_kokkos`. Export the DD module with FairChem's `gather_from_model_parallel_region_sum_grad` replaced by the halo op. Rebuild the halo plan on reneighbour only.
 **Gate:** matches M5 to the same bands at identical geometry, with extended/local ≈ 1.2–1.9×. Then and only then, timing.
 
@@ -427,6 +444,85 @@ true same-node ceiling is **above** 4096 and not yet pinned. Take the target
 from the finished sweep, not from this document. Also report step time against
 same-node `devices=4` **as context, not as a gate** — Scheme C is expected to
 lose on step time and win on reachable size (§5C).
+
+---
+
+## 9b. Prior art worth borrowing
+
+Two existing implementations already solved parts of this. Neither is a drop-in,
+but both suggest concrete design choices.
+
+### From LAMMPS `ML-IAP` (`mliap_unified`)
+
+The closest in-tree analogue: an external ML model (Python/PyTorch) driven
+through a LAMMPS pair style, i.e. our situation.
+
+**Ownership guard on the energy accumulation.** `mliap_unified.cpp:250-255`:
+
+```cpp
+double e = 0.5 * eij[ii];
+// must not count any contribution where i is not a local atom
+if (i < data->nlocal) {
+  data->eatoms[i] += e;
+  e_total += e;
+}
+```
+
+The pattern to copy for M5's `E_local = Σ_{i<nlocal} e_i`: the guard is an
+explicit `i < nlocal` test at the accumulation site, not a post-hoc slice. It
+composes with `newton pair on` because ghost contributions are folded back by
+reverse comm rather than being summed locally. Our M1 `node_energy[N]` tensor
+should be reduced with exactly this convention so the double-count question is
+settled at one line rather than distributed through the code.
+
+**Half-factor bookkeeping.** `0.5 * eij` for pair terms. UMA is a node-energy
+model rather than a pair model, so we do *not* inherit the factor — but the
+lesson is that the convention must be written down where the sum happens.
+M5's gate should assert `Σ_ranks E_local == E_serial`, which catches an
+inherited-factor error immediately.
+
+### From NVIDIA ALCHEMI (`nvalchemi.distributed`)
+
+ALCHEMI ships a working spatial decomposition for the *same* UMA model, so its
+abstractions are direct evidence of what the problem needs.
+
+**Declare force/energy provenance instead of hard-coding it.**
+`spec.py:276-292` defines a `ForceMode` enum:
+
+| Mode | Meaning |
+|---|---|
+| `MODEL_INTERNAL` | model computes forces in its own forward — *"E.g. UMA"* |
+| `FRAMEWORK_FROM_NODE_ENERGY` | framework does owned-only per-graph sum + all-reduce, then `forces = -dE/dx` — *"the MACE pattern"* |
+| `FRAMEWORK_FROM_GLOBAL_ENERGY` | model consolidates energy, framework differentiates |
+
+Our M1 wrapper implements precisely `FRAMEWORK_FROM_NODE_ENERGY`, and ALCHEMI
+classifies stock UMA as `MODEL_INTERNAL`. Worth recording explicitly in the DD
+artifact metadata: which mode the exported module obeys. It is the difference
+between "forces already reduced" and "forces are my responsibility", and
+getting it wrong is silent.
+
+**Name the reduction per output, not per model.** `spec.py` carries
+`owned_only_outputs`, `all_reduce_outputs`, and `output_kinds` sets. Energy is
+owned-only-sum-then-all-reduce; forces are owned-only-slice; per-atom
+quantities are neither. Encoding this as data rather than control flow means a
+new output cannot silently default to the wrong reduction. Cheap to adopt in
+`postprocess.cpp`.
+
+**Separate `skin` from `cutoff` and add migration hysteresis.**
+`config.py:77-121`: ghost width defaults to `cutoff + skin`, and atom migration
+uses `skin / 2` hysteresis so atoms near a boundary do not thrash between ranks
+on consecutive steps. Our §6 assumes LAMMPS' own `neighbor`/`comm_modify`
+handles this — mostly true, but the M6 halo *plan* is ours and needs the same
+hysteresis, or the plan rebuild cost reappears every step.
+
+**Negative result, also useful.** Measured here: ALCHEMI's `halo` and
+`graph_partition` both hold a full-size working set per rank (37.2 and
+39.3 GiB at 5832 atoms on 2 ranks, both OOM on a 40 GiB A100), because
+`graph_partition` *"holds the full geometry replicated"*. Their memory does not
+fall with rank count. **Scheme C only pays off if the ghost set is genuinely
+`O(nlocal · 1.2–1.9)`** (§5C), so M6 must measure extended/local directly
+rather than assume decomposition implies memory scaling. That measurement is
+already an M6 gate; ALCHEMI is the cautionary case for why.
 
 ---
 
