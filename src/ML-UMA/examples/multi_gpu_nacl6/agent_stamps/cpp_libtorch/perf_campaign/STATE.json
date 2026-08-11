@@ -1,8 +1,8 @@
 {
   "campaign": "uma_kk_perf",
-  "stamp": "2026-08-10T16:01:35",
+  "stamp": "2026-08-10T21:58:45",
   "phase": "V6_W17_cuda_graph",
-  "status": "w17_closed_structural_product_w8nk",
+  "status": "v7_w18_closed_accounting_solved_product_w8nk",
   "gates": {
     "E_F": true,
     "uma_le_ase": true,
@@ -132,7 +132,7 @@
     "21017619"
   ],
   "tick_log": "tick.log",
-  "next_action": "W17 closed (host-sync in FairChem layer_norm, not fixable by re-export). Product stays W8nk. Active track: NaCl N-sweep max-size on 4xA100 (job 21017619 N=8 seed).",
+  "next_action": "W18 closed. ms_post is the only remaining engine-side target (30-73 ms/step). W19/W20 invalidated by measurement. Before any promote claim, fix the timing methodology: >=3 repeats per cell, compare medians.",
   "v2a": {
     "change": "payload publish unlocked; short gen mutex; PERF ms_d2h/ms_pack",
     "jobs": {
@@ -2080,5 +2080,45 @@
     "verdict": "W17 CLOSED STRUCTURAL",
     "promote": false
   },
-  "handoff": "HANDOFF.md"
+  "handoff": "HANDOFF.md",
+  "v7_w18": {
+    "wave": "W18 instrumentation",
+    "build": "build-uma-v7 (isolated)",
+    "cells": 6,
+    "ef_pass": "6/6",
+    "accounting_closed": "4/4 multi-GPU cells (residual 0.42-0.57 ms)",
+    "result": "33.7 ms unaccounted block SOLVED",
+    "breakdown_nacl6_ngpu4": {
+      "h2d": 0.08,
+      "wshard": 0.84,
+      "pad": 0.0,
+      "prep": 0.04,
+      "fwd": 40.36,
+      "bar_pre_bwd": 0.03,
+      "bwd": 17.24,
+      "post": 30.41,
+      "accounted": 89.22,
+      "wait": 89.75,
+      "resid": 0.53
+    },
+    "finding": "ms_post (force all-reduce -> D2H -> payload publish) is 30-73 ms/step, rivaling ms_fwd. h2d+shard = ~1 ms, barrier = 0.03 ms.",
+    "invalidates": [
+      "W19 parent-side sharding (targets ~1 ms)",
+      "W20 edge-balanced partition (barrier is 0.03 ms, no imbalance)"
+    ],
+    "next_target": "ms_post",
+    "timing_noise": {
+      "deltas_vs_w8nk_ms": [
+        -0.8,
+        -1.19,
+        2.7,
+        2.31,
+        3.24
+      ],
+      "mean": 1.25,
+      "std": 1.86,
+      "note": "W18 is timers-only so the true delta is ~0; observed spread is run-to-run noise. The +-1 ms promote threshold is INSIDE this band, so single-sample promotes are not trustworthy -- require repeats."
+    },
+    "promote": false
+  }
 }

@@ -1,0 +1,121 @@
+{
+  "ver": "w18",
+  "sys": "nacl6",
+  "ngpu": 2,
+  "job": "21025787",
+  "build": "v7",
+  "natoms": 1728,
+  "sp_ms": 161.54,
+  "nvt_pair_ms_per_step": 160.75,
+  "nsteps": 10,
+  "energy_eV": -5830.923741338153,
+  "timing_source_internal": "lammps Pair/Loop timers (cross-check)",
+  "shell_sp_pass_s": 10.605,
+  "shell_full_pass_s": 11.154,
+  "shell_nvt_ms_per_step_shell": 54.889,
+  "timing_source": "shell (SLURM script, external to LAMMPS)",
+  "dE_vs_merge_ase": 4.638422979041934e-11,
+  "force_max_per_atom": 7.793410036545456e-07,
+  "force_mean_per_atom": 3.3342108250961423e-07,
+  "force_rms_per_atom": 3.7761603171084277e-07,
+  "n_atoms_over_tol": 0,
+  "n_atoms": 1728,
+  "worst_atoms": [
+    {
+      "index": 1607,
+      "abs_err": 7.793410036545456e-07,
+      "F": [
+        -0.183344,
+        0.172117,
+        -0.18964
+      ],
+      "F_oracle": [
+        -0.18334352479358637,
+        0.17211738769722254,
+        -0.1896395191235834
+      ]
+    },
+    {
+      "index": 1227,
+      "abs_err": 7.68716908842093e-07,
+      "F": [
+        0.121275,
+        0.173289,
+        -0.15405
+      ],
+      "F_oracle": [
+        0.12127454977412636,
+        0.17328948175914435,
+        -0.1540496048665093
+      ]
+    },
+    {
+      "index": 757,
+      "abs_err": 7.660542010676133e-07,
+      "F": [
+        0.139623,
+        0.300146,
+        -0.240198
+      ],
+      "F_oracle": [
+        0.1396234942281789,
+        0.30014641764480304,
+        -0.24019758993858428
+      ]
+    },
+    {
+      "index": 1378,
+      "abs_err": 7.324146161892743e-07,
+      "F": [
+        0.244389,
+        -0.175335,
+        -0.11426
+      ],
+      "F_oracle": [
+        0.24438948674365457,
+        -0.1753353413503731,
+        -0.11425957222469973
+      ]
+    },
+    {
+      "index": 902,
+      "abs_err": 7.318548555926843e-07,
+      "F": [
+        0.184305,
+        -0.11336,
+        0.148044
+      ],
+      "F_oracle": [
+        0.18430467169701883,
+        -0.11336045495998276,
+        0.14804446993626835
+      ]
+    }
+  ],
+  "force_sum_abs": 1.4419000000057136e-05,
+  "ef_pass": true,
+  "baseline_w8nk_ms": 161.94,
+  "delta_vs_w8nk_ms": -1.19,
+  "speed_win_ge_1ms": true,
+  "ase_ufast": 191.6,
+  "le_ase_nvt": true,
+  "tick_ms_fwd": 69.0349,
+  "tick_ms_bwd": 16.871,
+  "tick_ms_force_ar": 0.0274,
+  "tick_ms_h2d": 0.0757,
+  "tick_ms_wshard": 1.0397,
+  "tick_ms_pad": 0.0012,
+  "tick_ms_prep": 0.0416,
+  "tick_ms_bar_pre_bwd": 0.0308,
+  "tick_ms_post": 70.1445,
+  "tick_ms_accounted": 157.251,
+  "parent_ms_vesin": 1.875,
+  "parent_ms_wait_workers": 157.8175,
+  "parent_ms_total": 160.0565,
+  "parent_ms_shard": 0.1785,
+  "parent_ms_pub": 0.369,
+  "accounting_residual_ms": 0.566,
+  "accounting_closed": true,
+  "status": "PASS_PROMOTE_CANDIDATE",
+  "promote": true
+}
