@@ -1,6 +1,6 @@
 # MPI-driven multi-node LAMMPS + UMA — architecture plan
 
-**Stamp:** 2026-08-11 (rev 2) · **Status:** PLAN (no code written yet)
+**Stamp:** 2026-08-11 (rev 3) · **Status:** IN PROGRESS — first code landed
 **Supersedes:** [`multi_node_mpi.md`](multi_node_mpi.md) (v1/v2 all-gather/halo sketch — see [§7](#7-why-the-old-v1v2-sketch-does-not-work))
 **Sibling (current, same-node):** V7 campaign — **CLOSED**, see `V7_PLAN.md`
 
@@ -16,6 +16,60 @@
 > 4. §9 M2 — the Kokkos gate now has a **pre-committed fallback** instead of
 >    "reopen §8".
 > 5. §9 M7 — re-baseline the ceiling against the live N-sweep.
+
+> **Rev 3 — what actually got implemented, and a correction.**
+>
+> **Correction to §5.** The same-node product path is **graph-parallel, not
+> spatially decomposed**. One process holds all atoms, builds **one**
+> full-system vesin graph with `periodic=true`, and the **edge list** is split
+> by center atom across GPUs (`graph_shard.h`); every GPU sees every *atom* and
+> `1/world` of the *edges*. PBC is therefore resolved once, globally, before
+> any split — which is why the shipped path needs no ghosts. §4's 24 Å
+> receptive-field argument is real but applies to **spatial** decomposition
+> (Schemes B/C), not to what ships today. I briefly implemented a
+> one-rank-per-subdomain path and had to back it out: passing a rank's owned
+> atoms with the *global* cell makes the model see a diluted system with
+> spurious periodic images.
+>
+> Measured, to settle the `periodic` question (vesin 2-atom test, 10 Å box):
+>
+> | atoms passed | `periodic` | pairs found |
+> |---|---|---|
+> | owned only | `true` | 2 @ 1.0 Å (correct, wraps) |
+> | owned only | `false` | **0 (wrong)** |
+> | owned + ghost | `false` | 2 @ 1.0 Å (correct) |
+>
+> So `periodic=false` is correct **only** when ghosts are supplied. The shipped
+> design sidesteps this entirely by keeping `periodic=true` over the whole
+> system.
+>
+> **Landed (commits `af5d4d9c40`, `fce2278533`):**
+> - `SharedPeerGatherSlot::init_nccl_external` / `make_unique_id` /
+>   `unique_id_bytes` — NCCL bootstrapped by `MPI_Bcast` instead of `/dev/shm`,
+>   which is node-local. Collectives, the dedicated NCCL stream and the W1–W8
+>   optimisations are untouched; `ncclCommInitRank` already spans nodes.
+> - Per-rank GPU binding in `pair_uma.cpp` (`SLURM_LOCALID` → … → `comm->me`,
+>   `strtol`-validated, clamped). Previously `torch::Device(torch::kCUDA)` with
+>   no index, i.e. every rank on a node would bind GPU 0.
+> - Multi-rank `compute()`: `MPI_Allgatherv` of owned atoms, **tag-ordered**
+>   sort so every rank assembles a bitwise-identical system, full-system
+>   predict, each rank keeps forces for atoms it owns, only rank 0 contributes
+>   `eng_vdwl`.
+>
+> **This is Scheme A.** `O(N)` memory and compute per rank: it buys *more GPUs
+> for the same system*, **not larger systems**. Since §3 justifies this whole
+> campaign on capacity, Scheme A is a stepping stone — it proves the MPI
+> transport, the NCCL bootstrap and the tag ordering under real cross-node
+> conditions, and it is the parity oracle for B/C. It is **not** the product.
+>
+> **Tag ordering is load-bearing.** vesin output depends on atom order, so a
+> rank-dependent order would silently desynchronise the edge shards — wrong
+> forces with no error.
+>
+> **Parity target** (job `21026029`, NaCl 8×8×8 = 4096 atoms, 4 GPUs, 1 node):
+> `E = -13821.798173425354` eV, forces `(4096,3)` f64, `|F|max = 0.536847`.
+> The 8-GPU/2-node run must reproduce this. Note the existing shards are `w4`;
+> world 8 needs a `w8_n4096_r0..7` re-export.
 
 ---
 
@@ -181,11 +235,30 @@ Both are already satisfied by the campaign's `*-f64-fast` artifact (`execution_m
 
 ## 5. Three candidate decompositions
 
-### A. Replicated (every rank evaluates the whole system)
+### A. Replicated (every rank evaluates the whole system) — **IMPLEMENTED (rev 3)**
 
 All-gather positions by atom tag, every rank runs the full model, each rank keeps forces for its own `nlocal`. Bit-exact by construction.
 
 Memory `O(N)` per rank, compute `O(N)` per rank → **no size scaling and no speedup**. Useful only as a correctness oracle and as an ensemble/replica vehicle.
+
+Implemented in `pair_uma.cpp::compute()` (commit `fce2278533`). Two details
+that were not obvious from the sketch:
+
+1. **Each rank still shards the edge list.** Scheme A replicates the *atoms*,
+   but the underlying engine remains graph-parallel, so a rank with `devices 1`
+   evaluates the whole graph while an 8-rank job splits edges 8 ways via the
+   same `graph_shard.h` partition the forked workers use. "Replicated" refers
+   to the atom set, not the work.
+2. **Tag ordering is mandatory, not cosmetic.** vesin's output depends on input
+   atom order; if ranks assembled the system in MPI-rank order rather than tag
+   order, each would build a *different* graph and the edge shards would not
+   compose. Sorting by `atom->tag` makes the assembled system bitwise identical
+   on every rank.
+
+`predict_host` returns the fully reduced global force array on every rank, so
+no MPI reduction of forces is required — each rank simply selects the atoms it
+owns. Energy is global and identical everywhere, so exactly one rank may add it
+to `eng_vdwl` or LAMMPS' own sum would multiply it by `world`.
 
 ### B. Fat ghost halo (24 Å), no in-model communication
 
@@ -341,9 +414,24 @@ ambiguous between the scaffold and Kokkos. It is introduced **at M6**, where
 the Scheme C halo genuinely needs `pack_forward_comm_kokkos` + CUDA-aware MPI
 (`UMA_MN_KOKKOS=1`).
 
-**Gate:** 8-rank LJ NVT reproduces the serial trajectory (1e-6 relative on
-final temperature and PE; 100 LJ steps under a different decomposition diverge
-chaotically at round-off, while a real decomposition bug is orders larger).
+**Gate (rev 3, corrected):** the original gate here was *"8-rank LJ NVT
+reproduces the serial trajectory"*. That tests **LAMMPS' own MPI**, which
+upstream already ships and guarantees for its built-in potentials; it would
+pass whether or not `pair_style uma` works. Dropped.
+
+The M0 gate is now: the MN binary builds with `BUILD_MPI=ON` / `PKG_KOKKOS=OFF`
+without touching any protected build tree, loads `pair_style uma` on every
+rank, and each rank reports a **distinct** GPU via the new binding.
+
+Two failure modes this surfaced, worth keeping as regression notes:
+
+- `srun` **without** `--mpi=pmix` silently launches N independent 1-rank jobs.
+  Every one prints `1 by 1 by 1 MPI processor grid`, runs to completion, and
+  `nprocs == 1` everywhere — so a naive "did it crash?" gate reports PASS while
+  testing nothing. The checker now asserts
+  `max_ranks_in_one_job == world` before any other verdict counts.
+- The conda Open MPI 5.0.10 ships `libpmix.so` and `srun --mpi=list` offers
+  `pmix_v5`, so `--mpi=pmix` is the correct launcher flag on Delta.
 
 ### M0.5 — Full-precision output (prerequisite for every later gate)
 
@@ -404,11 +492,19 @@ regression, not a blocker. Record it as a known tax and continue to M3.
 Re-evaluate Kokkos only in M7, where the LAMMPS-side scaling argument
 (integrator, neighbour, exchange at 10⁵ atoms/node) can actually be measured.
 
-### M3 — Scheme A replicated oracle
+### M3 — Scheme A replicated oracle — **CODE LANDED, GATE PENDING**
+
+Implemented in rev 3; the bit-identical gate has not yet run on 2 nodes.
+
 Lift `nprocs > 1`. Tag-ordered `MPI_Allgatherv` of positions; every rank evaluates the full system; each keeps `nlocal` forces; energy on rank 0.
 **Gate:** 2/4/8 ranks bit-identical to serial. Explicitly labelled parity-only — **no speedup or scaling claims**.
 
-### M4 — Global reductions over MPI
+### M4 — Global reductions over MPI — **BOOTSTRAP LANDED**
+
+`init_nccl_external` / `make_unique_id` / `unique_id_bytes` landed in rev 3
+(commit `af5d4d9c40`). Still to do: route `balance_channels`' grad-aware
+all-reduce through it and verify the global-composition `merge_mole` assert.
+
 Add an MPI/NCCL-backed backend to `SharedPeerGatherSlot` (`ncclGetUniqueId` → `MPI_Bcast` → `ncclCommInitRank`). Replace `balance_channels`' `all_reduce_with_grad` with `uma_dist::all_reduce_sum` (same autograd pattern as `AllReduceSumFn`, `peer_context.cpp:75-95`). Verify `merge_mole=True` is merged on the **global** composition on every rank.
 **Gate:** with the reduction forced through MPI at 1 rank, results are bit-identical to serial; at N ranks under Scheme A, still bit-identical.
 
@@ -538,6 +634,7 @@ already an M6 gate; ALCHEMI is the cautionary case for why.
 | No virial anywhere in `pair_uma` | NPT impossible at any rank count | Out of scope here; file separately — UMA has `regress_stress` via autograd on the cell |
 | Same-node `devices>1` and MPI both active | fork/exec before CUDA init breaks under MPI | Forbid `devices>1` when `nprocs>1`; error at `init_style` |
 | Parity gates limited by output formatting, not physics | M5/M6 "pass" or "fail" for the wrong reason | **M0.5**: `%.17g` on dumps and `$(pe:%.17g)`; verified round-trip before M3 |
+| Scheme A mistaken for the product | Ships `O(N)`/rank: more GPUs for the same system, **no capacity gain**, which is the campaign's sole justification (§3) | Label every Scheme A result "parity only"; capacity claims require B/C. `w8_n4096` re-export is needed before the 8-GPU parity run |
 | Timing deltas smaller than run-to-run noise | False promote/regress calls | W18 measured std 1.86 ms on an instrumentation-only change, i.e. a ±1 ms threshold sits **inside** the noise. Require ≥3 repeats per cell and compare medians |
 
 ## 11. Explicitly out of scope
