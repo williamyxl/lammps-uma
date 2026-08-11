@@ -27,8 +27,15 @@ NG=${NG:?set NG}
 case "$SYS" in
   nacl6)    EX=${ROOT}/src/ML-UMA/examples/multi_gpu_nacl6; NAT=1728; NST=${NSTEPS:-10}
             ART=${ENG}/artifacts/uma-s-1p2-omat-f64-fast ;;
+  # water: the devices=1 traced model lives in -water648, but the multi-GPU
+  # shards (model_mp_w{2,4}_n648_r*) are in -f64-fast, which is what the locked
+  # W8nk water bars used and which reproduces the oracle energy exactly.
   water888) EX=${ROOT}/src/ML-UMA/examples/water888;        NAT=648;  NST=${NSTEPS:-10}
-            ART=${ENG}/artifacts/uma-s-1p2-omat-f64-fast-water648 ;;
+            if [ "${NG}" = "1" ]; then
+              ART=${ENG}/artifacts/uma-s-1p2-omat-f64-fast-water648
+            else
+              ART=${ENG}/artifacts/uma-s-1p2-omat-f64-fast
+            fi ;;
   *) echo "bad SYS=$SYS"; exit 1 ;;
 esac
 test -f "${ART}/model_traced.pt" || { echo "V7_CELL_FAIL missing ${ART}/model_traced.pt"; exit 1; }
