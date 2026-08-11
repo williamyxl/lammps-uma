@@ -247,8 +247,32 @@ void PairUMA::load_predictor()
     // For devices>1 fork the GP worker before any parent CUDA init.
     torch::Device device = torch::Device(torch::kCPU);
     if (num_devices <= 1) {
-      device = torch::cuda::is_available() ? torch::Device(torch::kCUDA)
-                                           : torch::Device(torch::kCPU);
+      if (torch::cuda::is_available()) {
+        // M0 (multi-node): bind one GPU per MPI rank. A bare
+        // torch::Device(torch::kCUDA) means index 0, so every rank on a node
+        // would pile onto GPU 0 -- N-way oversubscription and N x the memory on
+        // one card, while the other GPUs idle.
+        //
+        // Prefer the launcher's local-rank hint; fall back to comm->me. When
+        // the launcher already pins one GPU per task (srun --gpus-per-task=1),
+        // device_count() is 1 and the modulo correctly yields index 0.
+        int local_rank = comm->me;
+        const char *lr = nullptr;
+        for (const char *v : {"SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
+                              "MV2_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
+          if ((lr = std::getenv(v)) != nullptr && *lr) break;
+          lr = nullptr;
+        }
+        if (lr) local_rank = std::atoi(lr);
+        const int ndev = static_cast<int>(torch::cuda::device_count());
+        const int idx = (ndev > 0) ? (local_rank % ndev) : 0;
+        device = torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(idx));
+        if (screen && comm->me == 0)
+          fprintf(screen, "uma: binding rank %d -> cuda:%d of %d visible\n",
+                  comm->me, idx, ndev);
+      } else {
+        device = torch::Device(torch::kCPU);
+      }
     }
     predictor =
         new uma::Predictor(uma::Predictor::from_artifact(artifact_dir, device, num_devices));
