@@ -90,7 +90,7 @@
     ]
   },
   "results_parent": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/multi_gpu_nacl6/results",
-  "created_utc": "2026-08-10T01:50:13.851814+00:00",
+  "created_utc": "2026-08-10T12:50:41.841811+00:00",
   "meta": {
     "ngpus_present": [
       1,
