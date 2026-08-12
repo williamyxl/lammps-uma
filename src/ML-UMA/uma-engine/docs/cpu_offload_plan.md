@@ -79,6 +79,10 @@ Pre-pin a large host buffer as the offload target to maximize H2D/D2H BW.
 Enabler for A2/A3.
 - **Status:** NOT STARTED
 
+## Related docs
+- `activation_checkpointing.md` — the checkpointing method in detail (12.7× on
+  its own; the base lever that offload stacks on).
+
 ## Enablers already landed
 - `--activation-checkpointing` flag in export_artifact.py (eager only; does not
   trace).
