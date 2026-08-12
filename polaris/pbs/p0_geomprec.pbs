@@ -1,0 +1,32 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=0:30:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N p0_geomprec
+#PBS -A RAPINS
+
+# Attribution: does the LAMMPS-vs-tensor dE come from geometry file PRECISION?
+# Run the tensor oracle (general recipe) twice: once reading the 8-digit .extxyz,
+# once reading the full-precision .data that the LAMMPS pair style actually reads.
+# If the .data run's dE collapses toward ~1e-13, the earlier 1.4e-7 was the
+# extxyz's %.8f rounding, not the model / graph / output mantissa.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+
+echo "############ geom = extxyz (8-digit, ASE oracle default) ############"
+python "${P0}/p0_tensor_parity.py" --systems nacl666 water888 --recipes general --geom extxyz
+mv "${P0}"/results/${PBS_JOBID}/P0_TENSOR_PARITY.json \
+   "${P0}"/results/${PBS_JOBID}/P0_TENSOR_PARITY_extxyz.json 2>/dev/null || true
+
+echo "############ geom = data (full precision, LAMMPS input) ############"
+python "${P0}/p0_tensor_parity.py" --systems nacl666 water888 --recipes general --geom data
+mv "${P0}"/results/${PBS_JOBID}/P0_TENSOR_PARITY.json \
+   "${P0}"/results/${PBS_JOBID}/P0_TENSOR_PARITY_data.json 2>/dev/null || true
+echo "P0_GEOMPREC_RC=$?"

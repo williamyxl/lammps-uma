@@ -43,6 +43,8 @@ delta_parity/
 **/structure*.txt
 **/*.manifest.json
 
-# Exception: immutable multi-GPU geometry (under multi_gpu_nacl6)
-!multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz
+# Exception: immutable multi-GPU geometry manifest (under multi_gpu_nacl6).
+# The .extxyz is intentionally NOT tracked: the full-precision LAMMPS .data is
+# the single authoritative geometry for all tests (reduced-precision extxyz
+# inflated water888 |dE| by ~1e-7 eV).
 !multi_gpu_nacl6/structures/nacl6_rattle_fixed.manifest.json

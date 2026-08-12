@@ -97,3 +97,20 @@ src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/acti
 src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/tier*_jobs.txt
 src/ML-UMA/examples/multi_gpu_nacl6/agent_stamps/cpp_libtorch/perf_campaign/tier*_export_job.txt
 src/ML-UMA/examples/nacl9_2node/.alchemi_2node_n8_jobid
+
+# Reduced-precision (.extxyz, %.8f) geometries are NOT tracked: the full-precision
+# LAMMPS .data is the single authoritative geometry source for all tests. Mixing
+# an 8-digit extxyz with a 16-digit .data inflated water888 |dE| by ~1e-7 eV.
+src/ML-UMA/examples/multi_gpu_nacl6/structures/nacl6_rattle_fixed.extxyz
+src/ML-UMA/examples/water888/water_nvt_300K.extxyz
+# Full-precision extxyz derived on-the-fly from .data by the P0 MP export.
+src/ML-UMA/uma-engine/artifacts/**/_p0_geom/
+
+# PBS job stdout/stderr logs (Polaris: <jobname>.o<id> / .e<id>)
+*.o[0-9]*
+*.e[0-9]*
+# P0 job result dirs (regenerated per run)
+src/ML-UMA/examples/polaris_p0/results/
+# uma-engine C++ build trees
+src/ML-UMA/uma-engine/build-cpp-mp/
+src/ML-UMA/uma-engine/build-cpp-mp-*/

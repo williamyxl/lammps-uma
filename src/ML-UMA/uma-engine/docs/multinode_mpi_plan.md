@@ -795,6 +795,124 @@ passes.
 
 ---
 
+## 9d. Phase P0 — Polaris single-node bring-up & validation (do this BEFORE any multi-node work)
+
+**Why it exists:** rev 6. Migrated to **ALCF Polaris** (PBS Pro + Cray PALS
+`mpiexec`, 4×A100-40GB/node, `PMI_RANK`/`PMI_LOCAL_RANK` affinity). Every
+existing runner is SLURM/`srun --mpi=pmix`; none run here. Before porting the
+multi-node launch layer (MG5+) and reopening M0.5/M3, first prove the *shipped
+single-node product* builds and is physically correct on Polaris, validated
+against an independent **ASE + FairChem FP64** ground truth (not the Delta
+recorded numbers, which came from different hardware/toolchain).
+
+P0 supersedes MG3 on Polaris and is a hard gate for MG4→M0.5. It runs on **one
+node, one MPI rank, ≤4 GPUs** — no MPI decomposition, no PMIx.
+
+```mermaid
+flowchart LR
+  P0a["P0a env + build build-uma/lmp"] --> P0b["P0b export omat-f64 artifact"]
+  P0b --> P0c["P0c ASE FC FP64 oracle: NaCl666 + water888"]
+  P0c --> P0d["P0d LAMMPS UMA: SP + NVT300K x10"]
+  P0d --> P0e["P0e parity vs oracle + timing report"]
+```
+
+**Systems (fixed for P0):**
+
+| Tag | Composition | Approx atoms | Source |
+|---|---|---|---|
+| NaCl666 | rocksalt 6×6×6 | 1728 | `examples/nacl_nsweep/build_structure.py` / existing nacl6 data |
+| water888 | liquid H2O box | 648 | `examples/water888/` (`water_nvt_300K*.data` / `.extxyz`) |
+
+### P0a — Environment + product build
+
+- Polaris env include: `conda activate uma312`
+  (`/lus/grand/.../conda/envs/uma312`), `module load cuda/12.9` (or the version
+  matching `torch.version.cuda`), `LD_LIBRARY_PATH` += vesin + torch/lib +
+  cuda/lib64. `UMA_CHECKPOINT=/lus/eagle/projects/RAPINS/xiaoliyan/polaris/uma-s-1p2.pt`.
+- `bash scripts/build_lammps_uma.sh` → `build-uma/lmp` (Kokkos CUDA
+  `AMPERE80`, `BUILD_MPI=OFF`) on a compute node (build in a PBS job, not the
+  login node).
+
+**Gate:** `build-uma/lmp -h` lists `pair_style uma`; PairUMA symbols present in
+`liblammps.a`; MP worker binary built.
+
+### P0b — Export the FP64 artifact
+
+`export_artifact.py --task omat --dtype float64` →
+`uma-engine/artifacts/uma-s-1p2-omat-f64/` (`model_traced.pt` + `metadata.json`).
+
+**Gate:** artifact dir present; `uma_parity_cli` (or `parity_nacl.py`) loads it
+and returns finite E/F.
+
+### P0c — ASE + FairChem FP64 ground truth (the oracle)
+
+**Geometry precision (load-bearing).** The oracle MUST read the same
+full-precision LAMMPS `.data` file the pair style reads, NOT a reduced-precision
+`.extxyz`. The water888 `.extxyz` is written with `%.8f` (8 digits); comparing
+LAMMPS (16-digit `.data`) against an 8-digit oracle geometry inflates the
+apparent `|dE|` from ~0 to ~1.4e-7 eV purely from a ~5e-9 A position mismatch.
+Verified on Polaris: water888 engine-vs-FairChem `|dE|` is **0.0 (bit-identical)**
+on the `.data` geometry vs 4.5e-13 on the `.extxyz`, and the LAMMPS-vs-oracle
+gap closes to the ~1e-12 machine floor once both read `.data`.
+
+For NaCl666 and water888, in env `uma312`, run FairChem's UMA calculator
+(`task_name=omat`, FP64) through ASE on the **identical** geometry used by
+LAMMPS:
+- single-point: record total energy and the full per-atom force array
+  (`(N,3)` float64) to `.npz`.
+- Save geometry provenance (a manifest hash) so LAMMPS reads the same atoms.
+
+This mirrors the existing `record_ase_fp64_oracle.py` /
+`run_path_ase.py` drivers; reuse them where possible.
+
+**Gate:** oracle E and F written for both systems; forces finite; net force
+`|Σ F|` at rounding floor.
+
+### P0d — LAMMPS UMA runs
+
+Same two geometries, `pair_style uma precision double` (single rank, `devices 1`
+or up to 4), `units metal`, `newton off`.
+- **Single point:** `run 0`, dump forces with `dump_modify ... format float
+  %.17g` and `print "E = $(pe:%.17g)"` (M0.5 full-precision output — mandatory
+  or parity floors at ~8.7e-07).
+- **NVT 300 K, 10 steps:** `fix nvt temp 300 300 $(100*dt)`, `thermo 1`,
+  time the run; report ms/step (median of the 10, warmup excluded).
+
+### P0e — Parity + timing report
+
+Compare LAMMPS SP vs the ASE-FC FP64 oracle:
+
+| Quantity | Gate |
+|---|---|
+| `|ΔE|` (total) | ≤ 1e-6 eV (abs) or ≤ 1e-9 relative |
+| per-atom `max|ΔF|` | ≤ 1e-5 eV/Å (full-precision output; see M0.5) |
+| per-atom `mean|ΔF|` | reported |
+| NVT300K ms/step | reported (context, not a gate) |
+
+Write `P0_REPORT.md` + `P0_RESULTS.json` (per system: N, E_lammps, E_ase,
+dE, maxdF, meandF, sp_ok, nvt_ms_step). **P0 PASS** = both systems pass E and F
+bands.
+
+**Only after P0 PASS** proceed to MG4 (MN build) → MG5 (Polaris PBS/mpiexec
+launch adaptation, replacing `srun --mpi=pmix`) → M0.5 → M3.
+
+### Polaris launch notes (carried into MG5)
+
+- Scheduler: **PBS Pro**. `#PBS -l select=<nodes>:system=polaris:ncpus=64:ngpus=4`,
+  `-l filesystems=home:eagle`, `-l walltime=...`, `-q debug|debug-scaling|prod`,
+  `-A RAPINS`.
+- Launcher: **`mpiexec`** (Cray PALS), *not* `srun`. Ranks-per-node and
+  depth via `mpiexec -n <total> --ppn <pernode> --depth <cpus> --cpu-bind depth`.
+- GPU affinity: wrapper using `PMI_LOCAL_RANK % 4` →
+  `CUDA_VISIBLE_DEVICES`. `pair_uma.cpp`'s binding reads
+  `SLURM_LOCALID`/`OMPI_*`/`LOCAL_RANK` — none match `PMI_LOCAL_RANK`, so the
+  wrapper must **also export `LOCAL_RANK=$PMI_LOCAL_RANK`** (or pin via
+  `CUDA_VISIBLE_DEVICES` so each rank sees one GPU → torch index 0).
+- No PMIx/`--mpi=pmix` on Polaris; the Delta PMIx `gds/shmem2` workaround is
+  N/A. NCCL-over-MPI bootstrap still applies for M4+.
+
+---
+
 ## 10. Open risks
 
 | Risk | Impact | Mitigation |

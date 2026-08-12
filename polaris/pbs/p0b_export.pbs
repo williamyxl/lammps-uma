@@ -1,0 +1,25 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N p0b_export
+#PBS -A RAPINS
+
+# P0b — export the FP64 TorchScript artifact (task=omat) from the UMA checkpoint.
+# Output: src/ML-UMA/uma-engine/artifacts/uma-s-1p2-omat-f64/{model_traced.pt,metadata.json}
+
+set -euo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+OUT="${UMA_ARTIFACT_DIR}"
+echo "=== export omat FP64 -> ${OUT} ==="
+PYTHONPATH="${ENG}/python:${PYTHONPATH:-}" python "${ENG}/python/export_artifact.py" \
+  --checkpoint "${UMA_CHECKPOINT}" --dtype float64 --task omat \
+  --output "${OUT}"
+
+test -f "${OUT}/model_traced.pt" && test -f "${OUT}/metadata.json" \
+  && echo "P0B_EXPORT_OK ${OUT}" || { echo "P0B_EXPORT_FAIL"; exit 1; }

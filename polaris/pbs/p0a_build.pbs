@@ -1,0 +1,29 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N p0a_build
+#PBS -A RAPINS
+
+# P0a — build LAMMPS + Kokkos-CUDA + ML-UMA (LibTorch) on a Polaris compute node.
+# Produces build-uma/lmp and the uma_libtorch_mp_worker. Login-node builds are
+# discouraged (no GPU / different arch); build here instead.
+
+set -euo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+# Kokkos CUDA builds via nvcc_wrapper, which forwards to the host C++ compiler.
+# Pin it to gcc-13 (matches torch 2.8 / avoids nvc++ + old gcc).
+export NVCC_WRAPPER_DEFAULT_COMPILER="${CXX:-g++-13}"
+echo "toolchain: CC=${CC} CXX=${CXX} nvcc=$(command -v nvcc) CUDA_HOME=${CUDA_HOME}"
+echo "vesin vendored: $(bash src/ML-UMA/uma-engine/scripts/vendor_vesin_for_arch.sh --check 2>&1 | head -1)"
+
+echo "=== build_lammps_uma.sh (Kokkos CUDA AMPERE80, BUILD_MPI=OFF) ==="
+bash scripts/build_lammps_uma.sh
+
+echo "=== sanity ==="
+./build-uma/lmp -h 2>&1 | grep -iE 'MPI (v|STUBS)|pair_style' | head -3 || true
+test -x ./build-uma/lmp && echo "P0A_BUILD_OK $(md5sum build-uma/lmp | cut -d' ' -f1)"

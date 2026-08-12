@@ -1,0 +1,80 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N p0_export_mp
+#PBS -A RAPINS
+
+# Export multi-GPU MP shards (model_mp_w{W}_n{N}_r{R}.pt) for the P0 systems so
+# `pair_style uma ... devices 2|4` can run. One shard = one single-GPU export;
+# 4 GPUs/node -> launch in waves of 4. Traced 1-GPU model already exists.
+#
+# Systems: nacl666 (N=1728, Na Cl), water888 (N=648, O H).
+# Worlds:  2 and 4.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+ART="${UMA_ARTIFACT_DIR}"          # shards live alongside the traced model
+CKPT="${UMA_CHECKPOINT}"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+declare -A NAT=( [nacl666]=1728 [water888]=648 )
+WORLDS=(2 4)
+
+export UMA_FORBID_RAY_GP=1
+mkdir -p "${ART}"
+
+# The MP exporter needs an ASE-readable geometry. Derive a FULL-PRECISION extxyz
+# from the authoritative .data (the tracked reduced-precision .extxyz is gone).
+GEOMDIR="${ART}/_p0_geom"
+mkdir -p "${GEOMDIR}"
+declare -A XYZ
+for S in nacl666 water888; do
+  XYZ[$S]="${GEOMDIR}/${S}_fp.extxyz"
+  python -c "import p0_common as c; c.write_full_precision_extxyz('${S}', '${XYZ[$S]}')" \
+    || { echo "P0_MP_FAIL could not derive geometry for ${S}"; exit 1; }
+done
+
+launch() {  # world rank sysname
+  local W="$1" R="$2" S="$3"
+  local GPU=$(( R % 4 ))
+  echo "=== export ${S} world=${W} rank=${R} on GPU ${GPU} ==="
+  CUDA_VISIBLE_DEVICES="${GPU}" PYTHONPATH="${ENG}/python:${PYTHONPATH:-}" \
+    python "${ENG}/python/export_mp_artifact.py" \
+      --checkpoint "${CKPT}" --output "${ART}" \
+      --world "${W}" --ranks "${R}" \
+      --dtype float64 --task omat --device cuda \
+      --atoms "${XYZ[$S]}" \
+      --execution-mode umas_fast_pytorch --merge-mole &
+}
+
+for S in nacl666 water888; do
+  for W in "${WORLDS[@]}"; do
+    test -f "${XYZ[$S]}" || { echo "P0_MP_FAIL missing ${XYZ[$S]}"; exit 1; }
+    i=0
+    for (( R=0; R<W; R++ )); do
+      launch "${W}" "${R}" "${S}"
+      i=$(( i + 1 ))
+      if (( i % 4 == 0 )); then wait; fi
+    done
+    wait
+  done
+done
+wait
+
+echo "=== shard inventory ==="
+rc=0
+for S in nacl666 water888; do
+  N="${NAT[$S]}"
+  for W in "${WORLDS[@]}"; do
+    n=$(ls "${ART}"/model_mp_w${W}_n${N}_r*.pt 2>/dev/null | wc -l)
+    echo "  ${S} N=${N} w${W}: ${n}/${W}"
+    [[ "${n}" -eq "${W}" ]] || rc=1
+  done
+done
+[[ $rc -eq 0 ]] && echo "P0_MP_EXPORT_OK" || { echo "P0_MP_EXPORT_FAIL"; exit 1; }

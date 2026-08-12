@@ -1,0 +1,17 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=0:30:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N p0_gdiag
+#PBS -A RAPINS
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+python "${P0}/p0_graph_diag.py"
+echo "P0_GDIAG_RC=$?"

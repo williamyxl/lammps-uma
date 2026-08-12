@@ -1,0 +1,52 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N p0_validate
+#PBS -A RAPINS
+
+# P0c/P0d/P0e — single-node validation on one Polaris node (1 rank, 1 GPU):
+#   1. ASE + FairChem FP64 oracle (SP E+F + NVT300K x10) for both systems
+#   2. LAMMPS + LibTorch-UMA (precision double) for both systems
+#   3. parity vs oracle + timing -> P0_REPORT.md / P0_RESULTS.json
+#
+# Single rank, single GPU: no mpiexec, no PMI. Pin to GPU 0.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+# All 4 GPUs on the node are visible; the traced (devices 1) path uses GPU 0,
+# the MP runtime (devices 2/4) pins each worker to its own GPU internally.
+unset CUDA_VISIBLE_DEVICES
+export LMP_UMA="${LMP_UMA:-${ROOT}/build-uma/lmp}"
+export UMA_LIBTORCH_MP_WORKER="${UMA_LIBTORCH_MP_WORKER:-${ENG}/build-cpp-mp/uma_libtorch_mp_worker}"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+SYSTEMS=("nacl666" "water888")
+DEVSET=(${P0_DEVICES:-1 2 4})
+
+test -x "${LMP_UMA}" || { echo "P0_FAIL missing ${LMP_UMA} (run p0a_build first)"; exit 1; }
+test -f "${UMA_ARTIFACT_DIR}/model_traced.pt" || { echo "P0_FAIL missing artifact (run p0b_export)"; exit 1; }
+test -x "${UMA_LIBTORCH_MP_WORKER}" || echo "WARN: MP worker missing (devices>1 will fail): ${UMA_LIBTORCH_MP_WORKER}"
+
+# results dir is keyed by PBS_JOBID inside p0_common.results_dir()
+for S in "${SYSTEMS[@]}"; do
+  echo "=== [${S}] ASE-FC FP64 oracle: general (matches devices 1) ==="
+  python "${P0}/p0_ase_oracle.py" "${S}" --recipe general   --nsteps "${P0_NVT_STEPS:-10}" || { echo "P0_FAIL ase ${S} general"; exit 1; }
+  echo "=== [${S}] ASE-FC FP64 oracle: fastmerge (matches devices 2/4 MP shards) ==="
+  python "${P0}/p0_ase_oracle.py" "${S}" --recipe fastmerge --nsteps "${P0_NVT_STEPS:-10}" || { echo "P0_FAIL ase ${S} fastmerge"; exit 1; }
+  for D in "${DEVSET[@]}"; do
+    echo "=== [${S}] LAMMPS-UMA precision double, devices ${D} ==="
+    python "${P0}/p0_lammps.py" "${S}" --nsteps "${P0_NVT_STEPS:-10}" --devices "${D}" \
+      || { echo "P0_FAIL lammps ${S} d${D}"; exit 1; }
+  done
+done
+
+echo "=== parity + report (devices ${DEVSET[*]}) ==="
+python "${P0}/p0_parity.py" --systems "${SYSTEMS[@]}" --devices "${DEVSET[@]}"
+rc=$?
+echo "P0_PARITY_RC=${rc}"
+exit ${rc}

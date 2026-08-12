@@ -1,0 +1,20 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle
+#PBS -q debug # debug upto 1 hour 2 node, debug-scaling upto 1 hour 10 nodes.
+#PBS -N pyscf
+#PBS -A RAPINS
+
+
+# proxy settings
+export HTTP_PROXY="http://proxy.alcf.anl.gov:3128"
+export HTTPS_PROXY="http://proxy.alcf.anl.gov:3128"
+export http_proxy="http://proxy.alcf.anl.gov:3128"
+export https_proxy="http://proxy.alcf.anl.gov:3128"
+export ftp_proxy="http://proxy.alcf.anl.gov:3128"
+export no_proxy="admin,polaris-adminvm-01,localhost,*.cm.polaris.alcf.anl.gov,polaris-*,*.polaris.alcf.anl.gov,*.alcf.anl.gov"
+
+source /lus/eagle/projects/RAPINS/xiaoliyan/polaris/software/miniforge3/etc/profile.d/conda.sh
+conda activate uma312 
+cd $PBS_O_WORKDIR

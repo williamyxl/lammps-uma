@@ -200,7 +200,8 @@ void PairUMA::compute(int eflag, int vflag)
 
     // counts/displacements for the variable-sized per-rank contributions
     mn_counts.assign(static_cast<size_t>(mn_world), 0);
-    MPI_Allgather(&nlocal, 1, MPI_INT, mn_counts.data(), 1, MPI_INT, world);
+    int nlocal_send = nlocal;
+    MPI_Allgather(&nlocal_send, 1, MPI_INT, mn_counts.data(), 1, MPI_INT, world);
     mn_displs.assign(static_cast<size_t>(mn_world), 0);
     int running = 0;
     for (int r = 0; r < mn_world; r++) {
