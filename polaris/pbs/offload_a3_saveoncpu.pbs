@@ -1,0 +1,42 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N offload_a3_soc
+#PBS -A RAPINS
+
+# A3: eager model + torch.autograd.graph.save_on_cpu(pin_memory=True).
+#   (i)  save_on_cpu only
+#   (ii) save_on_cpu + activation checkpointing (stacked)
+# vs eager ckpt-only reference (21952). Record max N and (via peak) capacity.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES=0
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+OUT="${M3}/results/offload_a3_${PBS_JOBID:-manual}"; mkdir -p "${OUT}"
+
+echo "############ A3(i): save_on_cpu ONLY (no ckpt) ############"
+python "${M3}/max_atoms_sweep.py" --ckpt "${UMA_CHECKPOINT}" --checkpointing 0 \
+  --save-on-cpu 1 --sizes 6 8 10 12 14 16 18 20 22 24 26 \
+  --out "${OUT}/a3_soc_only.json" || true
+
+echo "############ A3(ii): save_on_cpu + checkpointing (stacked) ############"
+python "${M3}/max_atoms_sweep.py" --ckpt "${UMA_CHECKPOINT}" --checkpointing 1 \
+  --save-on-cpu 1 --sizes 12 16 20 24 28 32 36 40 \
+  --out "${OUT}/a3_soc_ckpt.json" || true
+
+echo "=== SUMMARY ==="
+python - "${OUT}" <<'PY'
+import json,sys; from pathlib import Path
+d=Path(sys.argv[1])
+for f in ["a3_soc_only.json","a3_soc_ckpt.json"]:
+    p=d/f
+    if p.is_file():
+        s=json.loads(p.read_text()); print(f"{s['tag']}: max_atoms_fit={s['max_atoms_fit']}")
+PY
+echo "OFFLOAD_A3_DONE ${OUT}"

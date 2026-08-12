@@ -1,0 +1,42 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N cap_sweep_1gpu
+#PBS -A RAPINS
+
+# Capacity sweep on ONE A100-40GB: largest NaCl cube that fits a single-point
+# E+F (autograd), (a) activation-checkpointing OFF, (b) ON. Answers "how much
+# bigger a box does checkpointing buy on fixed GPU memory".
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES=0
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+OUT="${M3}/results/cap_sweep_${PBS_JOBID:-manual}"
+mkdir -p "${OUT}"
+
+echo "############ (a) activation checkpointing OFF ############"
+python "${M3}/max_atoms_sweep.py" --ckpt "${UMA_CHECKPOINT}" --checkpointing 0 \
+  --out "${OUT}/sweep_ckpt_off.json"
+
+echo "############ (b) activation checkpointing ON ############"
+python "${M3}/max_atoms_sweep.py" --ckpt "${UMA_CHECKPOINT}" --checkpointing 1 \
+  --out "${OUT}/sweep_ckpt_on.json"
+
+echo "=== SUMMARY ==="
+python - "${OUT}" <<'PY'
+import json,sys
+from pathlib import Path
+d=Path(sys.argv[1])
+for f in ["sweep_ckpt_off.json","sweep_ckpt_on.json"]:
+    p=d/f
+    if p.is_file():
+        s=json.loads(p.read_text())
+        print(f"{s['tag']}: max_atoms_fit={s['max_atoms_fit']}")
+PY
+echo "CAP_SWEEP_DONE ${OUT}"

@@ -399,7 +399,14 @@ class SharedPeerGatherSlot {
 
   void release_nccl() {
 #if defined(UMA_ENGINE_USE_NCCL)
-    if (comm_ && shm_) {
+    // MPI bootstrap (init_nccl_external): each rank has a PRIVATE shm, so the
+    // cross-process shm barrier below can never reach `world` and would deadlock.
+    // The caller (which owns MPI) does an MPI_Barrier before destroying peers,
+    // so here we just destroy directly.
+    if (comm_ && external_world_ > 0) {
+      ncclCommDestroy(comm_);
+      comm_ = nullptr;
+    } else if (comm_ && shm_) {
       // All ranks must enter destroy together; parent broadcasts shutdown first.
       pthread_mutex_lock(&shm_->mu);
       const int gen = shm_->gen;

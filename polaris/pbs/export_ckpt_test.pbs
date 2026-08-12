@@ -1,0 +1,35 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N export_ckpt_test
+#PBS -A RAPINS
+
+# Test: does activation_checkpointing survive TorchScript export (the LAMMPS
+# product path)? Export a checkpointed omat-f64 artifact, then measure the max
+# NaCl cube that fits via the TRACED artifact (LAMMPS uses model_traced.pt).
+# If capacity jumps like the FairChem-model sweep (1728 -> ~22k), the product
+# path benefits; if it stays ~1728, tracing dropped the checkpointing.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES=0
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+ART_CKPT="${ENG}/artifacts/uma-s-1p2-omat-f64-ckpt"
+
+echo "=== export omat-f64 WITH activation checkpointing ==="
+python "${ENG}/python/export_artifact.py" \
+  --checkpoint "${UMA_CHECKPOINT}" --dtype float64 --task omat \
+  --output "${ART_CKPT}" --activation-checkpointing \
+  || { echo "EXPORT_FAIL (checkpointing may not trace)"; exit 1; }
+test -f "${ART_CKPT}/model_traced.pt" && echo "traced artifact present" || exit 1
+
+echo "=== max-atoms sweep via the TRACED checkpointed artifact ==="
+python "${M3}/traced_max_atoms.py" --artifact "${ART_CKPT}" \
+  --sizes 6 8 10 12 14 16 18 20
+echo "EXPORT_CKPT_TEST_DONE"

@@ -1,0 +1,23 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:40:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N m3_iso_4gpu1n
+#PBS -A RAPINS
+
+# Isolation experiment: run the NEW MPI edge-parallel path with 4 ranks on ONE
+# node (4 GPUs, intra-node NVLink, no cross-node hops). Compare its per-step time
+# to:
+#   - the fork-path 4-GPU ground truth (202 ms, same GPUs)  -> compute regression?
+#   - the 2-node/8-GPU MPI run (407 ms)                     -> cross-node comm cost?
+# Needs w4_n4096 shards (already exported for the ground truth).
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+export RESULTS="${ROOT}/src/ML-UMA/examples/polaris_m3/results/${M3_RUN_ID:-latest}"
+export NRANKS=4 PPN=4 TAG=mpi4_1node
+export M3_NATOMS=4096
+bash "${ROOT}/polaris/pbs/m3_run_mn.sh"
+echo "M3_ISO_DONE"

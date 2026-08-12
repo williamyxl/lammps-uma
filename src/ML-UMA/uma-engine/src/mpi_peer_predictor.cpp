@@ -1,5 +1,6 @@
 #include "uma/mpi_peer_predictor.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -143,6 +144,9 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   auto& I = *impl_;
   const auto dev = I.device;
   const auto dtype = compute_dtype_;
+  using clk = std::chrono::steady_clock;
+  const bool perf = [] { const char* e = std::getenv("UMA_MP_PERF"); return e && e[0] == '1'; }();
+  auto t0 = clk::now();
 
   auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3}, torch::kFloat64)
                  .to(dev, dtype).contiguous();
@@ -196,12 +200,21 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   auto charge = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(dev));
   auto spin = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(dev));
 
+#if defined(UMA_ENGINE_USE_CUDA)
+  if (perf) cudaDeviceSynchronize();
+#endif
+  auto t_graph = clk::now();
+
   std::vector<torch::jit::IValue> args = {pos_grad, z, cell, pbc, eidx, coff, charge, spin};
   torch::Tensor normed;
   {
     torch::autograd::AutoGradMode guard(true);
     normed = I.module.forward(args).toTensor().to(dtype);
   }
+#if defined(UMA_ENGINE_USE_CUDA)
+  if (perf) cudaDeviceSynchronize();
+#endif
+  auto t_fwd = clk::now();
   auto energy = denorm_energy(normed, metadata_.normalizer_mean, metadata_.normalizer_rmsd);
   if (I.element_refs.defined()) {
     auto batch = torch::zeros({n}, torch::TensorOptions().dtype(torch::kLong).device(dev));
@@ -221,10 +234,27 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
     PeerContext::instance().slot().barrier(rank_);
   auto grads = torch::autograd::grad({e_for_grad}, {pos_grad}, {}, false, false, false);
   auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
+#if defined(UMA_ENGINE_USE_CUDA)
+  if (perf) cudaDeviceSynchronize();
+#endif
+  auto t_bwd = clk::now();
 
   // Sum force shards across all W GPUs (NCCL).
   forces = PeerContext::instance().slot().all_reduce(rank_, forces);
   forces = forces.to(torch::kFloat64).contiguous();
+#if defined(UMA_ENGINE_USE_CUDA)
+  if (perf) cudaDeviceSynchronize();
+#endif
+  auto t_ar = clk::now();
+  if (perf) {
+    auto ms = [](auto a, auto b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    std::cerr << "MP_PERF rank=" << rank_ << " n_edges_shard=" << eidx.size(1)
+              << " ms_graph=" << ms(t0, t_graph) << " ms_fwd=" << ms(t_graph, t_fwd)
+              << " ms_bwd=" << ms(t_fwd, t_bwd) << " ms_force_ar=" << ms(t_bwd, t_ar)
+              << " ms_total=" << ms(t0, t_ar) << "\n" << std::flush;
+  }
 
   Prediction out;
   out.energy = energy.reshape({-1})[0].item<double>();

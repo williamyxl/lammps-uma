@@ -118,6 +118,7 @@ def export_task(
     skip_if_present: bool = False,
     execution_mode: str = "general",
     merge_mole: bool = False,
+    activation_checkpointing: bool = False,
 ) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     if skip_if_present and (output_dir / "model_traced.pt").is_file():
@@ -136,7 +137,7 @@ def export_task(
     # (MP shards already use these via export_mp_artifact.py).
     settings.execution_mode = execution_mode
     settings.merge_mole = bool(merge_mole)
-    settings.activation_checkpointing = False
+    settings.activation_checkpointing = bool(activation_checkpointing)
     settings.external_graph_gen = True
 
     sample = bulk("Fe", "bcc", a=2.87, cubic=True)
@@ -290,6 +291,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--device", default=DEFAULT_DEVICE, choices=["cpu", "cuda"])
     parser.add_argument(
+        "--activation-checkpointing", action="store_true",
+        help="Bake activation checkpointing into the traced model (recompute in "
+             "backward -> ~3x less activation memory for ~1.3x compute; capacity).",
+    )
+    parser.add_argument(
         "--skip-existing",
         action="store_true",
         help="Skip a task if model_traced.pt already exists",
@@ -361,6 +367,7 @@ def main(argv: list[str] | None = None) -> int:
                     skip_if_present=args.skip_existing,
                     execution_mode=args.execution_mode,
                     merge_mole=bool(args.merge_mole),
+                    activation_checkpointing=bool(args.activation_checkpointing),
                 )
                 summaries.append(report)
                 if report.get("export_format") == "none":
@@ -387,6 +394,7 @@ def main(argv: list[str] | None = None) -> int:
             skip_if_present=args.skip_existing,
             execution_mode=args.execution_mode,
             merge_mole=bool(args.merge_mole),
+            activation_checkpointing=bool(args.activation_checkpointing),
         )
     except Exception:
         traceback.print_exc()

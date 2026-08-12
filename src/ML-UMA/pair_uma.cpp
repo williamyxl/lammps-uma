@@ -85,6 +85,9 @@ PairUMA::~PairUMA()
 {
   delete predictor;
   predictor = nullptr;
+  // Collective NCCL teardown: every rank must enter ncclCommDestroy together.
+  // The engine's shm barrier can't span processes on the MPI path, so sync here.
+  if (mpi_peer && comm->nprocs > 1) MPI_Barrier(world);
   delete mpi_peer;
   mpi_peer = nullptr;
   if (allocated) {
@@ -357,6 +360,7 @@ void PairUMA::load_predictor()
 {
   delete predictor;
   predictor = nullptr;
+  if (mpi_peer && comm->nprocs > 1) MPI_Barrier(world);
   delete mpi_peer;
   mpi_peer = nullptr;
 

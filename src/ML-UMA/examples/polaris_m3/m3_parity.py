@@ -70,12 +70,12 @@ def main() -> int:
         return "-" if x is None else f.format(x)
 
     lines = [
-        "# M3 - multi-node parity + timing (Scheme A), NaCl 8x8x8 = 4096 atoms",
+        "# M3 - multi-node edge-parallel parity + timing, NaCl 8x8x8 = 4096 atoms",
         "",
-        "Ground truth = 4 GPUs / 1 node (minimum that fits; 4096 OOMs on <4 GPUs).",
-        "Test = 8 GPUs / 2 nodes. Scheme A replicated -> E/F must be bit-identical;",
-        "NVT-300K ms/step compared as scaling context (Scheme A is O(N)/rank, so a",
-        "step-time win is NOT expected -- this proves cross-node correctness).",
+        "Ground truth = 4 GPUs / 1 node (same-node graph-parallel; 4096 OOMs on <4 GPUs).",
+        "Test = 8 GPUs / 2 nodes (edge-parallel MpiPeerPredictor, NCCL-over-MPI).",
+        "Memory-sharded across GPUs -> E/F must match to the FP64 floor; NVT-300K",
+        "ms/step target > 1.5x vs the 1-node baseline.",
         "",
         f"Accuracy gates (8-GPU vs 4-GPU): |dE| <= {GATE_DE:g} eV, max|dF| <= {GATE_DF:g} eV/A.",
         "",

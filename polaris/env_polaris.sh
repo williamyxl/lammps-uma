@@ -87,15 +87,30 @@ export LD_LIBRARY_PATH="${_vesin}:${_torch_lib}:${_cuda_lib}:${LD_LIBRARY_PATH:-
 # Single-node product path: never fork Ray GP; NCCL only when devices>1.
 export UMA_FORBID_RAY_GP="${UMA_FORBID_RAY_GP:-1}"
 
+# Compute nodes have no network: skip HuggingFace lookups (atom_refs come from
+# the checkpoint metadata). Avoids multi-retry stalls during export.
+export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+
 # NCCL for the multi-node edge-parallel path. The conda torch ships libnccl.so.2
 # (versioned only) under nvidia/nccl; we vendor an unversioned symlink + header
 # under the engine so cmake find_library(nccl) succeeds. Also put it on
 # LD_LIBRARY_PATH for runtime.
 export NCCL_ROOT="${NCCL_ROOT:-${ENG}/third_party/nccl}"
-_nccl_real="$(python -c 'import os,glob;import nvidia.nccl as n;print(os.path.join(os.path.dirname(n.__file__),"lib"))' 2>/dev/null || true)"
-if [[ -n "${_nccl_real}" ]]; then
+# Put the REAL libnccl.so.2 (nvidia wheel) on LD_LIBRARY_PATH for runtime. Try a
+# python query, then fall back to the known site-packages glob (robust when the
+# subshell python isn't active yet).
+_nccl_real="$(python -c 'import os;import nvidia.nccl as n;print(os.path.join(os.path.dirname(n.__file__),"lib"))' 2>/dev/null || true)"
+if [[ -z "${_nccl_real}" ]]; then
+  for _c in "${UMA_CONDA_ENV}"/lib/python*/site-packages/nvidia/nccl/lib; do
+    [[ -e "${_c}/libnccl.so.2" ]] && { _nccl_real="${_c}"; break; }
+  done
+fi
+if [[ -n "${_nccl_real}" && -e "${_nccl_real}/libnccl.so.2" ]]; then
   export LD_LIBRARY_PATH="${_nccl_real}:${LD_LIBRARY_PATH}"
 fi
+# The vendored dir (on the binary RUNPATH) also carries a libnccl.so.2 symlink.
+export LD_LIBRARY_PATH="${NCCL_ROOT}/lib:${LD_LIBRARY_PATH}"
 
 echo "[env_polaris] ROOT=${ROOT}"
 echo "[env_polaris] conda=${CONDA_PREFIX}"

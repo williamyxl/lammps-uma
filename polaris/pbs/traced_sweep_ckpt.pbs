@@ -1,0 +1,28 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:40:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N traced_sweep_ckpt
+#PBS -A RAPINS
+
+# Confirm the LAMMPS product path benefits: max NaCl cube via the TRACED
+# checkpointed artifact (already exported) vs the traced NON-checkpointed one.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES=0
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+
+echo "############ traced NON-checkpointed artifact ############"
+python "${M3}/traced_max_atoms.py" --artifact "${ENG}/artifacts/uma-s-1p2-omat-f64" \
+  --sizes 6 8 10 12
+
+echo "############ traced CHECKPOINTED artifact ############"
+python "${M3}/traced_max_atoms.py" --artifact "${ENG}/artifacts/uma-s-1p2-omat-f64-ckpt" \
+  --sizes 6 8 10 12 14 16 18 20
+echo "TRACED_SWEEP_CKPT_DONE"

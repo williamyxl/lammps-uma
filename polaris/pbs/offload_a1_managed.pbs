@@ -1,0 +1,40 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N offload_a1_managed
+#PBS -A RAPINS
+
+# A1: CUDA managed-memory oversubscription. Build the pluggable managed allocator,
+# then run the TRACED artifact max-atoms sweep with it -> how far past the 1728
+# OOM ceiling can we spill to host, and at what step-time cost.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES=0
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+ART="${ENG}/artifacts/uma-s-1p2-omat-f64"
+SO="${M3}/libmanaged_alloc.so"
+
+echo "=== build managed allocator ==="
+nvcc -O2 -shared -Xcompiler -fPIC "${M3}/managed_alloc.cpp" -o "${SO}" \
+  || { echo "A1_BUILD_FAIL"; exit 1; }
+test -f "${SO}" && echo "built ${SO}"
+
+# baseline (native allocator) for the ms reference at 1728
+echo "############ baseline native allocator (ref) ############"
+python "${M3}/traced_max_atoms.py" --artifact "${ART}" --sizes 6 || true
+
+echo "############ A1: managed memory, PREFER_DEVICE off ############"
+python "${M3}/traced_max_atoms.py" --artifact "${ART}" --managed-alloc "${SO}" \
+  --sizes 6 8 10 12 14 16 || true
+
+echo "############ A1: managed memory, PREFER_DEVICE on ############"
+MANAGED_PREFER_DEVICE=1 python "${M3}/traced_max_atoms.py" --artifact "${ART}" \
+  --managed-alloc "${SO}" --sizes 6 8 10 12 || true
+echo "OFFLOAD_A1_DONE"

@@ -1,3 +1,54 @@
+# Multi-node UMA on Polaris — implementation design (rev 2)
+
+## Rev 2 — measured result of rev 1 (edge-parallel) and the redesign
+
+**Rev 1 (MpiPeerPredictor, edge-parallel via FairChem GP) result on 8 GPU/2 node,
+NaCl 8x8x8 = 4096:**
+- Energy/force parity vs 4-GPU ground truth: **EXACT** (|dE| 2.0e-11 eV,
+  max|dF| 9.2e-16). Cross-node NCCL bootstrap over MPI works; memory sharded.
+- Timing: **0.50x** (407 vs 202 ms/step) — FAILS the >1.5x gate.
+
+**Why (profiled, `UMA_MP_PERF`):** per step rank0 `ms_fwd≈130 ms_bwd≈260
+ms_force_ar≈5`. The force all-reduce is negligible; the cost is fwd+bwd. The
+FairChem GP path routes every message-passing block's node gather through
+`torch.ops.uma_peer.all_gather_nodes`, which reconstructs the FULL N-atom node
+tensor on every rank (`all_gather_concat`). So per-rank COMPUTE is O(N), not
+O(N/W); adding GPUs cannot speed the step, and moving those 4-layer x (fwd+bwd)
+gathers across nodes (IB vs NVLink) doubles it. This is the documented GP
+limitation (plan sec 3): GP buys capacity, not speed.
+
+**Redesign (rev 2) = Scheme C, at the single substitution point.** Keep the whole
+GP machinery (shards, NCCL, autograd custom ops, the global `all_reduce_sum` for
+balance_channels/MOLE), but replace the O(N) node gather with a SPATIAL halo
+gather so per-rank node tensors are O(nlocal + nghost_halo):
+
+```
+all_gather_nodes(x, N)   -> full [N, C]      (rev 1: O(N)/rank, the bottleneck)
+halo_gather(x, plan)     -> [nlocal+nghost, C] (rev 2: O(N/W), real compute shrink)
+```
+
+Crossover (NaCl density, 6 A halo, cube split): even at N=4096 the 8-GPU halo
+set is ~1601 atoms/rank vs 4096 for the 4-GPU whole-system path — a 2.56x
+compute reduction; it grows with N (3.0x @ 8000, 4.1x @ 32768). So Scheme C can
+clear >1.5x once comm is overlapped/amortized.
+
+**Substitution point:** `uma_peer_op_all_gather_nodes` (peer_context.cpp:57) and
+its autograd (`all_gather_nodes_autograd`, backward = scatter-add of the halo
+region). The global `all_reduce_sum` op (balance_channels, MOLE composition)
+stays a true global reduce — 3 doubles, latency-only, mandatory for correctness.
+
+**Halo plan:** built from the full tag-ordered graph (already assembled each
+step): for this rank's owned node set (FairChem `node_partition`), the halo is
+the set of source nodes appearing in edges whose center is owned, iterated to
+cover the receptive field the model actually reaches per block. v1: exchange the
+1-hop (6 A) neighbor node features each block (bit-comparable to serial since the
+owner computed them), backward scatter-adds ghost grads to owners.
+
+Everything below is rev 1 (still valid: transport, NCCL bootstrap, pair_uma
+wiring). Only the gather op semantics change.
+
+---
+
 # Multi-node UMA on Polaris — implementation design (rev 1)
 
 **Goal:** run NaCl 8x8x8 (4096) and larger across **8 GPUs / 2 nodes** with the

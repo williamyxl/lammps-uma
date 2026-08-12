@@ -4,7 +4,9 @@
 # does the force all-reduce. NaCl 8x8x8 (4096) SP (E + per-atom F) + NVT timing.
 #
 # Env in: NRANKS (=total GPUs), PPN (ranks/node=4), TAG (e.g. r8), RESULTS dir.
-set -euo pipefail
+# NOTE: no `set -e` around the run: LAMMPS can exit nonzero during NCCL/peer
+# teardown AFTER producing correct results; we must still parse the output.
+set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 source "${ROOT}/polaris/env_polaris.sh"
 
@@ -64,6 +66,40 @@ export UMA_STRUCTURE_NATOMS="${NAT}"
 export UMA_PEER_TRANSPORT=nccl
 export UMA_GPUS_PER_NODE="${PPN}"
 export UMA_FORBID_RAY_GP=1
+export UMA_MP_PERF="${UMA_MP_PERF:-1}"   # per-step fwd/bwd/nccl breakdown to stderr
+
+# --- NCCL over Slingshot via aws-ofi-nccl (CRITICAL for cross-node bandwidth) ---
+# Without the OFI plugin NCCL falls back to TCP sockets (~1.4 GB/s measured);
+# the plugin routes collectives through libfabric on the Slingshot fabric.
+# v1.6.0 variant: depends only on libcudart + Cray libfabric (no libhwloc.so.0,
+# which the v1.9.1 build needs and Polaris lacks). Confirmed deps resolve.
+OFI_NCCL="${OFI_NCCL:-/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0}"
+if [[ -e "${OFI_NCCL}/lib/libnccl-net.so" ]]; then
+  # NCCL discovers the plugin from LD_LIBRARY_PATH by soname libnccl-net.so.
+  # Do NOT set NCCL_NET_PLUGIN to a full path (NCCL appends .so -> not found).
+  # Cray system libfabric (Slingshot) that the plugin links.
+  for _fab in /opt/cray/libfabric/*/lib64; do
+    [[ -e "${_fab}/libfabric.so.1" ]] && export LD_LIBRARY_PATH="${_fab}:${LD_LIBRARY_PATH}"
+  done
+  export LD_LIBRARY_PATH="${OFI_NCCL}/lib:${LD_LIBRARY_PATH}"
+  # NCCL auto-loads libnccl-net.so from LD_LIBRARY_PATH. Setting NCCL_NET_PLUGIN=ofi
+  # makes it search libnccl-net-ofi.so (wrong name). Leave it unset.
+  unset NCCL_NET_PLUGIN 2>/dev/null || true
+fi
+# NCCL knobs (LAMMPS MPI uses host buffers, so no Cray GTL / MPICH GPU support
+# needed; NCCL does GPU comm itself via the OFI plugin above).
+export NCCL_CROSS_NIC="${NCCL_CROSS_NIC:-1}"
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-hsn0,hsn1}"
+export NCCL_DEBUG="${NCCL_DEBUG:-WARN}"   # INFO was verbose; WARN once working
+
+# --- Slingshot CXI provider settings (ALCF-recommended for aws-ofi-nccl) ---
+# Without these the cxi provider can deadlock on the first sizeable collective.
+export FI_CXI_DEFAULT_CQ_SIZE="${FI_CXI_DEFAULT_CQ_SIZE:-131072}"
+export FI_CXI_DEFAULT_TX_SIZE="${FI_CXI_DEFAULT_TX_SIZE:-16384}"
+export FI_CXI_RX_MATCH_MODE="${FI_CXI_RX_MATCH_MODE:-hybrid}"
+export FI_MR_CACHE_MONITOR="${FI_MR_CACHE_MONITOR:-userfaultfd}"
+export FI_CXI_OFLOW_BUF_SIZE="${FI_CXI_OFLOW_BUF_SIZE:-8388608}"
+export NCCL_NET_GDR_LEVEL="${NCCL_NET_GDR_LEVEL:-PHB}"
 export MASTER_ADDR="$(hostname)"
 export MASTER_PORT="$((29700 + RANDOM % 300))"
 
@@ -71,7 +107,8 @@ echo "=== mpiexec: ${NRANKS} ranks / ${PPN} per node, edge-parallel w${NRANKS}, 
 mpiexec -n "${NRANKS}" --ppn "${PPN}" \
   "${ROOT}/polaris/gpu_affinity_polaris.sh" \
   "${LMP}" -in "${WORK}/in.mn" -log "${WORK}/log.mn" > "${WORK}/out.mn" 2>&1
-echo "mpiexec rc=$?"
+mpi_rc=$?
+echo "mpiexec rc=${mpi_rc} (nonzero at teardown is OK if results are present)"
 tail -8 "${WORK}/out.mn" || true
 
 # parse (reuse the gp parser: same output tokens minus prefix)

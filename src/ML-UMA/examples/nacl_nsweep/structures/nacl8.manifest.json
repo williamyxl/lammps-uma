@@ -31,7 +31,7 @@
     "1": "Na",
     "2": "Cl"
   },
-  "extxyz": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/structures/nacl8_rattle.extxyz",
-  "data": "/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/structures/nacl8_nvt_300K_atomic_metal.data",
+  "extxyz": "/lus/eagle/projects/RAPINS/xiaoliyan/polaris/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/structures/nacl8_rattle.extxyz",
+  "data": "/lus/eagle/projects/RAPINS/xiaoliyan/polaris/workdir/lammps-uma/src/ML-UMA/examples/nacl_nsweep/structures/nacl8_nvt_300K_atomic_metal.data",
   "note": "N=6 reproduces frozen nacl6_rattle_fixed to ~5e-11 A."
 }

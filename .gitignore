@@ -119,3 +119,10 @@ src/ML-UMA/uma-engine/build-cpp-mp-*/
 src/ML-UMA/uma-engine/third_party/nccl/lib/
 # M3 results + derived geometry
 src/ML-UMA/examples/polaris_m3/results/
+
+# core dumps from OOM/killed runs
+core.[0-9]*
+# built managed allocator (regenerate via nvcc in the PBS job)
+src/ML-UMA/examples/polaris_m3/libmanaged_alloc.so
+# UMA paper PDF (large binary reference, not source)
+src/ML-UMA/*.pdf
