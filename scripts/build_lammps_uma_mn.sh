@@ -76,6 +76,8 @@ else
   echo "Kokkos: OFF (matches product recipe; enable at M6 via UMA_MN_KOKKOS=1)"
 fi
 
+# Optional site cmake args (e.g. Polaris Cray MPICH compiler hints). Space-split.
+read -r -a EXTRA_CMAKE_ARGS_ARR <<< "${EXTRA_CMAKE_ARGS:-}"
 cmake -S "${ROOT}/cmake" -B "${BUILD_DIR}" \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH="${TORCH_CMAKE}" \
@@ -83,7 +85,8 @@ cmake -S "${ROOT}/cmake" -B "${BUILD_DIR}" \
   -DPKG_ML-UMA=ON \
   -DUMA_ENGINE_ROOT="${ENG}" \
   -DBUILD_MPI=ON \
-  -DBUILD_OMP=ON
+  -DBUILD_OMP=ON \
+  "${EXTRA_CMAKE_ARGS_ARR[@]}"
 cmake --build "${BUILD_DIR}" -j"${JOBS}"
 
 cmake -S "${ENG}" -B "${MP_BUILD_DIR}" \

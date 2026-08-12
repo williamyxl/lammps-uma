@@ -1,0 +1,69 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:50:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N m3_gt_4gpu
+#PBS -A RAPINS
+
+# M3 GROUND TRUTH: NaCl 8x8x8 (4096) on 4 GPUs / 1 node, same-node graph-parallel
+# (devices 4, edge-parallel -> memory sharded, so 4096 fits). Exports w4_n4096
+# shards from the canonical perturbed geometry, then runs SP (E + per-atom F)
+# and NVT-300K/10 timing. Result is the reference the 8-GPU/2-node run must match.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+ART="${UMA_ARTIFACT_DIR}"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+export LMP_UMA="${LMP_UMA:-${ROOT}/build-uma/lmp}"
+export UMA_LIBTORCH_MP_WORKER="${UMA_LIBTORCH_MP_WORKER:-${ENG}/build-cpp-mp/uma_libtorch_mp_worker}"
+export UMA_FORBID_RAY_GP=1
+export RESULTS="${M3}/results/${M3_RUN_ID:-latest}"
+mkdir -p "${RESULTS}"
+
+SYSTEM=nacl4096
+NAT=4096
+WORLD=4
+
+test -x "${LMP_UMA}" || { echo "M3_FAIL missing ${LMP_UMA}"; exit 1; }
+test -x "${UMA_LIBTORCH_MP_WORKER}" || { echo "M3_FAIL missing worker"; exit 1; }
+test -f "${ART}/model_traced.pt" || { echo "M3_FAIL missing artifact"; exit 1; }
+
+# --- derive full-precision extxyz from the canonical .data (for MP export) ---
+GEOMDIR="${ART}/_m3_geom"; mkdir -p "${GEOMDIR}"
+XYZ="${GEOMDIR}/${SYSTEM}_fp.extxyz"
+python -c "import p0_common as c; c.write_full_precision_extxyz('${SYSTEM}', '${XYZ}')" \
+  || { echo "M3_FAIL derive geometry"; exit 1; }
+
+# --- export w4_n4096 shards if missing (waves of 4 on the 4-GPU node) ---
+need=0
+for R in 0 1 2 3; do [[ -f "${ART}/model_mp_w${WORLD}_n${NAT}_r${R}.pt" ]] || need=1; done
+if [[ "${need}" -eq 1 ]]; then
+  echo "=== export w${WORLD}_n${NAT} shards ==="
+  for R in 0 1 2 3; do
+    CUDA_VISIBLE_DEVICES=${R} PYTHONPATH="${ENG}/python:${PYTHONPATH}" \
+      python "${ENG}/python/export_mp_artifact.py" \
+        --checkpoint "${UMA_CHECKPOINT}" --output "${ART}" \
+        --world "${WORLD}" --ranks "${R}" \
+        --dtype float64 --task omat --device cuda \
+        --atoms "${XYZ}" \
+        --execution-mode umas_fast_pytorch --merge-mole &
+  done
+  wait
+fi
+n=$(ls "${ART}"/model_mp_w${WORLD}_n${NAT}_r*.pt 2>/dev/null | wc -l)
+echo "w${WORLD}_n${NAT} shards: ${n}/${WORLD}"
+[[ "${n}" -eq "${WORLD}" ]] || { echo "M3_FAIL shard export incomplete"; exit 1; }
+
+# --- run 4-GPU ground truth (SP + NVT) ---
+echo "=== 4-GPU/1-node ground truth (devices ${WORLD}) ==="
+python "${M3}/m3_lammps_gp.py" "${SYSTEM}" \
+  --work "${RESULTS}/work_gt4" --devices "${WORLD}" --nsteps "${M3_NVT_STEPS:-10}" --tag gt4
+echo "M3_GT_RC=$?"
+echo "M3_GROUNDTRUTH_DONE results=${RESULTS}"

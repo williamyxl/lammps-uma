@@ -1,0 +1,59 @@
+#!/bin/bash -le
+#PBS -l select=2:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:50:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N m3_2node_8gpu
+#PBS -A RAPINS
+
+# M3 TEST: NaCl 8x8x8 (4096) on 8 GPUs / 2 nodes, multi-node edge-parallel
+# (MpiPeerPredictor, NCCL-over-MPI). Exports w8_n4096 shards if needed, runs SP
+# (E + per-atom F) + NVT-300K/10 timing, then compares to the 4-GPU ground truth
+# in the same M3_RUN_ID results dir.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+ART="${UMA_ARTIFACT_DIR}"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+export RESULTS="${M3}/results/${M3_RUN_ID:-latest}"
+SYSTEM=nacl4096 NAT=4096 WORLD=8
+mkdir -p "${RESULTS}"
+
+# --- export w8_n4096 shards if missing (2 nodes x4 GPU; export locally in waves) ---
+need=0
+for R in $(seq 0 7); do [[ -f "${ART}/model_mp_w${WORLD}_n${NAT}_r${R}.pt" ]] || need=1; done
+if [[ "${need}" -eq 1 ]]; then
+  echo "=== export w${WORLD}_n${NAT} shards (this node, 4 GPUs, 2 waves) ==="
+  GEOMDIR="${ART}/_m3_geom"; mkdir -p "${GEOMDIR}"
+  XYZ="${GEOMDIR}/${SYSTEM}_fp.extxyz"
+  python -c "import p0_common as c; c.write_full_precision_extxyz('${SYSTEM}', '${XYZ}')" || exit 1
+  i=0
+  for R in $(seq 0 7); do
+    CUDA_VISIBLE_DEVICES=$((R % 4)) PYTHONPATH="${ENG}/python:${PYTHONPATH}" \
+      python "${ENG}/python/export_mp_artifact.py" \
+        --checkpoint "${UMA_CHECKPOINT}" --output "${ART}" \
+        --world "${WORLD}" --ranks "${R}" \
+        --dtype float64 --task omat --device cuda \
+        --atoms "${XYZ}" --execution-mode umas_fast_pytorch --merge-mole &
+    i=$((i+1)); [[ $((i % 4)) -eq 0 ]] && wait
+  done
+  wait
+fi
+n=$(ls "${ART}"/model_mp_w${WORLD}_n${NAT}_r*.pt 2>/dev/null | wc -l)
+echo "w${WORLD}_n${NAT} shards: ${n}/${WORLD}"
+[[ "${n}" -eq "${WORLD}" ]] || { echo "M3_FAIL shard export incomplete"; exit 1; }
+
+# --- run 8-GPU/2-node ---
+export NRANKS=8 PPN=4 TAG=r8
+bash "${ROOT}/polaris/pbs/m3_run_mn.sh"
+
+# --- compare vs 4-GPU ground truth ---
+echo "=== M3 parity (8-GPU/2-node vs 4-GPU/1-node ground truth) ==="
+python "${M3}/m3_parity.py" --results-dir "${RESULTS}" || true
+echo "M3_2NODE_DONE results=${RESULTS}"

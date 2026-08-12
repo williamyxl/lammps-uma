@@ -42,6 +42,16 @@ SYSTEMS = {
         "elements": ["O", "H"],
         "data": ML_UMA / "examples" / "water888" / "water_nvt_300K_atomic_metal.data",
     },
+    # NaCl 8x8x8 = 4096 atoms: the M3 multi-node (2-node/8-GPU) parity target.
+    # Canonical geometry: per-atom isotropic random displacement |d| in
+    # [0.05, 0.10] A (no near-perfect sites -> non-trivial forces), full-precision
+    # LAMMPS data. Regenerate with polaris_m3/make_nacl8_perturbed.py (seed=0).
+    "nacl4096": {
+        "natoms": 4096,
+        "elements": ["Na", "Cl"],
+        "data": ML_UMA / "examples" / "polaris_m3" / "structures"
+        / "nacl8x8x8_perturbed.data",
+    },
 }
 
 

@@ -114,3 +114,8 @@ src/ML-UMA/examples/polaris_p0/results/
 # uma-engine C++ build trees
 src/ML-UMA/uma-engine/build-cpp-mp/
 src/ML-UMA/uma-engine/build-cpp-mp-*/
+
+# vendored NCCL lib is a symlink into the conda env (regenerate via env_polaris)
+src/ML-UMA/uma-engine/third_party/nccl/lib/
+# M3 results + derived geometry
+src/ML-UMA/examples/polaris_m3/results/

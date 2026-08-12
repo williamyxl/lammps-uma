@@ -1,0 +1,38 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N mg4_build_mn
+#PBS -A RAPINS
+
+# MG4 - multi-node MPI LAMMPS + ML-UMA build on Polaris.
+#   -> build-uma-mn/lmp                          (BUILD_MPI=ON, PKG_KOKKOS=OFF)
+#   -> uma-engine/build-cpp-mp-mn/uma_libtorch_mp_worker
+#
+# MPI: Cray MPICH ofi/gnu/12.3 (mpicxx already wraps g++-13, matching torch 2.8).
+# Kokkos stays OFF through M5 (product recipe; enable at M6 via UMA_MN_KOKKOS=1).
+
+set -euo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+
+# Cray MPICH GNU wrappers (g++-13 underneath). Point find_package(MPI) at them.
+MPI_ROOT="${MPICH_DIR:-/opt/cray/pe/mpich/9.0.1/ofi/gnu/12.3}"
+MPICXX="${MPI_ROOT}/bin/mpicxx"
+MPICC="${MPI_ROOT}/bin/mpicc"
+export MPICH_CXX="${CXX:-g++-13}"
+export MPICH_CC="${CC:-gcc-13}"
+test -x "${MPICXX}" || { echo "MG4_FAIL missing ${MPICXX}"; exit 1; }
+echo "MPI: ${MPICXX} -> $(${MPICXX} --version | head -1)"
+
+export EXTRA_CMAKE_ARGS="-DMPI_CXX_COMPILER=${MPICXX} -DMPI_C_COMPILER=${MPICC}"
+echo "vesin vendored: $(bash src/ML-UMA/uma-engine/scripts/vendor_vesin_for_arch.sh --check 2>&1 | head -1)"
+
+echo "=== build_lammps_uma_mn.sh (BUILD_MPI=ON, Kokkos OFF) ==="
+bash scripts/build_lammps_uma_mn.sh
+
+echo "=== sanity ==="
+./build-uma-mn/lmp -h 2>&1 | grep -iE 'MPI v|MPI STUBS|pair_style' | head -3 || true
+test -x ./build-uma-mn/lmp && echo "MG4_BUILD_OK $(md5sum build-uma-mn/lmp | cut -d' ' -f1)"

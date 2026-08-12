@@ -21,6 +21,7 @@ add_library(uma_engine
   src/graph_parallel.cpp
   src/peer_context.cpp
   src/libtorch_mp.cpp
+  src/mpi_peer_predictor.cpp
 )
 target_include_directories(uma_engine
   PUBLIC

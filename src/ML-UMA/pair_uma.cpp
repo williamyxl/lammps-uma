@@ -28,6 +28,7 @@
 #include "utils.h"
 
 #include "uma/predictor.h"
+#include "uma/mpi_peer_predictor.h"
 
 #ifdef LMP_KOKKOS
 #include "kokkos.h"
@@ -67,6 +68,8 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   manybody_flag = 1;
   map = nullptr;
   predictor = nullptr;
+  mpi_peer = nullptr;
+  gpus_per_node = 4;  // Polaris default; override via UMA_GPUS_PER_NODE
   cutoff = 6.0;
   precision = PRECISION_MIXED;
   num_devices = 1;
@@ -82,6 +85,8 @@ PairUMA::~PairUMA()
 {
   delete predictor;
   predictor = nullptr;
+  delete mpi_peer;
+  mpi_peer = nullptr;
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -100,11 +105,16 @@ void PairUMA::compute(int eflag, int vflag)
   // design (see below). The same-node devices>1 path forks workers and moves
   // geometry through /dev/shm, which cannot cross a node; forking after
   // MPI_Init also breaks CUDA context ownership. The two are exclusive.
+  // Two multi-GPU models, mutually exclusive:
+  //   - same-node fork workers: 1 MPI rank, devices N (GraphParallelRuntime)
+  //   - multi-node edge-parallel: nprocs MPI ranks, devices 1, one GPU/rank,
+  //     each rank an MpiPeerPredictor sharing the graph over NCCL-over-MPI.
+  // Reject the mix (devices>1 forks after MPI_Init -> broken CUDA contexts).
   if (comm->nprocs > 1 && num_devices > 1)
     error->all(FLERR,
                "Pair style uma: devices > 1 (same-node fork workers) cannot be "
                "combined with multiple MPI ranks; use one rank per GPU with "
-               "devices 1");
+               "devices 1 (multi-node edge-parallel)");
   // Multi-node keeps the single-node GRAPH-parallel design: LAMMPS rank 0 owns
   // the whole system and builds ONE full-system vesin graph with periodic=true,
   // then the EDGE list is split by center atom across all GPUs. Every GPU sees
@@ -243,13 +253,19 @@ void PairUMA::compute(int eflag, int vflag)
     }
 
     mn_force_sorted.assign(static_cast<size_t>(natoms_global) * 3, 0.0);
-    result = predictor->predict_host(natoms_global, mn_pos_sorted.data(),
-                                     mn_z_sorted.data(), cell_buf, pbc_buf,
-                                     mn_force_sorted.data());
+    // Edge-parallel, memory-sharded: each rank evaluates its 1/world edge shard
+    // of the FULL tag-ordered system and the NCCL all_reduce inside the peer sums
+    // force contributions across all GPUs. Memory is ~O(N/world), so systems that
+    // do not fit one GPU (e.g. NaCl 8x8x8 = 4096) run across nodes.
+    if (!mpi_peer)
+      error->all(FLERR, "Pair style uma: multi-node peer predictor not initialized");
+    result = mpi_peer->predict_host(natoms_global, mn_pos_sorted.data(),
+                                    mn_z_sorted.data(), cell_buf, pbc_buf,
+                                    mn_force_sorted.data());
 
-    // Scatter forces back to owners. predict_host already returns the fully
-    // reduced global force array on every rank, so each rank simply picks out
-    // the atoms it owns -- no MPI reduction of forces is needed.
+    // Scatter forces back to owners. all_reduce returns the fully reduced global
+    // force array on every rank, so each rank simply picks out the atoms it owns
+    // -- no extra MPI reduction of forces is needed.
     for (int k = 0; k < natoms_global; k++) {
       const int gathered_idx = mn_order[k];
       if (gathered_idx < mn_displs[mn_rank] ||
@@ -341,6 +357,74 @@ void PairUMA::load_predictor()
 {
   delete predictor;
   predictor = nullptr;
+  delete mpi_peer;
+  mpi_peer = nullptr;
+
+  // ---- multi-node edge-parallel: one MpiPeerPredictor per MPI rank ---------
+  // Triggered by nprocs > 1. Each rank owns one GPU and evaluates 1/world of
+  // the graph; NCCL (bootstrapped over MPI) does the force all-reduce. Memory
+  // is ~O(N/world) -> systems too big for one GPU run across nodes.
+  if (comm->nprocs > 1) {
+    if (precision != PRECISION_DOUBLE)
+      error->all(FLERR, "Pair style uma: multi-node requires precision double");
+    try {
+      const int mn_w = comm->nprocs;   // world SIZE (not the MPI_Comm `world`)
+      const int rank = comm->me;
+
+      // GPUs per node: env override else default (Polaris = 4).
+      gpus_per_node = 4;
+      if (const char *e = std::getenv("UMA_GPUS_PER_NODE")) {
+        const int v = atoi(e);
+        if (v >= 1) gpus_per_node = v;
+      }
+      // Local rank for device binding: launcher hint else me % gpus_per_node.
+      int local_rank = comm->me % gpus_per_node;
+      for (const char *v : {"PMI_LOCAL_RANK", "SLURM_LOCALID",
+                            "OMPI_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
+        const char *lr = std::getenv(v);
+        if (lr == nullptr || *lr == '\0') continue;
+        char *end = nullptr;
+        const long parsed = std::strtol(lr, &end, 10);
+        if (end == lr || *end != '\0' || parsed < 0) continue;
+        local_rank = static_cast<int>(parsed);
+        break;
+      }
+      const int ndev =
+          torch::cuda::is_available() ? static_cast<int>(torch::cuda::device_count()) : 0;
+      // When the launcher pins one GPU per rank (CUDA_VISIBLE_DEVICES), ndev==1
+      // and device_index 0 is correct; otherwise bind local_rank % ndev.
+      const int device_index = (ndev > 1) ? (local_rank % ndev) : 0;
+
+      // Load metadata (all ranks) for cutoff + normalizer + refs.
+      auto metadata = uma::load_artifact_metadata(artifact_dir + "/metadata.json");
+      cutoff = metadata.cutoff;
+
+      // NCCL id: rank 0 generates, MPI_Bcast to all, then collective create.
+      const size_t id_bytes = uma::MpiPeerPredictor::nccl_unique_id_bytes();
+      if (id_bytes == 0)
+        error->all(FLERR, "Pair style uma: engine built without NCCL (multi-node)");
+      std::vector<char> nccl_id(id_bytes, 0);
+      if (rank == 0) uma::MpiPeerPredictor::make_nccl_unique_id(nccl_id.data());
+      MPI_Bcast(nccl_id.data(), static_cast<int>(id_bytes), MPI_BYTE, 0, world);
+
+      mpi_peer = uma::MpiPeerPredictor::create(
+                     artifact_dir, metadata, mn_w, rank, device_index,
+                     nccl_id.data(), torch::kFloat64)
+                     .release();
+      if (screen)
+        fprintf(screen,
+                "uma: rank %d -> multi-node peer (world=%d local_rank=%d dev=%d)\n",
+                rank, mn_w, local_rank, device_index);
+      utils::logmesg(lmp,
+                     "Pair uma: multi-node edge-parallel, world={} artifact '{}' "
+                     "cutoff={:.3f} precision=double\n",
+                     mn_w, artifact_dir, cutoff);
+      return;
+    } catch (const std::exception &e) {
+      error->one(FLERR, "Failed to init UMA multi-node peer: {}", e.what());
+    }
+  }
+
   try {
     if (!devices_explicit) {
 #ifdef LMP_KOKKOS
