@@ -1,0 +1,66 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:50:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N lammps_eager_ckpt
+#PBS -A RAPINS
+
+# Test activation checkpointing IN LAMMPS (single GPU, eager worker).
+# UMA_EAGER_CKPT=1 routes pair_style uma (devices 1) through the eager FairChem
+# model with activation_checkpointing -> big boxes that the traced path OOMs on.
+# Runs SP (E + per-atom F) + short NVT at N given by M3_NREP (default 14 = 21952,
+# the single-GPU ckpt ceiling). Also a control run WITHOUT ckpt (expected OOM at
+# large N) for contrast.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+export CUDA_VISIBLE_DEVICES=0
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+LMP="${ROOT}/build-uma-mn/lmp"
+ART="${UMA_ARTIFACT_DIR}"
+NREP="${M3_NREP:-14}"
+OUT="${M3}/results/lammps_ckpt_${PBS_JOBID:-manual}"; mkdir -p "${OUT}"
+# eager worker uses fairchem; needs a writable short TMPDIR
+export TMPDIR="/tmp/t_$USER"; mkdir -p "${TMPDIR}"
+
+test -x "${LMP}" || { echo "FAIL missing ${LMP}"; exit 1; }
+DATA="${OUT}/nacl${NREP}.data"
+python "${M3}/make_nacl_data.py" --n "${NREP}" --out "${DATA}"
+
+cat > "${OUT}/in.ckpt" <<EOF
+units metal
+atom_style atomic
+boundary p p p
+newton off
+read_data ${DATA}
+pair_style uma precision double devices 1
+pair_coeff * * ${ART} Na Cl
+neighbor 2.0 bin
+neigh_modify delay 0 every 1 check yes
+timestep 0.001
+thermo 1
+thermo_style custom step temp pe
+thermo_modify norm no format float %.17g
+dump 1 all custom 1 ${OUT}/f.dump id type x y z fx fy fz
+dump_modify 1 sort id format float %.17g
+run 0
+undump 1
+print "CKPT_SP_PE = \$(pe:%.17g)"
+velocity all create 300.0 12345 mom yes rot yes dist gaussian
+fix 1 all nvt temp 300.0 300.0 \$(100.0*dt)
+run 10
+print "CKPT_NVT_PE = \$(pe:%.17g) T = \$(temp:%.17g)"
+EOF
+
+echo "############ LAMMPS + eager checkpointing (UMA_EAGER_CKPT=1), NaCl ${NREP}^3 ############"
+UMA_EAGER_CKPT=1 UMA_PYTHON_GP_WORKER=1 "${LMP}" -in "${OUT}/in.ckpt" -log "${OUT}/log.ckpt" \
+  > "${OUT}/out.ckpt" 2>&1
+rc=$?
+echo "lmp rc=${rc}"
+grep -iE 'CKPT_SP_PE|CKPT_NVT_PE|Loop time|ERROR|out of memory|activation_checkpointing|eager' "${OUT}/out.ckpt" "${OUT}/log.ckpt" 2>/dev/null | tail -15
+echo "LAMMPS_EAGER_CKPT_DONE ${OUT}"

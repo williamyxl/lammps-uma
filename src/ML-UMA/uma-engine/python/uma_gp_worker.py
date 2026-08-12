@@ -85,6 +85,7 @@ class WorkerState:
         workers: int,
         dtype: str,
         task: str,
+        activation_checkpointing: bool = False,
     ) -> dict:
         from ase import Atoms
         from fairchem.core import FAIRChemCalculator
@@ -105,7 +106,10 @@ class WorkerState:
         settings.base_precision_dtype = getattr(torch, dtype)
         # Graph-parallel + external_graph trips CUDA index asserts on UMA.
         settings.external_graph_gen = workers <= 1
-        settings.activation_checkpointing = False
+        # Activation checkpointing (eager only): recompute block activations in
+        # backward -> ~3x less activation memory, exact. Cannot be traced, so the
+        # eager worker is the way LAMMPS gets this capacity lever.
+        settings.activation_checkpointing = bool(activation_checkpointing)
         # Never silent turbo for double / parity paths.
         settings.execution_mode = "general"
 
@@ -180,10 +184,14 @@ def main() -> int:
     _write_json({"ok": True, "ready": True, "pid": os.getpid()})
 
     while True:
-        line = sys.stdin.readline()
-        if not line:
+        # Read the command line in BINARY. Mixing sys.stdin.readline() (text,
+        # read-ahead buffered) with sys.stdin.buffer.read() (binary geometry)
+        # desyncs the stream: readline() swallows bytes past the newline, so the
+        # following binary read misses them. Use buffer.readline() throughout.
+        raw = sys.stdin.buffer.readline()
+        if not raw:
             break
-        line = line.strip()
+        line = raw.decode("utf-8", errors="strict").strip()
         if not line:
             continue
         try:
@@ -200,6 +208,7 @@ def main() -> int:
                     workers=int(msg.get("workers", 1)),
                     dtype=str(msg.get("dtype", "float64")),
                     task=str(msg.get("task", "omat")),
+                    activation_checkpointing=bool(msg.get("activation_checkpointing", False)),
                 )
                 _write_json(out)
             elif cmd == "predict":

@@ -24,7 +24,8 @@ class GraphParallelRuntime {
  public:
   static std::unique_ptr<GraphParallelRuntime> create(
       const std::string& artifact_dir, const ArtifactMetadata& metadata,
-      int num_devices, torch::ScalarType compute_dtype);
+      int num_devices, torch::ScalarType compute_dtype,
+      bool activation_checkpointing = false);
 
   ~GraphParallelRuntime();
 

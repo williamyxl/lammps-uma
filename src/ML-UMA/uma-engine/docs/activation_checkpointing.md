@@ -76,9 +76,23 @@ Consequence: the LAMMPS C++ engine loads a **traced** `model_traced.pt`, so it
 **eager-only** capability today.
 
 ### Paths to use checkpointing from LAMMPS
-1. **Eager Python-worker path** (recommended): run the eager checkpointed model
-   in-process via the engine's `UMA_PYTHON_GP_WORKER` hook. Gets the full 12.7×
-   (or 19× with save_on_cpu) at the cost of Python in the loop.
+1. **Eager Python-worker path (IMPLEMENTED)**: `UMA_EAGER_CKPT=1` routes
+   `pair_style uma ... devices 1` through the eager FairChem worker
+   (`uma_gp_worker.py`, workers=1 → no Ray) with `activation_checkpointing=True`.
+   The engine `Predictor::from_artifact` builds a single-GPU `GraphParallelRuntime`
+   that forks the worker and talks the binary geometry protocol; LAMMPS gets E+F
+   per step. Verified in LAMMPS:
+   - NaCl 8³ (4096): SP E=-13841.9561 + 10-step NVT — a box the traced path OOMs.
+   - NaCl 14³ (**21,952**, ~79 Å): SP E=-74185.517 + 10-step NVT complete
+     (~14 s/step). 12.7× the traced ceiling (1,728).
+   Run it: `polaris/pbs/lammps_eager_ckpt.pbs` (`M3_NREP=<N>`).
+   Note: ΔE ~5e-5 vs the fast+merge ground truth is the general-vs-fastmerge
+   recipe bias (the eager worker uses execution_mode=general), not a bug.
+   Bugfix landed: the worker mixed text `stdin.readline()` with binary
+   `stdin.buffer.read()`, desyncing repeated predicts (MD steps); now all reads
+   use `stdin.buffer`.
+2. **Legacy generic Python GP** (`UMA_PYTHON_GP_WORKER`): same worker, multi-GPU
+   (Ray) — Ray is broken on Polaris compute nodes.
 2. **`torch.jit.script` the checkpoint region** instead of `trace`: scripting can
    represent the control flow, but the UMA model has many tracer-only patterns —
    high effort.

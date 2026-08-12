@@ -38,11 +38,14 @@ def make_nacl(nrep: int):
 
 
 _EDGE_CHUNK = None  # set from CLI
+_WORKERS = 1        # set from CLI
 
 
 def settings(checkpointing: bool):
     s = inference_settings_with_dtype("float64")
-    s.external_graph_gen = True
+    # Graph-parallel (workers>1) requires internal graph gen (external trips
+    # CUDA index asserts on UMA GP, per uma_gp_worker.py).
+    s.external_graph_gen = (_WORKERS <= 1)
     s.activation_checkpointing = bool(checkpointing)
     s.execution_mode = "general"
     s.merge_mole = False
@@ -94,21 +97,28 @@ def main() -> int:
                     help="A3: offload saved activations to pinned host RAM")
     ap.add_argument("--edge-chunk", type=int, default=0,
                     help="C1: edge_chunk_size (stream edges); 0=off")
+    ap.add_argument("--workers", type=int, default=1,
+                    help="FairChem graph-parallel GPU workers (aggregate memory)")
     ap.add_argument("--sizes", type=int, nargs="*",
                     default=[6, 8, 10, 12, 14, 16, 18, 20, 22, 24])
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
-    global _EDGE_CHUNK
+    global _EDGE_CHUNK, _WORKERS
     _EDGE_CHUNK = args.edge_chunk or None
+    _WORKERS = max(1, int(args.workers))
 
     from fairchem.core.units.mlip_unit import load_predict_unit
 
     predictor = load_predict_unit(
-        args.ckpt, device="cuda", inference_settings=settings(bool(args.checkpointing))
+        args.ckpt, device="cuda", inference_settings=settings(bool(args.checkpointing)),
+        workers=_WORKERS,
     )
-    tag = ("ckpt_on" if args.checkpointing else "ckpt_off") + ("_soc" if args.save_on_cpu else "") + (f"_ec{args.edge_chunk}" if args.edge_chunk else "")
-    print(f"# capacity sweep [{tag}] on {torch.cuda.get_device_name(0)} "
-          f"({torch.cuda.get_device_properties(0).total_memory/1024**3:.1f} GiB)")
+    tag = ("ckpt_on" if args.checkpointing else "ckpt_off") + ("_soc" if args.save_on_cpu else "") \
+        + (f"_ec{args.edge_chunk}" if args.edge_chunk else "") + (f"_w{_WORKERS}" if _WORKERS > 1 else "")
+    ngpu = torch.cuda.device_count()
+    print(f"# capacity sweep [{tag}] workers={_WORKERS} on {ngpu}x "
+          f"{torch.cuda.get_device_name(0)} "
+          f"({torch.cuda.get_device_properties(0).total_memory/1024**3:.1f} GiB each)")
     results = []
     max_ok = 0
     for nrep in args.sizes:

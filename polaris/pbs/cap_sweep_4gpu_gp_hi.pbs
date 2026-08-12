@@ -1,0 +1,36 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N cap_sweep_4gpu_hi
+#PBS -A RAPINS
+
+# Max NaCl NxNxN on 4 GPUs with checkpointing, via FairChem graph parallel over
+# torch.distributed (Ray-free): mpiexec -n 4, one GP peer per GPU. Sweep N=8..20.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+OUT="${M3}/results/cap4gpu_hi_${PBS_JOBID:-manual}"; mkdir -p "${OUT}"
+
+# torch.distributed rendezvous (single node)
+export MASTER_ADDR=127.0.0.1
+export MASTER_PORT=$((29500 + RANDOM % 500))
+# NCCL over Slingshot (aws-ofi-nccl) for the GP collectives
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+[[ -e "$OFI/lib/libnccl-net.so" ]] && export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_MR_CACHE_MONITOR=userfaultfd
+export NCCL_CROSS_NIC=1
+
+echo "############ 4-GPU GP (torch.distributed) + checkpointing, N=8..20 ############"
+mpiexec -n 4 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+  python "${M3}/gp_mpi_sweep.py" --ckpt "${UMA_CHECKPOINT}" --checkpointing 1 \
+    --sizes 22 24 26 28 30 32 34 36 --out "${OUT}/sweep.json" || true
+
+echo "=== SUMMARY ==="; cat "${OUT}/sweep.json" 2>/dev/null | python -c "import json,sys;s=json.load(sys.stdin);print('max_atoms_fit',s['max_atoms_fit'],'box',round(s['max_box_A'],1),'A')" 2>/dev/null || true
+echo "CAP_SWEEP_4GPU_GP_DONE ${OUT}"

@@ -85,11 +85,20 @@ Predictor Predictor::from_artifact(const std::string& artifact_dir,
   const std::string metadata_path = artifact_dir + "/metadata.json";
   auto metadata = load_artifact_metadata(metadata_path);
 
-  if (num_devices > 1) {
-    // Same-node GP via GraphParallelRuntime. Default = C++ LibTorch MP when
-    // model_mp_wN_r*.pt exists. Python only with UMA_PYTHON_GP_WORKER=1.
+  // Activation checkpointing (eager only; cannot be traced). UMA_EAGER_CKPT=1
+  // routes single-GPU through the eager FairChem worker with checkpointing on,
+  // trading ~1.33x step time for ~3x less activation memory (much bigger boxes).
+  bool eager_ckpt = false;
+  if (const char* e = std::getenv("UMA_EAGER_CKPT"))
+    eager_ckpt = (e[0] == '1' && e[1] == '\0');
+
+  if (num_devices > 1 || eager_ckpt) {
+    // Same-node GP (num_devices>1) via GraphParallelRuntime, OR single-GPU eager
+    // checkpointing (num_devices==1 + eager_ckpt). Default GP = C++ LibTorch MP
+    // when model_mp_wN_r*.pt exists; Python only with UMA_PYTHON_GP_WORKER=1 or
+    // the eager-checkpointing path.
     auto gp = GraphParallelRuntime::create(artifact_dir, metadata, num_devices,
-                                           metadata.compute_dtype);
+                                           metadata.compute_dtype, eager_ckpt);
     return Predictor(std::move(gp), torch::Device(torch::kCPU), std::move(metadata),
                      num_devices);
   }

@@ -161,14 +161,21 @@ std::string resolve_gp_worker_script() {
 
 std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
     const std::string& artifact_dir, const ArtifactMetadata& metadata,
-    int num_devices, torch::ScalarType compute_dtype) {
-  if (num_devices <= 1) {
+    int num_devices, torch::ScalarType compute_dtype,
+    bool activation_checkpointing) {
+  // Single-GPU eager path is allowed ONLY for activation checkpointing (which
+  // cannot be traced): run the eager FairChem model (workers=1, no Ray) via the
+  // Python worker. Otherwise num_devices>1 is required for GP.
+  if (num_devices <= 1 && !activation_checkpointing) {
     throw std::runtime_error(
-        "GraphParallelRuntime::create requires num_devices > 1");
+        "GraphParallelRuntime::create requires num_devices > 1 "
+        "(or num_devices==1 with activation_checkpointing)");
   }
 
   // --- Product path: C++ LibTorch MP (Kokkos peer + vesin) ---
-  const bool force_python = prefer_python_gp_worker();
+  // Force the Python worker when checkpointing is requested (traced MP can't
+  // checkpoint); otherwise honor the normal selection.
+  const bool force_python = activation_checkpointing || prefer_python_gp_worker();
   if (!force_python) {
     if (LibtorchMpRuntime::artifacts_present(artifact_dir, num_devices)) {
       auto cpp = LibtorchMpRuntime::try_create(artifact_dir, metadata, num_devices,
@@ -193,6 +200,14 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
   }
 
   const std::string checkpoint = resolve_gp_checkpoint(artifact_dir, metadata);
+  // Checkpointing needs the eager FairChem worker (uma_gp_worker.py); at
+  // workers=1 it uses no Ray. Force it via UMA_GP_WORKER for this case.
+  if (activation_checkpointing) {
+#ifdef UMA_ENGINE_PYTHON_DIR
+    std::string cand = std::string(UMA_ENGINE_PYTHON_DIR) + "/uma_gp_worker.py";
+    if (file_exists(cand)) setenv("UMA_GP_WORKER", cand.c_str(), /*overwrite=*/1);
+#endif
+  }
   const std::string script = resolve_gp_worker_script();
   const std::string python = find_python();
   const std::string task =
@@ -248,7 +263,9 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
     std::ostringstream init;
     init << "{\"cmd\":\"init\",\"checkpoint\":\"" << checkpoint
          << "\",\"workers\":" << num_devices << ",\"dtype\":\""
-         << dtype_name(compute_dtype) << "\",\"task\":\"" << task << "\"}";
+         << dtype_name(compute_dtype) << "\",\"task\":\"" << task
+         << "\",\"activation_checkpointing\":"
+         << (activation_checkpointing ? "true" : "false") << "}";
     rt->write_line(init.str());
     const std::string resp = rt->read_line();
     if (!json_get_bool(resp, "ok", false)) {
@@ -258,7 +275,10 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
     if (!backend.empty()) rt->backend_ = backend;
 
     const char* forbid = std::getenv("UMA_FORBID_RAY_GP");
-    if (forbid != nullptr && forbid[0] == '1' && forbid[1] == '\0') {
+    // workers==1 uses NO Ray (Ray only kicks in for workers>1), so the
+    // single-GPU eager-checkpointing path is exempt from the Ray ban.
+    if (forbid != nullptr && forbid[0] == '1' && forbid[1] == '\0' &&
+        num_devices > 1) {
       if (rt->backend_ == "fairchem_eager_python" ||
           script.find("uma_gp_worker.py") != std::string::npos) {
         throw std::runtime_error(
