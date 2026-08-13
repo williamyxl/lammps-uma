@@ -12,7 +12,35 @@ collectives, eager FairChem model, `activation_checkpointing=True`. (Single-GPU
 `devices 1` uses `uma_gp_worker.py`.) Wired via `graph_parallel.cpp::create`
 (allows num_devices>1 with checkpointing) + `predictor.cpp` (UMA_EAGER_CKPT).
 
-## Result: it RUNS at 64k atoms, energy matches ASE, but forces are WRONG
+## RESOLVED (rev 2): forces now bit-exact via real torch.distributed GP
+
+The force bug below was root-caused to the **host-staged kgp SharedGatherSlot
+emulation** of the GP collectives (not the GP math): a diagnostic showed real
+torch.distributed GP forces are bit-exact vs serial (dF ~6e-16), while kgp gave
+~13% partial forces. Fix: a new worker `uma_dist_gp_worker.py` runs the eager
+checkpointed model over **real torch.distributed + FairChem gp_utils** (rank 0
+speaks the C++ pipe protocol and forks ranks 1..W-1 into the same NCCL group).
+`graph_parallel.cpp` selects it for multi-GPU checkpointing.
+
+Corrected results (LAMMPS + checkpointing, 4 GPU, vs ASE-FC FP64):
+
+| N | atoms | box | E_lammps (eV) | \|dE\| | max\|dF\| | mean\|dF\| | SP ms/step |
+|--:|------:|----:|--------------:|------:|----------:|-----------:|-----------:|
+| 8  | 4,096  | 45 A  | -13841.956101 | 3.6e-12 | **5.7e-16** | - | - |
+| 20 | 64,000 | 113 A | -216283.022184 | 1.8e-10 | **6.1e-14** | 3.9e-15 | 4,858 |
+| 21 | 74,088 | 118 A | -250375.822189 | 8.7e-11 | **7.1e-14** | 2.0e-14 | 5,536 |
+| 22 | 85,184 | 124 A | — | — | — | — | **OOM in LAMMPS** |
+
+- **Energy + per-atom forces now match ASE to the FP64 floor.**
+- **LAMMPS 4-GPU checkpointing ceiling = N=21 (74,088)**; N=22 (85,184) fits the
+  pure model (ASE) but OOMs in LAMMPS (~34 GiB by torch + LAMMPS/C++ engine
+  overhead on GPU 0 leaves too little headroom). So the LAMMPS ceiling is one N
+  below the model ceiling.
+- SP ~5 s/step at 64-74k on 4-GPU dist GP + checkpointing.
+
+---
+
+## (Historical) Original bug: energy matched ASE, forces WRONG
 
 | N | atoms | box | E_lammps (eV) | E_ase (eV) | \|dE\| | max\|dF\| | NVT ms/step |
 |--:|------:|----:|--------------:|-----------:|------:|----------:|------------:|

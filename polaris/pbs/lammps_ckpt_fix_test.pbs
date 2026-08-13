@@ -1,0 +1,41 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:40:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N lmp_ckpt_fix
+#PBS -A RAPINS
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"; ROOT="$(pwd)"; source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"; M3="${ROOT}/src/ML-UMA/examples/polaris_m3"; P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"; ART="${UMA_ARTIFACT_DIR}"; LMP="${ROOT}/build-uma-mn/lmp"
+OUT="${M3}/results/ckpt_fix_${PBS_JOBID}"; mkdir -p "${OUT}"; export TMPDIR="/tmp/t_$USER"; mkdir -p "$TMPDIR"
+export UMA_EAGER_CKPT=1 UMA_PYTHON_GP_WORKER=1
+export UMA_LIBTORCH_MP_WORKER="${ENG}/build-cpp-mp-mn/uma_libtorch_mp_worker"
+N=8; python "${M3}/make_nacl_data.py" --n $N --out "${OUT}/n${N}.data"
+cat > "${OUT}/in.$N" <<LMP
+units metal
+atom_style atomic
+boundary p p p
+newton off
+read_data ${OUT}/n${N}.data
+pair_style uma precision double devices 4
+pair_coeff * * ${ART} Na Cl
+neighbor 2.0 bin
+neigh_modify delay 0 every 1 check yes
+thermo_modify norm no format float %.17g
+dump 1 all custom 1 ${OUT}/lmp_f_${N}.dump id type x y z fx fy fz
+dump_modify 1 sort id format float %.17g
+run 0
+print "SP_PE_${N} = \$(pe:%.17g)"
+LMP
+"${LMP}" -in "${OUT}/in.$N" -log "${OUT}/log.$N" > "${OUT}/out.$N" 2>&1; echo "lmp rc=$?"
+grep -h "SP_PE_${N}" "${OUT}/out.$N" 2>/dev/null | tail -1
+# ASE ckpt ref
+export MASTER_ADDR=127.0.0.1 MASTER_PORT=$((29500+RANDOM%400))
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+[[ -e "$OFI/lib/libnccl-net.so" ]] && export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_MR_CACHE_MONITOR=userfaultfd NCCL_CROSS_NIC=1
+mpiexec -n 4 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" python "${M3}/ase_ckpt_ref.py" --data "${OUT}/n${N}.data" --out "${OUT}/ase_${N}.npz" || echo "ase failed"
+python "${M3}/lmp_ckpt_report.py" --outdir "${OUT}" --sizes $N
+echo "CKPT_FIX_DONE ${OUT}"

@@ -221,10 +221,15 @@ def peer_all_gather_padded(inp: torch.Tensor) -> tuple[torch.Tensor, ...]:
 
 
 class _ReduceFromMP(torch.autograd.Function):
-    """FairChem ReduceFromModelParallelRegion: all_reduce fwd, identity bwd.
+    """FairChem ReduceFromModelParallelRegion: all_reduce fwd.
 
-    Used for energy/force GP reductions where each rank already holds a correct
-    partial and the backward must not double-count.
+    Backward: an all_reduce (sum) is self-adjoint, so its VJP is also an
+    all_reduce of the incoming grad. Returning identity here dropped the other
+    ranks' contributions to dE/dpos -> per-atom forces were partial (measured
+    ~13% low, per-atom-varying). All-reduce the grad so every rank accumulates
+    the full force gradient across shards (matches the C++ AllReduceSumFn which
+    defaults ar_bwd ON). Override with UMA_GP_REDUCE_IDENTITY_BWD=1 only for
+    diagnostics.
     """
 
     @staticmethod
@@ -233,18 +238,19 @@ class _ReduceFromMP(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: torch.Tensor):
+        # ReduceFromModelParallelRegion is all_reduce fwd / identity bwd (FairChem
+        # semantics). Its backward must NOT all_reduce (that double-counts with
+        # all_reduce_with_grad / the gather backward -> forces blow up ~1e6).
         return grad_output
 
 
 class _AllReduceWithGrad(torch.autograd.Function):
-    """Peer stand-in for escn_md's ``all_reduce_with_grad``.
-
-    Default: identity backward (safe with concurrent per-rank autograd.grad).
-
-    Set ``UMA_ALLREDUCE_WITH_GRAD_BWD=1`` to all_reduce grads in backward
-    (true ``nn.functional.all_reduce`` semantics). Pair with
-    ``UMA_SKIP_FORCE_GP_REDUCE=1`` when testing whether each rank already holds
-    full dE/dpos after that backward (force all_reduce would then over-count).
+    """Peer stand-in for escn_md's ``all_reduce_with_grad`` =
+    torch.distributed.nn.functional.all_reduce, which all_reduces in BOTH
+    forward and backward (grad-aware). Used by balance_channels (the whole-system
+    charge/spin coupling applied every block). Its backward MUST all_reduce, or
+    each rank's dE/dpos misses the other ranks' balance_channels contribution ->
+    per-atom forces come out partial (~13% low, per-atom-varying).
     """
 
     @staticmethod
@@ -255,6 +261,8 @@ class _AllReduceWithGrad(torch.autograd.Function):
     def backward(ctx, grad_output: torch.Tensor):
         import os
 
+        # Default ON: matches torch.distributed.nn.functional.all_reduce (grad-
+        # aware). Set UMA_ALLREDUCE_WITH_GRAD_BWD=0 for identity (diagnostics).
         if os.environ.get("UMA_ALLREDUCE_WITH_GRAD_BWD", "0") == "1":
             return peer_all_reduce_sum(grad_output.contiguous())
         return grad_output

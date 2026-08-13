@@ -205,8 +205,10 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
   //   multi-GPU : uma_native_gp_worker.py (Ray-free, host-staged GP collectives)
   if (activation_checkpointing) {
 #ifdef UMA_ENGINE_PYTHON_DIR
+    // multi-GPU: real torch.distributed GP worker (bit-exact forces, unlike the
+    // host-staged kgp native worker). single-GPU: plain eager worker (no Ray).
     const char* wname =
-        (num_devices > 1) ? "uma_native_gp_worker.py" : "uma_gp_worker.py";
+        (num_devices > 1) ? "uma_dist_gp_worker.py" : "uma_gp_worker.py";
     std::string cand = std::string(UMA_ENGINE_PYTHON_DIR) + "/" + wname;
     if (file_exists(cand)) setenv("UMA_GP_WORKER", cand.c_str(), /*overwrite=*/1);
 #endif
