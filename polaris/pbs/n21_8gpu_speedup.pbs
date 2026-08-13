@@ -1,0 +1,59 @@
+#!/bin/bash -le
+#PBS -l select=2:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:50:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N n21_8gpu_speedup
+#PBS -A RAPINS
+
+# N=21 (NaCl 21^3 = 74,088) single-point timing: 8 GPUs / 2 nodes vs 4 GPUs / 1
+# node, eager checkpointing + real torch.distributed graph parallel. Does adding
+# a second node speed up the single point?
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"; M3="${ROOT}/src/ML-UMA/examples/polaris_m3"; P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+export TMPDIR="/tmp/t_$USER"; mkdir -p "$TMPDIR"
+OUT="${M3}/results/n21_speedup_${PBS_JOBID}"; mkdir -p "$OUT"
+python "${M3}/make_nacl_data.py" --n 21 --out "${OUT}/n21.data"
+
+# rendezvous: first node hostname (must be reachable cross-node, not 127.0.0.1)
+HEAD=$(head -1 "${PBS_NODEFILE}")
+export MASTER_ADDR="${HEAD}"
+export MASTER_PORT=$((29500 + RANDOM % 400))
+# NCCL over Slingshot
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+[[ -e "$OFI/lib/libnccl-net.so" ]] && export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_MR_CACHE_MONITOR=userfaultfd NCCL_CROSS_NIC=1
+export NCCL_SOCKET_IFNAME=hsn0,hsn1
+
+echo "############ 4 GPU / 1 node (baseline) ############"
+export MASTER_PORT=$((29500 + RANDOM % 400))
+mpiexec -n 4 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+  python "${M3}/ase_ckpt_ref.py" --data "${OUT}/n21.data" --out "${OUT}/gp4.npz" --time-iters 5 \
+  || echo "(4-GPU failed)"
+
+echo "############ 8 GPU / 2 nodes ############"
+export MASTER_PORT=$((29500 + RANDOM % 400))
+mpiexec -n 8 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+  python "${M3}/ase_ckpt_ref.py" --data "${OUT}/n21.data" --out "${OUT}/gp8.npz" --time-iters 5 \
+  || echo "(8-GPU failed)"
+
+echo "=== SPEEDUP ==="
+python - "$OUT" <<'PY'
+import sys, numpy as np; from pathlib import Path
+d=Path(sys.argv[1])
+def load(p):
+    z=np.load(d/p); return float(z["ms_per_sp"]), float(z["energy_eV"])
+try:
+    m4,e4=load("gp4.npz"); m8,e8=load("gp8.npz")
+    print(f"4 GPU/1 node: {m4:.1f} ms/SP  E={e4:.6f}")
+    print(f"8 GPU/2 node: {m8:.1f} ms/SP  E={e8:.6f}")
+    print(f"speedup 8v4 = {m4/m8:.2f}x   |dE| = {abs(e8-e4):.2e}")
+except Exception as ex:
+    print("compare failed:", ex)
+PY
+echo "N21_8GPU_SPEEDUP_DONE $OUT"

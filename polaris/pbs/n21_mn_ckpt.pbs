@@ -1,0 +1,66 @@
+#!/bin/bash -le
+#PBS -l select=2:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:40:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N n21_mn_ckpt
+#PBS -A RAPINS
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"; ROOT="$(pwd)"; source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"; M3="${ROOT}/src/ML-UMA/examples/polaris_m3"; P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"; export TMPDIR="/tmp/t_$USER"; mkdir -p "$TMPDIR"
+LMP="${ROOT}/build-uma-mn/lmp"; ART="${UMA_ARTIFACT_DIR}"
+OUT="${M3}/results/n21_mn_ckpt_${PBS_JOBID}"; mkdir -p "$OUT"
+N=21; NAT=10648 ; NAT=$((8*N*N*N))
+python "${M3}/make_nacl_data.py" --n $N --out "${OUT}/n21.data"
+# full-precision extxyz for MP shard export
+python - "${OUT}/n21.data" "${OUT}/n21.extxyz" <<'PY'
+import sys,numpy as np;from ase.io import read;from ase.data import atomic_numbers as AN
+a=read(sys.argv[1],format="lammps-data",atom_style="atomic",units="metal")
+if a.has("type"): a.set_atomic_numbers([AN[["Na","Cl"][t-1]] for t in a.get_array("type")])
+a.pbc=True;c=np.array(a.cell,float);lat=" ".join(repr(float(v)) for v in c.reshape(-1))
+L=[str(len(a)),f'Lattice="{lat}" Properties=species:S:1:pos:R:3 pbc="T T T"']
+for s,p in zip(a.get_chemical_symbols(),a.get_positions()):L.append(f"{s} {repr(float(p[0]))} {repr(float(p[1]))} {repr(float(p[2]))}")
+open(sys.argv[2],"w").write("\n".join(L)+"\n")
+PY
+# export w8_n{NAT} shards (2 waves of 4 on node 0)
+need=0; for R in $(seq 0 7); do [[ -f "${ART}/model_mp_w8_n${NAT}_r${R}.pt" ]]||need=1;done
+if [[ $need -eq 1 ]]; then
+  echo "=== export w8_n${NAT} shards ==="
+  i=0; for R in $(seq 0 7); do
+    CUDA_VISIBLE_DEVICES=$((R%4)) python "${ENG}/python/export_mp_artifact.py" \
+      --checkpoint "${UMA_CHECKPOINT}" --output "${ART}" --world 8 --ranks $R \
+      --dtype float64 --task omat --device cuda --atoms "${OUT}/n21.extxyz" \
+      --execution-mode umas_fast_pytorch --merge-mole & i=$((i+1)); [[ $((i%4)) -eq 0 ]]&&wait
+  done; wait
+fi
+ns=$(ls "${ART}"/model_mp_w8_n${NAT}_r*.pt 2>/dev/null|wc -l); echo "w8_n${NAT} shards: ${ns}/8"
+[[ $ns -eq 8 ]] || { echo "shard export failed (OOM at N=21 export?)"; exit 1; }
+
+HEAD=$(head -1 "${PBS_NODEFILE}"); export MASTER_ADDR="${HEAD}"; export MASTER_PORT=$((29500+RANDOM%400))
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_MR_CACHE_MONITOR=userfaultfd NCCL_CROSS_NIC=1
+export UMA_MP_NATOMS=${NAT} UMA_STRUCTURE_NATOMS=${NAT} UMA_PEER_TRANSPORT=nccl UMA_GPUS_PER_NODE=4
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+export UMA_MN_CKPT=1  # multi-node checkpointing ON (default, explicit)
+cat > "${OUT}/in.n21" <<LMP
+units metal
+atom_style atomic
+boundary p p p
+newton off
+read_data ${OUT}/n21.data
+pair_style uma precision double devices 1
+pair_coeff * * ${ART} Na Cl
+neighbor 2.0 bin
+neigh_modify delay 0 every 1 check yes
+thermo_modify norm no format float %.17g
+run 0
+print "N21_MN_PE = \$(pe:%.17g)"
+LMP
+echo "== 8 GPU / 2 node, N=21, multi-node checkpointing =="
+timeout 1200 mpiexec -n 8 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+  "${LMP}" -in "${OUT}/in.n21" -log "${OUT}/log.n21" > "${OUT}/out.n21" 2>&1
+echo "lmp rc=$?"
+grep -iE 'N21_MN_PE|out of memory|CUDA out of|MP_PERF rank=0|Total wall|ERROR|Watchdog' "${OUT}/out.n21" "${OUT}/log.n21" 2>/dev/null | tail -8
+echo "N21_MN_CKPT_DONE ${OUT}"

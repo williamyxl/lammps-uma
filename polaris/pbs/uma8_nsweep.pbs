@@ -1,0 +1,27 @@
+#!/bin/bash -le
+#PBS -l select=2:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:30:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N uma8_nsweep
+#PBS -A RAPINS
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"; ROOT="$(pwd)"; source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"; M3="${ROOT}/src/ML-UMA/examples/polaris_m3"; P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"; export TMPDIR="/tmp/t_$USER"; mkdir -p "$TMPDIR"
+OUT="${M3}/results/uma8_nsweep_${PBS_JOBID}"; mkdir -p "$OUT"
+HEAD=$(head -1 "${PBS_NODEFILE}"); export MASTER_ADDR="${HEAD}"
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_MR_CACHE_MONITOR=userfaultfd NCCL_CROSS_NIC=1
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+for N in 8 10 12 14; do
+  python "${M3}/make_nacl_data.py" --n $N --out "${OUT}/n$N.data" >/dev/null 2>&1
+  export MASTER_PORT=$((29500+RANDOM%400))
+  echo "== 8GPU N=$N ($(( 8*N*N*N )) atoms) ckpt =="
+  timeout 300 mpiexec -n 8 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+    python "${M3}/ase_ckpt_ref.py" --data "${OUT}/n$N.data" --out "${OUT}/n$N.npz" --ckptflag 1 --time-iters 1 \
+    && python -c "import numpy as np;z=np.load('${OUT}/n$N.npz');print('  N=$N OK ms/SP',round(float(z['ms_per_sp']),1))" \
+    || echo "  N=$N rc=$?"
+done
+echo "UMA8_NSWEEP_DONE"

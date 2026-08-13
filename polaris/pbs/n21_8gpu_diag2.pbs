@@ -1,0 +1,28 @@
+#!/bin/bash -le
+#PBS -l select=2:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:20:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N n21_8gpu_diag2
+#PBS -A RAPINS
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"; ROOT="$(pwd)"; source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"; M3="${ROOT}/src/ML-UMA/examples/polaris_m3"; P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"; export TMPDIR="/tmp/t_$USER"; mkdir -p "$TMPDIR"
+OUT="${M3}/results/n21_diag2_${PBS_JOBID}"; mkdir -p "$OUT"
+python "${M3}/make_nacl_data.py" --n 21 --out "${OUT}/n21.data"
+HEAD=$(head -1 "${PBS_NODEFILE}"); export MASTER_ADDR="${HEAD}"; export MASTER_PORT=$((29500+RANDOM%400))
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+# Polaris-recommended NCCL/CXI knobs for cross-node stability
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_CXI_DEFAULT_TX_SIZE=16384 FI_CXI_RX_MATCH_MODE=hybrid
+export FI_MR_CACHE_MONITOR=userfaultfd FI_CXI_OFLOW_BUF_SIZE=8388608 FI_CXI_REQ_BUF_SIZE=8388608
+export NCCL_CROSS_NIC=1 NCCL_NET_GDR_LEVEL=0
+export NCCL_ALGO=Ring NCCL_PROTO=Simple
+export NCCL_DEBUG=WARN
+export TORCH_NCCL_BLOCKING_WAIT=1 NCCL_TIMEOUT=120
+echo "== 8 GPU / 2 node with CXI tuning + GDR off + Ring/Simple =="
+timeout 700 mpiexec -n 8 --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+  python "${M3}/ase_ckpt_ref.py" --data "${OUT}/n21.data" --out "${OUT}/gp8.npz" --time-iters 2 && \
+  python -c "import numpy as np;z=np.load('${OUT}/gp8.npz');print('8GPU ms/SP',float(z['ms_per_sp']),'E',float(z['energy_eV']))" || echo "8-GPU rc=$?"
+echo "N21_8GPU_DIAG2_DONE"

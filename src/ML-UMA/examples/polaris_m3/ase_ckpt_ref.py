@@ -29,6 +29,8 @@ def main() -> int:
     ap.add_argument("--ckpt", default=os.environ.get("UMA_CHECKPOINT"))
     ap.add_argument("--time-iters", type=int, default=0,
                     help="timed repeated single points (median ms/SP)")
+    ap.add_argument("--ckptflag", type=int, default=1,
+                    help="activation_checkpointing on(1)/off(0)")
     args = ap.parse_args()
 
     rank = int(os.environ.get("PMI_RANK", "0"))
@@ -50,7 +52,7 @@ def main() -> int:
 
     s = inference_settings_with_dtype("float64")
     s.external_graph_gen = False
-    s.activation_checkpointing = True
+    s.activation_checkpointing = bool(args.ckptflag)
     s.execution_mode = "general"
     s.merge_mole = False
     pred = load_predict_unit(args.ckpt, device="cuda", inference_settings=s, workers=1)

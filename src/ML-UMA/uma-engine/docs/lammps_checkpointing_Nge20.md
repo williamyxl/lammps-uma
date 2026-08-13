@@ -12,6 +12,39 @@ collectives, eager FairChem model, `activation_checkpointing=True`. (Single-GPU
 `devices 1` uses `uma_gp_worker.py`.) Wired via `graph_parallel.cpp::create`
 (allows num_devices>1 with checkpointing) + `predictor.cpp` (UMA_EAGER_CKPT).
 
+## Multi-node (MpiPeerPredictor) checkpointing (rev 3)
+
+The multi-node LAMMPS path (`pair_uma` with nprocs>1 -> `MpiPeerPredictor`, C++
+NCCL edge-parallel) loads a **traced** shard and so had no checkpointing ->
+OOM at large N. Implemented **C++ gradient checkpointing** around the traced
+module forward: a custom `torch::autograd::Function` (`CheckpointModuleFn`) runs
+the module under NoGrad in forward (no retained activations) and RECOMPUTES it
+with grad in backward -> ~3x less activation memory, bit-exact, works with the
+opaque traced module. Default ON for the MN path (`UMA_MN_CKPT=0` to disable).
+(mpi_peer_predictor.cpp)
+
+**Remaining blocker at N=21 = the SHARD EXPORT, not the runtime.** The runtime
+checkpointing is correct, but the traced w8_n{N} shards must first be EXPORTED,
+and `export_mp_artifact.py` traces the model on the full N-atom geometry with
+`activation_checkpointing=False` (tracing cannot capture torch.utils.checkpoint)
+-> the EXPORT itself OOMs at N=74,088 (needs ~40 GiB, tried 5.09 GiB alloc with
+1.39 GiB free). So:
+  - MN runtime checkpointing: DONE (helps run-time memory for any N with shards).
+  - N=21 end-to-end on the MN path: BLOCKED by the export OOM (traced export
+    can't checkpoint). Tracing-vs-checkpointing wall, now at export time.
+
+Ways past the export blocker (future work):
+  1. Export w8 shards with dynamic atom-count axis so a small-N (fits) export
+     runs at N=21 (requires tracing with dynamic shapes; UMA graph currently
+     bakes shapes).
+  2. Checkpoint the export's forward (needs a scriptable/checkpointable export,
+     i.e. not torch.jit.trace).
+  3. Use the eager multi-node dist-GP path (no traced shards) once the cross-node
+     dist-GP hang (see two_node_investigation.md) is resolved.
+
+The single-node checkpointing path (below) is unaffected and works to N=14 on 1
+GPU / N=21 on 4 GPU (1 node).
+
 ## RESOLVED (rev 2): forces now bit-exact via real torch.distributed GP
 
 The force bug below was root-caused to the **host-staged kgp SharedGatherSlot
