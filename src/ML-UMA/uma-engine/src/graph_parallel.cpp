@@ -200,11 +200,14 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
   }
 
   const std::string checkpoint = resolve_gp_checkpoint(artifact_dir, metadata);
-  // Checkpointing needs the eager FairChem worker (uma_gp_worker.py); at
-  // workers=1 it uses no Ray. Force it via UMA_GP_WORKER for this case.
+  // Checkpointing needs an eager worker (traced models can't checkpoint).
+  //   single-GPU: uma_gp_worker.py (workers=1 -> no Ray)
+  //   multi-GPU : uma_native_gp_worker.py (Ray-free, host-staged GP collectives)
   if (activation_checkpointing) {
 #ifdef UMA_ENGINE_PYTHON_DIR
-    std::string cand = std::string(UMA_ENGINE_PYTHON_DIR) + "/uma_gp_worker.py";
+    const char* wname =
+        (num_devices > 1) ? "uma_native_gp_worker.py" : "uma_gp_worker.py";
+    std::string cand = std::string(UMA_ENGINE_PYTHON_DIR) + "/" + wname;
     if (file_exists(cand)) setenv("UMA_GP_WORKER", cand.c_str(), /*overwrite=*/1);
 #endif
   }

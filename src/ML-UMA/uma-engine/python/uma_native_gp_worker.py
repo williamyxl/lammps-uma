@@ -55,6 +55,7 @@ def _rank_process_main(
     checkpoint: str,
     dtype: str,
     task: str,
+    activation_checkpointing: bool,
     conn,
     gather_slot,
     reduce_slot,
@@ -76,7 +77,9 @@ def _rank_process_main(
     settings = inference_settings_default()
     settings.base_precision_dtype = getattr(torch, dtype)
     settings.external_graph_gen = False
-    settings.activation_checkpointing = False
+    # Eager activation checkpointing (recompute in backward): ~3x less activation
+    # memory, bit-exact. Enables large boxes in the multi-GPU eager path.
+    settings.activation_checkpointing = bool(activation_checkpointing)
     settings.execution_mode = "general"
 
     with torch.cuda.device(rank):
@@ -154,7 +157,8 @@ class NativeWorkerState:
         self._gather = None
         self._reduce = None
 
-    def init(self, checkpoint: str, workers: int, dtype: str, task: str) -> dict:
+    def init(self, checkpoint: str, workers: int, dtype: str, task: str,
+             activation_checkpointing: bool = False) -> dict:
         import torch
         import torch.multiprocessing as mp
 
@@ -196,6 +200,7 @@ class NativeWorkerState:
                     str(ckpt),
                     dtype,
                     task,
+                    bool(activation_checkpointing),
                     child,
                     self._gather,
                     self._reduce,
@@ -296,6 +301,7 @@ def main() -> int:
                     int(msg["workers"]),
                     msg.get("dtype", "float64"),
                     msg.get("task", "omat"),
+                    bool(msg.get("activation_checkpointing", False)),
                 )
                 _write_json(resp)
             elif cmd == "predict":

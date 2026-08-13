@@ -1,0 +1,64 @@
+# LAMMPS + activation checkpointing at N>=20 (4-GPU eager GP) — results
+
+Goal: run NaCl NxNxN (N=20..25) in LAMMPS with activation checkpointing on 4
+GPUs, report energy / per-atom force / timing, and compare vs ASE-FairChem FP64.
+
+## Implementation
+
+`UMA_EAGER_CKPT=1` + `pair_style uma precision double devices 4` now routes
+through the Ray-free **native GP worker** (`uma_native_gp_worker.py`): one process
+forks `workers` GPU rank processes with host-staged (`SharedGatherSlot`)
+collectives, eager FairChem model, `activation_checkpointing=True`. (Single-GPU
+`devices 1` uses `uma_gp_worker.py`.) Wired via `graph_parallel.cpp::create`
+(allows num_devices>1 with checkpointing) + `predictor.cpp` (UMA_EAGER_CKPT).
+
+## Result: it RUNS at 64k atoms, energy matches ASE, but forces are WRONG
+
+| N | atoms | box | E_lammps (eV) | E_ase (eV) | \|dE\| | max\|dF\| | NVT ms/step |
+|--:|------:|----:|--------------:|-----------:|------:|----------:|------------:|
+| 20 | 64,000 | 112.8 A | -216283.022184451 | -216283.022184451 | **2.3e-10** | **6.1e-2** | 68,103 (68 s/step) |
+| 21 | 74,088 | 118.4 A | -250375.822189 | (walltime) | - | - | - |
+
+- **Energy is essentially exact** vs ASE (dE 2.3e-10 eV at 64k atoms) — the
+  forward GP collectives (energy) are correct, and checkpointing is bit-exact.
+- **Per-atom forces are systematically wrong**: max|dF| 6.1e-2, mean 2.6e-2
+  eV/A, ALL 64,000 atoms differ (none < 1e-6). This is NOT sorting/indexing.
+- **Timing**: 68 s/step at 64k on 4-GPU host-staged GP — very slow (host-staged
+  collectives + eager + checkpointing recompute). Debug walltime (1 h) only fit
+  N=20 fully + N=21 SP.
+
+## Root cause (force bug)
+
+Correct energy + systematically wrong forces = the **backward (force-gradient)
+reduction in the native GP worker is incomplete**. Forces come from rank 0 of
+`unit.predict` (uma_native_gp_worker.py:136); their correctness depends on
+`kokkos_gp_runtime.py`'s autograd Function patches (`_ReduceFromMP`,
+`peer_all_reduce_sum`, gather backward). One of those backward paths does not
+fully reduce/scale the per-atom force gradient across the 4 GPUs.
+
+This is a pre-existing bug in the **host-staged native Python GP worker**, a path
+that was not exercised by the earlier exact 4-GPU parity (which used the C++
+traced MP or the C++ MpiPeerPredictor edge-parallel path — both gave dF ~1e-15).
+
+## Status vs the question
+
+- **"Test N>=20 in LAMMPS+checkpointing"**: N=20 (64,000) and N=21 (74,088) RUN
+  in LAMMPS with checkpointing (they fit — baseline OOMs at N=11). Energy is
+  correct.
+- **Forces**: NOT correct through the native GP worker (backward reduction bug).
+  So N>=20 in LAMMPS+checkpointing is **not yet force-accurate**.
+- **N=22..25**: not completed (68 s/step exceeded debug walltime; and blocked on
+  the force bug anyway).
+
+## Next
+
+Fix the force-gradient reduction in `kokkos_gp_runtime.py` (native GP backward):
+ensure the per-atom force gradient is all-reduced/scaled consistently with the
+energy path, matching the C++ MpiPeerPredictor recipe (energy scaled 1/world for
+the backward, forces summed across ranks). Then re-run N=20..25 for force parity
+and timing. Alternatively, drive the eager checkpointed model through the proven
+C++ MpiPeerPredictor collective (NCCL) instead of the host-staged kgp path.
+
+## Reproduce
+`polaris/pbs/lammps_ckpt_sweep_4gpu.pbs` (M3_SIZES, M3_NVT_STEPS) ->
+`ase_ckpt_ref.py`, `lmp_ckpt_report.py`.
