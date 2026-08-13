@@ -1,0 +1,98 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=1:00:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N n11_baseline
+#PBS -A RAPINS
+
+# N=11 (NaCl 11^3 = 10,648 atoms, ~62 A) WITHOUT checkpointing or CPU offload.
+#   (A) ASE-FairChem baseline (general recipe) on 4 GPUs (GP, torch.distributed)
+#   (B) LAMMPS-UMA libtorch traced on 4 GPUs (devices 4, w4_n10648 shards)
+# Compare E + per-atom forces. 10,648 > 4-GPU baseline ceiling (8,000) so this
+# also tests whether N=11 fits at all without checkpointing.
+
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"
+ROOT="$(pwd)"
+source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"
+M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+P0="${ROOT}/src/ML-UMA/examples/polaris_p0"
+export PYTHONPATH="${P0}:${ENG}/python:${PYTHONPATH:-}"
+ART="${UMA_ARTIFACT_DIR}"
+LMP="${ROOT}/build-uma-mn/lmp"
+OUT="${M3}/results/n11_baseline_${PBS_JOBID:-manual}"; mkdir -p "${OUT}"
+export TMPDIR="/tmp/t_$USER"; mkdir -p "${TMPDIR}"
+NREP=11; NAT=10648; WORLD=4
+
+DATA="${OUT}/nacl11.data"
+python "${M3}/make_nacl_data.py" --n ${NREP} --out "${DATA}"
+# full-precision extxyz for MP export + ASE
+XYZ="${OUT}/nacl11.extxyz"
+python - "$DATA" "$XYZ" <<'PY'
+import sys; from ase.io import read, write
+from ase.data import atomic_numbers as AN
+a=read(sys.argv[1],format="lammps-data",atom_style="atomic",units="metal")
+if a.has("type"): a.set_atomic_numbers([AN[["Na","Cl"][t-1]] for t in a.get_array("type")])
+a.pbc=True
+# full precision extxyz
+import numpy as np
+cell=np.array(a.cell,float); lat=" ".join(repr(float(v)) for v in cell.reshape(-1))
+L=[str(len(a)), f'Lattice="{lat}" Properties=species:S:1:pos:R:3 pbc="T T T"']
+for s,p in zip(a.get_chemical_symbols(), a.get_positions()):
+    L.append(f"{s} {repr(float(p[0]))} {repr(float(p[1]))} {repr(float(p[2]))}")
+open(sys.argv[2],"w").write("\n".join(L)+"\n"); print("wrote xyz", len(a))
+PY
+
+# ---------- (A) ASE-FairChem baseline (no ckpt) via 4-GPU GP ----------
+echo "############ (A) ASE-FC baseline 4-GPU GP (no ckpt), N=11 ############"
+export MASTER_ADDR=127.0.0.1 MASTER_PORT=$((29500+RANDOM%500))
+OFI=/soft/libraries/aws-ofi-nccl/v1.6.0-libfabric-1.22.0
+[[ -e "$OFI/lib/libnccl-net.so" ]] && export LD_LIBRARY_PATH="$OFI/lib:/opt/cray/libfabric/2.2.0rc1/lib64:$LD_LIBRARY_PATH"
+export FI_CXI_DEFAULT_CQ_SIZE=131072 FI_MR_CACHE_MONITOR=userfaultfd NCCL_CROSS_NIC=1
+mpiexec -n ${WORLD} --ppn 4 "${ROOT}/polaris/gpu_affinity_polaris.sh" \
+  python "${M3}/gp_mpi_sweep.py" --ckpt "${UMA_CHECKPOINT}" --checkpointing 0 \
+    --sizes ${NREP} --out "${OUT}/ase_gp.json" || echo "(A) ASE 4-GPU baseline result above (OOM = does not fit w/o ckpt)"
+
+# ---------- (B) LAMMPS-UMA traced 4-GPU ----------
+echo "############ (B) LAMMPS-UMA traced, devices 4, N=11 ############"
+need=0; for R in 0 1 2 3; do [[ -f "${ART}/model_mp_w${WORLD}_n${NAT}_r${R}.pt" ]] || need=1; done
+if [[ "${need}" -eq 1 ]]; then
+  echo "=== export w4_n10648 shards ==="
+  for R in 0 1 2 3; do
+    CUDA_VISIBLE_DEVICES=${R} python "${ENG}/python/export_mp_artifact.py" \
+      --checkpoint "${UMA_CHECKPOINT}" --output "${ART}" --world ${WORLD} --ranks ${R} \
+      --dtype float64 --task omat --device cuda --atoms "${XYZ}" \
+      --execution-mode umas_fast_pytorch --merge-mole &
+  done; wait
+fi
+ns=$(ls "${ART}"/model_mp_w${WORLD}_n${NAT}_r*.pt 2>/dev/null | wc -l)
+echo "w4_n${NAT} shards: ${ns}/4"
+if [[ "${ns}" -eq 4 ]]; then
+  cat > "${OUT}/in.n11" <<EOF
+units metal
+atom_style atomic
+boundary p p p
+newton off
+read_data ${DATA}
+pair_style uma precision double devices 4
+pair_coeff * * ${ART} Na Cl
+neighbor 2.0 bin
+neigh_modify delay 0 every 1 check yes
+thermo 1
+thermo_style custom step temp pe
+thermo_modify norm no format float %.17g
+dump 1 all custom 1 ${OUT}/lmp_f.dump id type x y z fx fy fz
+dump_modify 1 sort id format float %.17g
+run 0
+print "N11_LMP_PE = \$(pe:%.17g)"
+EOF
+  UMA_MP_NATOMS=${NAT} UMA_STRUCTURE_NATOMS=${NAT} UMA_FORBID_RAY_GP=1 \
+    "${LMP}" -in "${OUT}/in.n11" -log "${OUT}/log.n11" > "${OUT}/out.n11" 2>&1
+  echo "lmp rc=$?"
+  grep -iE 'N11_LMP_PE|out of memory|ERROR' "${OUT}/out.n11" "${OUT}/log.n11" 2>/dev/null | tail -6
+else
+  echo "shard export incomplete (likely OOM at N=11 without checkpointing) -> LAMMPS 4-GPU baseline does not fit"
+fi
+echo "N11_BASELINE_DONE ${OUT}"

@@ -1,0 +1,36 @@
+#!/bin/bash -le
+#PBS -l select=1:system=polaris:ncpus=64:ngpus=4
+#PBS -l walltime=0:30:00
+#PBS -l filesystems=home:eagle:grand
+#PBS -q debug
+#PBS -N n11_lmp
+#PBS -A RAPINS
+set -uo pipefail
+cd "${PBS_O_WORKDIR:-$(pwd)}"; ROOT="$(pwd)"; source "${ROOT}/polaris/env_polaris.sh"
+ENG="${ROOT}/src/ML-UMA/uma-engine"; M3="${ROOT}/src/ML-UMA/examples/polaris_m3"
+export PYTHONPATH="${ROOT}/src/ML-UMA/examples/polaris_p0:${ENG}/python:${PYTHONPATH:-}"
+ART="${UMA_ARTIFACT_DIR}"; LMP="${ROOT}/build-uma-mn/lmp"
+OUT="${M3}/results/n11_lmp_${PBS_JOBID}"; mkdir -p "${OUT}"; export TMPDIR="/tmp/t_$USER"; mkdir -p "$TMPDIR"
+python "${M3}/make_nacl_data.py" --n 11 --out "${OUT}/nacl11.data"
+export UMA_LIBTORCH_MP_WORKER="${ENG}/build-cpp-mp-mn/uma_libtorch_mp_worker"
+cat > "${OUT}/in.n11" <<LMP
+units metal
+atom_style atomic
+boundary p p p
+newton off
+read_data ${OUT}/nacl11.data
+pair_style uma precision double devices 4
+pair_coeff * * ${ART} Na Cl
+neighbor 2.0 bin
+neigh_modify delay 0 every 1 check yes
+thermo 1
+thermo_style custom step temp pe
+thermo_modify norm no format float %.17g
+run 0
+print "N11_LMP_PE = \$(pe:%.17g)"
+LMP
+UMA_MP_NATOMS=10648 UMA_STRUCTURE_NATOMS=10648 UMA_FORBID_RAY_GP=1 UMA_PEER_TRANSPORT=cuda_ipc \
+  "${LMP}" -in "${OUT}/in.n11" -log "${OUT}/log.n11" > "${OUT}/out.n11" 2>&1
+echo "lmp rc=$?"
+grep -iE 'N11_LMP_PE|out of memory|CUDA|ERROR|nccl' "${OUT}/out.n11" "${OUT}/log.n11" 2>/dev/null | tail -8
+echo "N11_LMP_ONLY_DONE ${OUT}"
