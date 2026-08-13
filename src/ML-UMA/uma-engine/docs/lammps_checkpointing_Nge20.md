@@ -31,6 +31,24 @@ Corrected results (LAMMPS + checkpointing, 4 GPU, vs ASE-FC FP64):
 | 21 | 74,088 | 118 A | -250375.822189 | 8.7e-11 | **7.1e-14** | 2.0e-14 | 5,536 |
 | 22 | 85,184 | 124 A | — | — | — | — | **OOM in LAMMPS** |
 
+### N=21 full comparison vs ASE (energy, per-atom force, timing)
+
+NaCl 21^3 = 74,088 atoms, ~118 A. Both: FP64, task=omat, 4x A100 graph-parallel
++ activation checkpointing, identical geometry.
+
+| metric | LAMMPS-UMA (libtorch) | ASE-FairChem | difference |
+|---|---:|---:|---:|
+| Energy (eV) | -250375.82218906094 | -250375.82218906110 | \|dE\| = 8.7e-11 (1.2e-15/atom) |
+| Per-atom force | \|F\|max = 0.4576 eV/A | \|F\|max = 0.4576 eV/A | max\|dF\|=7.1e-14, mean\|dF\|=2.0e-14 |
+| Timing / step | 5,536 ms (NVT loop) | 5,759 ms/SP | LAMMPS ~1.04x faster (noise) |
+
+At 74,088 atoms (9x the 4-GPU baseline ceiling of 8,000; impossible without
+checkpointing), LAMMPS-UMA matches ASE-FairChem FP64 to the machine floor in
+BOTH energy and per-atom force, at the same per-step cost. Both run the same
+eager checkpointed model over the same 4-GPU torch.distributed GP path, so the
+~0.2 s timing gap is run-to-run noise (ASE's number also includes the ASE
+calculator wrapper + per-iter position perturbation).
+
 - **Energy + per-atom forces now match ASE to the FP64 floor.**
 - **LAMMPS 4-GPU checkpointing ceiling = N=21 (74,088)**; N=22 (85,184) fits the
   pure model (ASE) but OOMs in LAMMPS (~34 GiB by torch + LAMMPS/C++ engine

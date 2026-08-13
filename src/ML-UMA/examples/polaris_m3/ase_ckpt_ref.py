@@ -27,6 +27,8 @@ def main() -> int:
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--ckpt", default=os.environ.get("UMA_CHECKPOINT"))
+    ap.add_argument("--time-iters", type=int, default=0,
+                    help="timed repeated single points (median ms/SP)")
     args = ap.parse_args()
 
     rank = int(os.environ.get("PMI_RANK", "0"))
@@ -56,9 +58,29 @@ def main() -> int:
 
     e = float(a.get_potential_energy())
     f = np.asarray(a.get_forces(), dtype=np.float64)
+    torch.cuda.synchronize(); dist.barrier()
+
+    # Timed repeated single points (proxy for per-step cost), matching how
+    # LAMMPS times MD steps. --time-iters>0 enables it.
+    import time
+    ms = None
+    if args.time_iters > 0:
+        ts = []
+        for _ in range(args.time_iters):
+            a.positions += np.random.default_rng(0).normal(0, 1e-5, a.positions.shape)
+            if hasattr(a.calc, "results"):
+                a.calc.results.clear()
+            torch.cuda.synchronize(); dist.barrier(); t0 = time.perf_counter()
+            _ = float(a.get_potential_energy()); _ = a.get_forces()
+            torch.cuda.synchronize(); dist.barrier()
+            ts.append((time.perf_counter() - t0) * 1e3)
+        ms = float(np.median(ts))
+
     if rank == 0:
-        np.savez(args.out, forces=f, energy_eV=np.array(e), natoms=len(a))
-        print(f"ASE ckpt ref: N={len(a)} E={e:.9f} fmax={np.abs(f).max():.3e} -> {args.out}",
+        np.savez(args.out, forces=f, energy_eV=np.array(e), natoms=len(a),
+                 ms_per_sp=np.array(ms if ms is not None else np.nan))
+        tstr = f" ms/SP={ms:.1f}" if ms is not None else ""
+        print(f"ASE ckpt ref: N={len(a)} E={e:.9f} fmax={np.abs(f).max():.3e}{tstr} -> {args.out}",
               flush=True)
     dist.barrier(); dist.destroy_process_group()
     return 0
