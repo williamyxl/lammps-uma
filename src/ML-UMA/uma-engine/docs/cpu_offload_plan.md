@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # CPU-memory offload plan for UMA (capacity / memory-bound)
 
 **Goal:** run larger boxes on fixed GPU memory (A100-40GB) by spilling model

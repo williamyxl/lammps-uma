@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # Activation checkpointing for UMA (capacity lever)
 
 **What it is:** during the forward pass, do NOT keep the intermediate activations

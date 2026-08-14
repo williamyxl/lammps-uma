@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # LAMMPS + activation checkpointing at N>=20 (4-GPU eager GP) — results
 
 Goal: run NaCl NxNxN (N=20..25) in LAMMPS with activation checkpointing on 4

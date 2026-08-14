@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # Multi-node UMA on Polaris — implementation design (rev 2)
 
 ## Rev 2 — measured result of rev 1 (edge-parallel) and the redesign

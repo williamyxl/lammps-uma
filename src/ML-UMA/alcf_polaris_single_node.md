@@ -1,3 +1,5 @@
+> Part of the Polaris UMA scaling campaign — see uma-engine/docs/CAMPAIGN_SUMMARY.md for the full picture.
+
 # Phase P0 - Polaris single-node validation (1/2/4 GPUs)
 
 LAMMPS + LibTorch-UMA (precision double, devices 1/2/4) vs ASE-FairChem FP64 (task=omat).

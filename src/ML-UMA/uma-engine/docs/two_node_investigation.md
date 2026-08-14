@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # 2-node (8 GPU) investigation — where it breaks and where to improve
 
 Question: can N=21 (NaCl 21^3 = 74,088 atoms) single point be sped up on 8 GPUs /

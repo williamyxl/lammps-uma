@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # MPI-driven multi-node LAMMPS + UMA — architecture plan
 
 **Stamp:** 2026-08-11 (rev 5) · **Status:** IN PROGRESS — migrating to a faster HPC; resume at phase MG then M0.5

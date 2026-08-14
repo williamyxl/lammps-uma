@@ -1,3 +1,5 @@
+> See [CAMPAIGN_SUMMARY.md](CAMPAIGN_SUMMARY.md) for the authoritative overview and final conclusions.
+
 # UMA capacity on 4x A100-40GB (Polaris) — NaCl NxNxN, FP64
 
 System: NaCl rocksalt, N conventional cells/side = **8·N^3 atoms**, box = N·5.64 A,
