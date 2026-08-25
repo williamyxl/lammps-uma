@@ -49,10 +49,30 @@ Consistent to 5 significant figures → large-N results are physically correct.
 | 1 tile, N=6 | 1,728 | 7.7 s | 25 s |
 | 1 tile, N=12 | 13,824 | 61.2 s | 117 s |
 | 1 tile, N=18 | 46,656 | 383.3 s | NVT OOM (single-point OK) |
-| 12 tiles, N=18 | 46,656 | — | 88 s |
-| 12 tiles, N=32 | 262,144 | — (ASE OOM) | 450 s |
+| **12 tiles, N=18** | 46,656 | **90 s**† | **88 s** |
+| **12 tiles, N=32** | 262,144 | **258 s**† | **450 s** |
 
-**Walltime caveat (important for interpretation):** Path A `t_nvt10` is the pure 10-step integration time (model already resident). Path C walltime is the **whole `mpiexec` process** including per-rank cold model load (~tens of s) + neighbor setup + 10 steps — so the small-N Path C numbers are load-dominated, not a fair per-step comparison. This first-cut comparison establishes **correctness and capacity**, not optimized throughput; a like-for-like steps/s benchmark (warm, load excluded) is future work. Notably, at N=18 the 12-tile Path C (88 s incl. load) already beats the 1-tile ASE NVT (383 s).
+† **ASE 12-tile = FairChem graph-parallel** (`ParallelMLIPPredictUnit` + XCCL, Ray, W=12;
+from project `hen`). ASE's driver measures **11 warm energy+force evaluations + cold
+load** (= the force calls of a 10-step NVT: run 0 + 10 steps), not a literal
+Nosé–Hoover loop, so it is the NVT-equivalent wall. Breakdown: N=18 load 49.0 s +
+warmup 12.2 s + ef_mean 2.43 s/eval (wall 90.3 s); N=32 load 49.4 s + warmup 31.1 s +
+ef_mean 14.82 s/eval (wall 258.3 s). **Cross-check: ASE-GP and pair_style uma agree
+on energy** — N=18 both −157578.531115; N=32 −885377.06004 (ASE) vs −885377.06004
+(ours), Fmax 0.848045 identical.
+
+**Walltime caveats (important for interpretation):**
+- 1-tile Path A `t_nvt10` is pure 10-step integration (model resident); 1-tile Path C
+  wall includes per-rank **cold model load** — so small-N 1-tile Path C is
+  load-dominated, not a fair per-step number.
+- 12-tile: both include cold load. At **N=18 they are ~equal (90 s ASE-GP vs 88 s
+  ours)**. At **N=32, ASE-GP (258 s) is currently faster than ours (450 s)** — our
+  per-chunk activation-checkpointing does extra recompute and our per-layer XCCL
+  path is not yet tuned, whereas hen's ASE-GP path is optimized (`ef_mean` warm).
+  This is expected for a correctness-first C++ port; **throughput optimization
+  (esp. checkpoint recompute + collective tuning) is the clear next step.**
+- This comparison establishes **correctness + capacity**; a like-for-like warm,
+  load-excluded steps/s benchmark is future work.
 
 ---
 
