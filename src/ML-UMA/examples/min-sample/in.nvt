@@ -1,0 +1,42 @@
+# Minimal NVT sample: NaCl + FairChem UMA via native LibTorch pair_style uma.
+# 10-step Nose-Hoover NVT @ 300 K, FP64. First frame dumps per-atom forces.
+#
+# Set the pair_coeff artifact dir (from extract_uma_artifact.sh) before running,
+# e.g.  lmp -in in.nvt -var artifact /path/to/artifact_n6
+# Element order in pair_coeff must match atom types: type 1 = Na, type 2 = Cl.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off                 # required before the box is defined
+
+read_data       data.nacl
+mass            1 22.989769         # Na
+mass            2 35.453            # Cl
+
+# --- UMA pair style (native LibTorch) ---
+# precision double  -> FP64 inference
+# devices 1         -> single XPU tile. For 12-tile graph-parallel, keep
+#                      "devices 1" and launch with mpiexec -n 12 (world = #ranks);
+#                      point pair_coeff at the GP artifact root (has w12/r*/...).
+pair_style      uma precision double devices 1
+pair_coeff      * * ${artifact} Na Cl
+
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+
+thermo          1
+thermo_style    custom step temp pe etotal press fmax
+thermo_modify   norm no format float %.16e
+
+# --- first frame: single point + per-atom force dump (for ASE parity) ---
+dump            f0 all custom 1 forces_step0.dump id type x y z fx fy fz
+dump_modify     f0 sort id format float %.16e
+run             0
+undump          f0
+
+# --- 10-step Nose-Hoover NVT @ 300 K ---
+velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
+fix             1 all nvt temp 300.0 300.0 0.1     # Nose-Hoover (tchain=3 default)
+timestep        0.001
+run             10

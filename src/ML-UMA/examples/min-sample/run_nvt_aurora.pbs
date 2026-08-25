@@ -1,0 +1,69 @@
+#!/bin/bash -l
+#PBS -N uma_nvt
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# Minimal LAMMPS + UMA NVT run on ALCF Aurora (Intel XPU).
+# Prereqs: build_lammps_uma.sh (-> lmp) and extract_uma_artifact.sh (-> artifact).
+#
+#   qsub -v N=6 run_nvt_aurora.pbs               # single tile
+#   qsub -v N=32,WORLD=12 run_nvt_aurora.pbs     # 12-tile graph-parallel
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/min-sample
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-6}
+WORLD=${WORLD:-1}                                # 1 = single tile; 12 = all tiles
+NAT=$((8*N*N*N))
+ARTIFACT=${ARTIFACT:-${EX}/artifact_n${N}}       # from extract_uma_artifact.sh
+RUNDIR=${RUNDIR:-${EX}/run_n${N}_w${WORLD}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP} (run build_lammps_uma.sh)"; exit 1; }
+[ -f "${ARTIFACT}/metadata.json" ] || { echo "missing artifact metadata: ${ARTIFACT}"; exit 1; }
+
+# runtime libs: force conda libsycl.so.9 (+ compat .8->.9), torch + icpx libs
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+# oneCCL / XCCL single-node knobs (only used for WORLD>1):
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_ZE_IPC_EXCHANGE=sockets FI_PROVIDER=cxi
+
+# geometry + input
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl"
+cp -f "${EX}/in.nvt" "${RUNDIR}/in.nvt"
+
+cd "${RUNDIR}"
+echo "=== UMA NVT: N=${N} (${NAT} atoms), WORLD=${WORLD} tiles ==="
+t0=$SECONDS
+if [ "${WORLD}" -eq 1 ]; then
+  mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 \
+    "${LMP}" -in in.nvt -var artifact "${ARTIFACT}" > lmp.log 2>&1
+else
+  # 12-tile graph-parallel: one rank per tile, world = #ranks; artifact holds w{W}/r{R}
+  mpiexec -n ${WORLD} --ppn ${WORLD} env UMA_MP_NATOMS=${NAT} \
+    gpu_tile_compact.sh \
+    "${LMP}" -in in.nvt -var artifact "${ARTIFACT}" > lmp.log 2>&1
+fi
+rc=$?
+echo "exit=${rc} wall=$((SECONDS-t0))s"
+echo "--- first frame + last NVT step ---"
+grep -E "^\s*(0|10)\s" log.lammps 2>/dev/null | head -3
+grep -iE "out of memory|OUT_OF|ERROR" lmp.log | grep -vi index_reduce | head -3
+echo "forces_step0.dump written: $(ls -la forces_step0.dump 2>/dev/null | awk '{print $5}') bytes"
+echo "DONE"
