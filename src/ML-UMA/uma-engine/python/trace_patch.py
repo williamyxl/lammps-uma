@@ -104,10 +104,145 @@ def _init_edge_rot_euler_angles_wigner_cuda_graph_fixed(edge_distance_vec: torch
     return mask, -gamma, -beta, -alpha
 
 
-def apply_trace_patches() -> None:
+# ---------------------------------------------------------------------------
+# Shape-generalization patches (quaternion hybrid Wigner path).
+#
+# torch.jit.trace bakes the trace-time edge count into the quaternion Wigner
+# tensors, so a module traced at N=n0 fails at any other N. graspa-mlip
+# (scripts/xpu_uma_export_odac_traced.py, validated to 1e-13 eV on XPU)
+# localized exactly two baked sites and made their leading dim symbolic:
+#   1) axis_angle_wigner_hybrid: gamma leading dim tied to a live tensor,
+#   2) wigner_d_from_quaternion_hybrid: D leading dim + D[:,0,0] symbolic.
+#
+# CRITICAL difference for FORCES: graspa uses a *random* gamma (rand_like);
+# Wigner-D is rotation invariant so energy is unaffected, but a random roll
+# per forward would make autograd forces (one draw) inconsistent with finite
+# difference (separate draws at +/- eps). We therefore keep gamma
+# DETERMINISTIC (zeros) while keeping its leading dim symbolic via
+# zeros_like(...) on a live [N] slice. Deterministic gamma=0 is what
+# _axis_angle_wigner_fixed_gamma / the CUDA-graph helper already use.
+# ---------------------------------------------------------------------------
+_SHAPE_PATCH_RESTORE: list = []
+
+
+def _install_shape_patches() -> None:
+    import fairchem.core.models.uma.common.quaternion.wigner_d_hybrid as _wdh
+
+    _orig_axis = _wdh.axis_angle_wigner_hybrid
+
+    def _axis_symbolic(edge_distance_vec, lmax, gamma=None, *,
+                       coeffs=None, U_blocks=None, custom_kernels=None):
+        if edge_distance_vec.dim() == 1:
+            edge_distance_vec = edge_distance_vec.unsqueeze(0)
+        edge_normalized = torch.nn.functional.normalize(edge_distance_vec, dim=-1)
+        if gamma is None:
+            # Deterministic gamma=0 with SYMBOLIC leading dim (tied to live tensor).
+            gamma = torch.zeros_like(edge_normalized[:, 0])
+        q_edge_to_y = _wdh.quaternion_edge_to_y_stable(edge_normalized)
+        q_gamma = _wdh.quaternion_y_rotation(gamma)
+        q_combined = _wdh.quaternion_multiply(q_gamma, q_edge_to_y)
+        D = _wdh.wigner_d_from_quaternion_hybrid(
+            q_combined, lmax, coeffs=coeffs, U_blocks=U_blocks,
+            custom_kernels=custom_kernels,
+        )
+        D_inv = D.transpose(1, 2).contiguous()
+        return D, D_inv
+
+    _wdh.axis_angle_wigner_hybrid = _axis_symbolic
+    _SHAPE_PATCH_RESTORE.append(
+        lambda: setattr(_wdh, "axis_angle_wigner_hybrid", _orig_axis)
+    )
+
+    _orig_hybrid = _wdh.wigner_d_from_quaternion_hybrid
+
+    def _hybrid_symbolic(q, lmax, coeffs=None, U_blocks=None, custom_kernels=None):
+        size = (lmax + 1) ** 2
+        row = torch.ones_like(q[:, :1]).unsqueeze(-1)          # [N,1,1] symbolic
+        D = torch.zeros(1, size, size, dtype=q.dtype, device=q.device) * row
+        D = D.clone()
+        D[:, 0, 0] = torch.ones_like(q[:, 0])                  # symbolic RHS
+        if lmax >= 1:
+            D[:, 1:4, 1:4] = _wdh.quaternion_to_rotation_matrix(q)
+        if lmax >= 2:
+            D[:, 4:9, 4:9] = _wdh.quaternion_to_wigner_d_l2_einsum(
+                q, custom_kernels.C_l2)
+        if lmax >= 4:
+            D_l3, D_l4 = _wdh.quaternion_to_wigner_d_l3l4_batched(
+                q, custom_kernels.C_combined_l3l4, custom_kernels.monomials_l4)
+            D[:, 9:16, 9:16] = D_l3
+            D[:, 16:25, 16:25] = D_l4
+        elif lmax >= 3:
+            D[:, 9:16, 9:16] = _wdh.quaternion_to_wigner_d_matmul(
+                q, 3, custom_kernels.C_l3, custom_kernels.monomials_l3)
+        if lmax >= 5:
+            return _orig_hybrid(q, lmax, coeffs=coeffs, U_blocks=U_blocks,
+                                custom_kernels=custom_kernels)
+        return D
+
+    _wdh.wigner_d_from_quaternion_hybrid = _hybrid_symbolic
+    _SHAPE_PATCH_RESTORE.append(
+        lambda: setattr(_wdh, "wigner_d_from_quaternion_hybrid", _orig_hybrid)
+    )
+
+
+def _restore_shape_patches() -> None:
+    while _SHAPE_PATCH_RESTORE:
+        _SHAPE_PATCH_RESTORE.pop()()
+
+
+_CKPT_PASSTHROUGH_RESTORE: list = []
+
+
+def _install_checkpoint_passthrough() -> None:
+    """Make torch.utils.checkpoint.checkpoint a traceable passthrough.
+
+    (h) Traceable internal activation checkpointing: escn's edge_wise.forward
+    edge-chunk loop calls torch.utils.checkpoint.checkpoint(forward_chunk, ...)
+    per edge chunk. That does NOT survive torch.jit.trace (_NoopSaveInputs). We
+    replace it with a DIRECT call so the chunk loop still executes chunk-by-chunk
+    and traces as a plain sequence of per-chunk ops. At runtime the C++
+    CheckpointModuleFn runs the whole module forward under no_grad, so each
+    chunk's SO2-conv intermediates are freed after the chunk (peak = one chunk,
+    not all edges) and recomputed in backward. This reproduces eager AC's memory
+    profile in the pure-traced path. Chunk COUNT bakes at trace N (N-specific
+    shards), which is fine.
+    """
+    import torch.utils.checkpoint as _ckpt
+
+    orig = _ckpt.checkpoint
+
+    def _passthrough(function, *args, use_reentrant=None, context_fn=None,
+                     determinism_check=None, debug=None, **kwargs):
+        return function(*args, **kwargs)
+
+    _ckpt.checkpoint = _passthrough
+    _CKPT_PASSTHROUGH_RESTORE.append(lambda: setattr(_ckpt, "checkpoint", orig))
+    # escn_md_block imported the symbol by module ref (torch.utils.checkpoint.
+    # checkpoint), so patching the module attribute above suffices.
+
+
+def _restore_checkpoint_passthrough() -> None:
+    while _CKPT_PASSTHROUGH_RESTORE:
+        _CKPT_PASSTHROUGH_RESTORE.pop()()
+
+
+def apply_trace_patches(shape_generic: bool = False,
+                        checkpoint_passthrough: bool = False) -> None:
     global _ORIG_AXIS_ANGLE, _ORIG_EULER, _ORIG_EULER_CG
 
     MOLE.forward = mole_forward_traceable
+
+    if checkpoint_passthrough:
+        _install_checkpoint_passthrough()
+
+    if shape_generic:
+        # Symbolic-dim quaternion Wigner: replaces the fixed-gamma wrappers below.
+        _install_shape_patches()
+        import fairchem.core.models.uma.common.quaternion.wigner_d_hybrid as wigner_mod
+        import fairchem.core.models.uma.escn_md as escn_md
+        # escn_md imported axis_angle_wigner_hybrid by name; rebind to symbolic.
+        escn_md.axis_angle_wigner_hybrid = wigner_mod.axis_angle_wigner_hybrid
+        return
 
     import fairchem.core.models.uma.common.quaternion.wigner_d_hybrid as wigner_mod
     import fairchem.core.models.uma.common.rotation as rotation_mod
@@ -139,6 +274,18 @@ def restore_trace_patches() -> None:
     global _ORIG_AXIS_ANGLE, _ORIG_EULER, _ORIG_EULER_CG
 
     MOLE.forward = _ORIGINAL_MOLE_FORWARD
+
+    _restore_checkpoint_passthrough()
+
+    # Restore shape-generic patches (if any) and rebind escn_md name.
+    if _SHAPE_PATCH_RESTORE:
+        _restore_shape_patches()
+        try:
+            import fairchem.core.models.uma.common.quaternion.wigner_d_hybrid as wigner_mod
+            import fairchem.core.models.uma.escn_md as escn_md
+            escn_md.axis_angle_wigner_hybrid = wigner_mod.axis_angle_wigner_hybrid
+        except Exception:
+            pass
 
     if _ORIG_AXIS_ANGLE is not None:
         import fairchem.core.models.uma.common.quaternion.wigner_d_hybrid as wigner_mod

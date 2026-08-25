@@ -18,12 +18,16 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
+#include "uma/block_context.h"
+#include "uma/device_compat.h"
 #include "uma/graph_shard.h"
 #include "uma/peer_context.h"
 #include "uma/postprocess.h"
 #include "uma/shared_peer.h"
 #include "uma/vesin_nl.h"
 #include "uma/neighbor_list.h"
+
+#include <unistd.h>
 
 namespace uma {
 
@@ -97,13 +101,24 @@ bool mn_checkpoint_enabled() {
   return !(e[0] == '0' && e[1] == '\0');
 }
 
+bool path_readable(const std::string& p) { return ::access(p.c_str(), R_OK) == 0; }
+
 }  // namespace
 
 struct MpiPeerPredictor::Impl {
   torch::jit::script::Module module;
+#if defined(UMA_ENGINE_USE_XPU)
+  torch::Device device{torch::kXPU, 0};
+#else
   torch::Device device{torch::kCUDA, 0};
+#endif
   kp::SharedPeerGatherSlot* slot = nullptr;   // private per-rank Shm (NCCL only)
   kp::SharedPeerGatherSlot::Shm* shm = nullptr;
+  // P4 (AC+GP merge): true when this rank loaded per-rank block/chunk/edgedeg AC
+  // modules into BlockContext. On this path the top module runs NORMALLY (the
+  // uma_ckpt ops self-checkpoint) and the whole-module CheckpointModuleFn is
+  // SKIPPED (mirrors predictor.cpp). false => legacy monolithic-shard fallback.
+  bool ac_active = false;
   torch::Tensor element_refs;
   // persistent full-system buffers (rebuilt when N changes)
   int64_t n_cached = -1;
@@ -130,6 +145,7 @@ MpiPeerPredictor::~MpiPeerPredictor() {
     ::free(impl_->shm);
     impl_->shm = nullptr;
   }
+  if (impl_ && impl_->ac_active) BlockContext::instance().clear();
   PeerContext::instance().clear();
 }
 
@@ -141,8 +157,10 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   if (rank < 0 || rank >= world) throw std::runtime_error("MpiPeerPredictor: bad rank");
   if (compute_dtype != torch::kFloat64)
     throw std::runtime_error("MpiPeerPredictor: FP64 only");
+#if !defined(UMA_ENGINE_USE_XPU)
   if (nccl_unique_id == nullptr)
     throw std::runtime_error("MpiPeerPredictor: null nccl id (rank0 make + MPI_Bcast)");
+#endif
 
   torch::jit::setTensorExprFuserEnabled(false);
   torch::jit::setGraphExecutorOptimize(false);
@@ -159,12 +177,33 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   self->compute_dtype_ = compute_dtype;
   self->impl_ = std::make_unique<Impl>();
 
-#if defined(UMA_ENGINE_USE_CUDA)
+#if defined(UMA_ENGINE_USE_XPU)
+  // Intel XPU: one tile per MPI rank (pinned via ZE_AFFINITY_MASK). Device index
+  // is 0 within the masked view.
+  self->impl_->device = torch::Device(torch::kXPU, 0);
+#elif defined(UMA_ENGINE_USE_CUDA)
   self->impl_->device = torch::Device(torch::kCUDA, 0);  // CUDA_VISIBLE_DEVICES pins one GPU
 #else
   self->impl_->device = torch::Device(torch::kCPU);
 #endif
 
+#if defined(UMA_ENGINE_USE_XPU)
+  // ------- XPU transport: native oneCCL (XCCL), on-device collectives. -------
+  // KVS rendezvous over MPI (address only) happens inside XcclPeer::create.
+  // A tiny control-only shm is allocated so PeerContext has a valid slot object.
+  const int transport = kp::SharedPeerGatherSlot::kTransportXccl;
+  const size_t bytes = kp::SharedPeerGatherSlot::map_bytes_for(world, transport);
+  auto* shm = static_cast<kp::SharedPeerGatherSlot::Shm*>(std::calloc(1, bytes));
+  if (!shm) throw std::runtime_error("MpiPeerPredictor: shm calloc failed");
+  shm->world = world;
+  shm->transport = transport;
+  self->impl_->shm = shm;
+  self->impl_->slot = kp::SharedPeerGatherSlot::attach(shm, bytes);
+  PeerContext::instance().reset_shared(self->impl_->slot);
+  PeerContext::set_thread_rank(rank);
+  self->impl_->slot->init_xccl_external(rank, world, /*unused*/ nullptr,
+                                        device_index);
+#else
   // Private per-rank Shm (NCCL transport). Not shared across processes: NCCL
   // itself carries the cross-rank traffic; the Shm only records world/transport
   // and holds the comm handles created by init_nccl_external.
@@ -181,30 +220,79 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
 
   // NCCL bootstrap over MPI (id already broadcast by the caller).
   self->impl_->slot->init_nccl_external(rank, world, nccl_unique_id, device_index);
+#endif
 
-  // Load this rank's shard: model_mp_w{W}_n{N}_r{R}.pt (n-specific preferred).
+  // ---- P4 (AC+GP merge): prefer this rank's per-rank AC artifact set. ----
+  // The AC exporter emits, per (world W, rank R), a directory
+  //   <artifact_dir>/w{W}/r{R}/
+  // containing the rank's top traced module model_traced.pt PLUS the per-rank
+  // activation-checkpoint sub-modules (model_block_{i}.pt / model_chunk_{i}.pt /
+  // model_edgedeg_chunk.pt). When that dir exists we load the rank's top module
+  // as I.module and load its AC sub-modules into the process-wide BlockContext
+  // so the uma_ckpt::block/chunk/edge_degree ops dispatch. Each MPI rank is a
+  // separate PROCESS (one tile per rank), so the BlockContext singleton is
+  // per-rank by construction -> no cross-rank contamination. The uma_peer
+  // collectives live INSIDE the block/chunk modules and dispatch to XcclPeer via
+  // PeerContext (already initialized above), so uma_peer + uma_ckpt ops are BOTH
+  // active on this path. This mirrors predictor.cpp's single-tile AC path.
+  const std::string rank_ac_dir = artifact_dir + "/w" + std::to_string(world) +
+                                  "/r" + std::to_string(rank);
+  const std::string rank_ac_top = rank_ac_dir + "/model_traced.pt";
+  const bool rank_ac_present =
+      path_readable(rank_ac_top) &&
+      path_readable(rank_ac_dir + "/model_block_0.pt");
+
   std::string path;
-  if (const char* natoms_e = std::getenv("UMA_MP_NATOMS")) {
-    if (*natoms_e) {
-      const std::string nspec = artifact_dir + "/model_mp_w" + std::to_string(world) +
-                                "_n" + natoms_e + "_r" + std::to_string(rank) + ".pt";
-      if (::access(nspec.c_str(), R_OK) == 0) path = nspec;
+  if (rank_ac_present) {
+    self->impl_->module = torch::jit::load(rank_ac_top, self->impl_->device);
+    self->impl_->module.eval();
+    self->impl_->module.to(self->impl_->device);
+    // Load THIS RANK's AC sub-modules into BlockContext (per-rank dir). The
+    // architecture is top -> uma_ckpt::block per block -> uma_ckpt::chunk per
+    // edge-chunk, plus the checkpointed prologue uma_ckpt::edge_degree; load ALL
+    // three families (each is a defensive no-op if the files are absent).
+    const bool have_blocks =
+        maybe_load_blocks(rank_ac_dir, self->impl_->device);
+    const bool have_chunks =
+        maybe_load_chunks(rank_ac_dir, self->impl_->device);
+    const bool have_edgedeg =
+        maybe_load_edgedeg(rank_ac_dir, self->impl_->device);
+    self->impl_->ac_active = have_blocks || have_chunks || have_edgedeg;
+    path = rank_ac_top;
+    std::cerr << "MpiPeerPredictor rank=" << rank << " world=" << world
+              << " dev=" << device_index << " AC-shard=" << path << " ("
+              << BlockContext::instance().num_blocks() << " block + "
+              << BlockContext::instance().num_chunks() << " chunk"
+              << (have_edgedeg ? " + prologue edge_degree" : "")
+              << " sub-modules; whole-module checkpoint SKIPPED)\n";
+  } else {
+    // ---- Legacy monolithic-shard fallback (no per-rank AC artifacts). ----
+    // Load this rank's shard: model_mp_w{W}_n{N}_r{R}.pt (n-specific preferred).
+    if (const char* natoms_e = std::getenv("UMA_MP_NATOMS")) {
+      if (*natoms_e) {
+        const std::string nspec = artifact_dir + "/model_mp_w" +
+                                  std::to_string(world) + "_n" + natoms_e +
+                                  "_r" + std::to_string(rank) + ".pt";
+        if (::access(nspec.c_str(), R_OK) == 0) path = nspec;
+      }
     }
+    if (path.empty()) {
+      path = artifact_dir + "/model_mp_w" + std::to_string(world) + "_r" +
+             std::to_string(rank) + ".pt";
+    }
+    self->impl_->module = torch::jit::load(path, self->impl_->device);
+    self->impl_->module.eval();
+    self->impl_->module.to(self->impl_->device);
+    std::cerr << "MpiPeerPredictor rank=" << rank << " world=" << world
+              << " dev=" << device_index << " shard=" << path
+              << " (whole-module checkpoint"
+              << (mn_checkpoint_enabled() ? " ON)" : " OFF)") << "\n";
   }
-  if (path.empty()) {
-    path = artifact_dir + "/model_mp_w" + std::to_string(world) + "_r" +
-           std::to_string(rank) + ".pt";
-  }
-  self->impl_->module = torch::jit::load(path, self->impl_->device);
-  self->impl_->module.eval();
-  self->impl_->module.to(self->impl_->device);
 
   if (metadata.element_references.defined()) {
     self->impl_->element_refs =
         metadata.element_references.to(self->impl_->device, compute_dtype).contiguous();
   }
-  std::cerr << "MpiPeerPredictor rank=" << rank << " world=" << world
-            << " dev=" << device_index << " shard=" << path << "\n";
   return self;
 }
 
@@ -279,10 +367,23 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   torch::Tensor normed;
   {
     torch::autograd::AutoGradMode guard(true);
-    if (mn_checkpoint_enabled()) {
-      // Gradient checkpointing (C++): recompute the module in backward instead
-      // of retaining activations -> ~3x less activation memory, enabling large N
-      // (e.g. NaCl 21^3 = 74,088) that OOMs without it. Bit-exact.
+    if (I.ac_active) {
+      // P4 (AC+GP merge): per-rank block/chunk/edgedeg AC modules are loaded, so
+      // the uma_ckpt::block/chunk/edge_degree ops in the traced top graph each
+      // recompute independently (only ONE chunk/block/prologue-chunk is live at a
+      // time). Run the top module NORMALLY (grad on). Do NOT also wrap it in
+      // CheckpointModuleFn: that outer whole-module checkpoint's backward would
+      // recompute the ENTIRE module with grad on, retaining everything at once
+      // and defeating the per-chunk/per-block AC -- exactly the reasoning in
+      // predictor.cpp. The uma_peer collectives inside the block/chunk modules
+      // still dispatch to XcclPeer via PeerContext, so uma_ckpt + uma_peer ops
+      // coexist on this path.
+      std::vector<torch::jit::IValue> args = {pos_grad, z, cell, pbc, eidx, coff, charge, spin};
+      normed = I.module.forward(args).toTensor().to(dtype);
+    } else if (mn_checkpoint_enabled()) {
+      // Legacy monolithic-shard fallback: whole-module gradient checkpointing
+      // (C++): recompute the module in backward instead of retaining activations
+      // -> ~3x less activation memory. Bit-exact.
       normed = CheckpointModuleFn::apply(&I.module, pos_grad, z, cell, pbc,
                                          eidx, coff, charge, spin).to(dtype);
     } else {

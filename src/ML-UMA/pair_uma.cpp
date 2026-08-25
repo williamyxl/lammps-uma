@@ -25,6 +25,7 @@
 #include "memory.h"
 #include "neighbor.h"
 #include "neigh_request.h"
+#include "neigh_list.h"
 #include "utils.h"
 
 #include "uma/predictor.h"
@@ -35,9 +36,12 @@
 #endif
 
 #include <algorithm>  // std::stable_sort for the multi-node tag ordering
+#include <cmath>      // std::lround for ghost->integer-image recovery
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <initializer_list>  // brace-init list in the M0 device-binding loop
+#include <vector>
 
 using namespace LAMMPS_NS;
 
@@ -77,6 +81,12 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   mn_world = 1;
   mn_rank = 0;
   mn_active = false;
+  list = nullptr;
+  // A/B switch: UMA_ENGINE_BUILD_GRAPH=1 forces the old path where the engine
+  // rebuilds its own graph (known-good reference). Default consumes the LAMMPS NL.
+  engine_build_graph_ = false;
+  if (const char *e = std::getenv("UMA_ENGINE_BUILD_GRAPH"))
+    engine_build_graph_ = (e[0] == '1' && e[1] == '\0');
 }
 
 /* ---------------------------------------------------------------------- */
@@ -143,7 +153,9 @@ void PairUMA::compute(int eflag, int vflag)
   z_buf.resize(static_cast<size_t>(nlocal));
   force_buf.resize(static_cast<size_t>(nlocal) * 3);
 
-  // Engine owns its own neighbor graph; only local atoms are passed.
+  // Positions passed to the engine: local atoms, boxlo-shifted. The edge graph
+  // (built from the LAMMPS NL below) references these same local indices; the
+  // boxlo shift cancels in every edge vector, so it does not affect energy/force.
   const double xlo = domain->boxlo[0];
   const double ylo = domain->boxlo[1];
   const double zlo = domain->boxlo[2];
@@ -183,13 +195,31 @@ void PairUMA::compute(int eflag, int vflag)
 
   uma::Prediction result;
   if (!mn_active) {
-    // Single rank: unchanged product path.
-    if (use_f64)
+    // Single rank. Default: CONSUME the LAMMPS neighbor list (convert to
+    // FairChem edges, engine skips its own O(N^2) rebuild). A/B fallback:
+    // UMA_ENGINE_BUILD_GRAPH=1 keeps the old path where the engine rebuilds.
+    const bool use_ext = !engine_build_graph_ && (list != nullptr);
+    if (use_ext) {
+      // Positions are passed exactly as-is (x - boxlo); the engine's extgraph
+      // path must NOT re-wrap them, so that
+      //   edge_vec = pos[jr] + offset@cell - pos[i] == x[j] - x[i]
+      // matches the LAMMPS minimum-image displacement (== vesin geometry).
+      const int64_t E = build_ext_graph(nlocal);
+      if (use_f64)
+        result = predictor->predict_host_extgraph(
+            nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf, E,
+            ext_edge_index_.data(), ext_cell_offsets_.data(), force_buf.data());
+      else
+        error->all(FLERR,
+                   "Pair style uma: LAMMPS-neighbor-list path requires precision "
+                   "double; set UMA_ENGINE_BUILD_GRAPH=1 for the mixed path");
+    } else if (use_f64) {
       result = predictor->predict_host(nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf,
                                        force_buf.data());
-    else
+    } else {
       result = predictor->predict_host(nlocal, pos_buf.data(), z_buf.data(), cell_buf, pbc_buf,
                                        force_buf.data());
+    }
     for (int i = 0; i < nlocal; i++) {
       f[i][0] += force_buf[3 * i + 0];
       f[i][1] += force_buf[3 * i + 1];
@@ -393,16 +423,29 @@ void PairUMA::load_predictor()
         local_rank = static_cast<int>(parsed);
         break;
       }
+#if defined(UMA_ENGINE_USE_XPU)
+      // XPU: one tile per rank via ZE_AFFINITY_MASK (masked view -> index 0).
+      const int device_index = 0;
+#else
       const int ndev =
           torch::cuda::is_available() ? static_cast<int>(torch::cuda::device_count()) : 0;
       // When the launcher pins one GPU per rank (CUDA_VISIBLE_DEVICES), ndev==1
       // and device_index 0 is correct; otherwise bind local_rank % ndev.
       const int device_index = (ndev > 1) ? (local_rank % ndev) : 0;
+#endif
 
       // Load metadata (all ranks) for cutoff + normalizer + refs.
       auto metadata = uma::load_artifact_metadata(artifact_dir + "/metadata.json");
       cutoff = metadata.cutoff;
 
+#if defined(UMA_ENGINE_USE_XPU)
+      // XPU transport (host-staged MPI or XCCL) bootstraps over MPI_COMM_WORLD;
+      // no NCCL unique-id exchange needed.
+      mpi_peer = uma::MpiPeerPredictor::create(
+                     artifact_dir, metadata, mn_w, rank, device_index,
+                     /*nccl_unique_id=*/nullptr, torch::kFloat64)
+                     .release();
+#else
       // NCCL id: rank 0 generates, MPI_Bcast to all, then collective create.
       const size_t id_bytes = uma::MpiPeerPredictor::nccl_unique_id_bytes();
       if (id_bytes == 0)
@@ -415,6 +458,7 @@ void PairUMA::load_predictor()
                      artifact_dir, metadata, mn_w, rank, device_index,
                      nccl_id.data(), torch::kFloat64)
                      .release();
+#endif
       if (screen)
         fprintf(screen,
                 "uma: rank %d -> multi-node peer (world=%d local_rank=%d dev=%d)\n",
@@ -445,6 +489,33 @@ void PairUMA::load_predictor()
     // For devices>1 fork the GP worker before any parent CUDA init.
     torch::Device device = torch::Device(torch::kCPU);
     if (num_devices <= 1) {
+#if defined(UMA_ENGINE_USE_XPU)
+      // Intel XPU (Aurora): one tile per MPI rank. With ZE_AFFINITY_MASK pinning
+      // one tile per rank, device_count()==1 and index 0 is correct; otherwise
+      // bind local_rank % ndev. (Eager UMA_EAGER_CKPT path picks XPU in-worker.)
+      if (at::hasXPU() && torch::xpu::is_available()) {
+        int local_rank = comm->me;
+        for (const char *v : {"PMI_LOCAL_RANK", "PALS_LOCAL_RANKID",
+                              "SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
+                              "MPI_LOCALRANKID", "LOCAL_RANK"}) {
+          const char *lr = std::getenv(v);
+          if (lr == nullptr || *lr == '\0') continue;
+          char *end = nullptr;
+          const long parsed = std::strtol(lr, &end, 10);
+          if (end == lr || *end != '\0' || parsed < 0) continue;
+          local_rank = static_cast<int>(parsed);
+          break;
+        }
+        const int ndev = static_cast<int>(torch::xpu::device_count());
+        const int idx = (ndev > 0 && local_rank >= 0) ? (local_rank % ndev) : 0;
+        device = torch::Device(torch::kXPU, static_cast<c10::DeviceIndex>(idx));
+        if (screen)
+          fprintf(screen, "uma: rank %d -> xpu:%d (of %d visible)\n",
+                  comm->me, idx, ndev);
+      } else {
+        device = torch::Device(torch::kCPU);
+      }
+#else
       if (torch::cuda::is_available()) {
         // M0 (multi-node): bind one GPU per MPI rank. A bare
         // torch::Device(torch::kCUDA) means index 0, so every rank on a node
@@ -484,6 +555,7 @@ void PairUMA::load_predictor()
       } else {
         device = torch::Device(torch::kCPU);
       }
+#endif  // UMA_ENGINE_USE_XPU
     }
     predictor =
         new uma::Predictor(uma::Predictor::from_artifact(artifact_dir, device, num_devices));
@@ -526,8 +598,130 @@ void PairUMA::init_style()
   if (force->newton_pair) error->all(FLERR, "Pair style uma requires newton pair off");
   if (atom->tag_enable == 0) error->all(FLERR, "Pair style uma requires atom IDs");
 
-  // Register cutoff with neighbor; engine builds its own UMA graph.
+  // Full neighbor list; we CONSUME it (convert to FairChem edges) instead of
+  // letting the engine rebuild its own O(N^2) graph. The list is built to the
+  // pair cutoff (init_one -> cutoff = UMA cutoff 6.0) plus neighbor skin, so all
+  // UMA edges (|rij| <= cutoff) are present and we filter to the exact cutoff.
   neighbor->add_request(this, NeighConst::REQ_FULL);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairUMA::init_list(int /*id*/, NeighList *ptr)
+{
+  list = ptr;
+}
+
+/* ---------------------------------------------------------------------- */
+
+int64_t PairUMA::build_ext_graph(int nlocal)
+{
+  // Orthorhombic-only integer image recovery. Triclinic ghost->image needs the
+  // full h-matrix solve; assert it away for now (NaCl cubic test is orthorhombic).
+  if (domain->triclinic)
+    error->all(FLERR,
+               "Pair style uma: LAMMPS-neighbor-list path requires an "
+               "orthorhombic box (triclinic==0); set UMA_ENGINE_BUILD_GRAPH=1 "
+               "to use the engine's own graph for triclinic cells");
+
+  double **x = atom->x;
+  const tagint *tag = atom->tag;
+
+  const double Lx = domain->boxhi[0] - domain->boxlo[0];
+  const double Ly = domain->boxhi[1] - domain->boxlo[1];
+  const double Lz = domain->boxhi[2] - domain->boxlo[2];
+  const double invLx = (Lx > 0.0) ? 1.0 / Lx : 0.0;
+  const double invLy = (Ly > 0.0) ? 1.0 / Ly : 0.0;
+  const double invLz = (Lz > 0.0) ? 1.0 / Lz : 0.0;
+
+  const double cut2 = cutoff * cutoff;
+
+  const int inum = list->inum;
+  const int *ilist = list->ilist;
+  const int *numneigh = list->numneigh;
+  int **firstneigh = list->firstneigh;
+
+  // Build tag -> OWNED local index map from the nlocal owned atoms (robust vs
+  // LAMMPS atom->map/sametag which can return a ghost). Single-rank: all real
+  // atoms owned. tags are 1..N (metal units, atom_style atomic).
+  tagint maxtag = 0;
+  for (int i = 0; i < nlocal; i++) if (tag[i] > maxtag) maxtag = tag[i];
+  std::vector<int> owned_of_tag(static_cast<size_t>(maxtag) + 1, -1);
+  for (int i = 0; i < nlocal; i++) owned_of_tag[tag[i]] = i;
+
+  ext_edge_index_.clear();
+  ext_cell_offsets_.clear();
+  // Row-major [2,E] built as two logical rows; we append into a flat [E] pair of
+  // arrays and stitch to [2,E] at the end. Reserve generously.
+  std::vector<int64_t> row_nbr;   // row0 = neighbor (jr)
+  std::vector<int64_t> row_ctr;   // row1 = center (i)
+  size_t guess = 0;
+  for (int ii = 0; ii < inum; ii++) guess += static_cast<size_t>(numneigh[ilist[ii]]);
+  row_nbr.reserve(guess);
+  row_ctr.reserve(guess);
+  ext_cell_offsets_.reserve(guess * 3);
+
+  for (int ii = 0; ii < inum; ii++) {
+    const int i = ilist[ii];
+    if (i >= nlocal) continue;  // centers are local atoms only
+    const int jnum = numneigh[i];
+    const int *jlist = firstneigh[i];
+    const double xi = x[i][0];
+    const double yi = x[i][1];
+    const double zi = x[i][2];
+    for (int jj = 0; jj < jnum; jj++) {
+      int j = jlist[jj];
+      j &= NEIGHMASK;  // strip special-bond/history bits
+
+      // Exact UMA cutoff filter, computed on the ACTUAL (ghost) coordinates so
+      // it reproduces vesin/radius_graph(cutoff) edge-for-edge.
+      const double dx = x[j][0] - xi;
+      const double dy = x[j][1] - yi;
+      const double dz = x[j][2] - zi;
+      const double r2 = dx * dx + dy * dy + dz * dz;
+      if (r2 > cut2) continue;
+
+      // Map ghost/local j to its real OWNED atom jr_local in [0,nlocal). j may be
+      // a ghost (>= nlocal) or a local self-image; atom->map(tag[j]) returns the
+      // owned atom carrying that global tag. (newton_pair is off for this style,
+      // and the mn/GP path is separate, so a local owned copy always exists.)
+      // Map ghost/local j to its OWNED atom jr_local in [0,nlocal). LAMMPS
+      // atom->map(tag) can return a ghost (closest-image map), and sametag may
+      // not be current, so use our own tag->owned map (owned_of_tag, built once
+      // per compute below from the nlocal owned atoms). Single rank: every real
+      // atom is owned, so the owned copy always exists.
+      const int jr_local = owned_of_tag[tag[j]];
+      if (jr_local < 0 || jr_local >= nlocal)
+        error->one(FLERR,
+                   "Pair style uma: neighbor tag has no owned local atom "
+                   "(unexpected on the single-rank path)");
+
+      // Integer image (sx,sy,sz): x[j] = x[jr_local] + (sx,sy,sz).(Lx,Ly,Lz).
+      // Base position is the OWNED atom the engine will index (row0 = jr_local),
+      // so pos[jr_local] + offset@cell reproduces the ghost position x[j] used
+      // for the edge vector. Orthorhombic: per-axis rounding is exact.
+      const double bx = x[jr_local][0];
+      const double by = x[jr_local][1];
+      const double bz = x[jr_local][2];
+      const long sx = std::lround((x[j][0] - bx) * invLx);
+      const long sy = std::lround((x[j][1] - by) * invLy);
+      const long sz = std::lround((x[j][2] - bz) * invLz);
+
+      row_nbr.push_back(static_cast<int64_t>(jr_local));
+      row_ctr.push_back(static_cast<int64_t>(i));
+      ext_cell_offsets_.push_back(static_cast<double>(sx));
+      ext_cell_offsets_.push_back(static_cast<double>(sy));
+      ext_cell_offsets_.push_back(static_cast<double>(sz));
+    }
+  }
+
+  const int64_t E = static_cast<int64_t>(row_ctr.size());
+  ext_edge_index_.resize(static_cast<size_t>(2) * E);
+  for (int64_t e = 0; e < E; e++) {
+    ext_edge_index_[e] = row_nbr[e];              // row0 = neighbor
+    ext_edge_index_[E + e] = row_ctr[e];          // row1 = center
+  }
+  return E;
 }
 
 /* ---------------------------------------------------------------------- */

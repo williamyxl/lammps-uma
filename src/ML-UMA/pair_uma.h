@@ -22,6 +22,7 @@ PairStyle(uma,PairUMA);
 
 #include "pair.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -45,11 +46,17 @@ class PairUMA : public Pair {
   void settings(int, char **) override;
   void coeff(int, char **) override;
   void init_style() override;
+  void init_list(int, class NeighList *) override;
   double init_one(int, int) override;
 
  protected:
   virtual void allocate();
   void load_predictor();
+  // Convert the LAMMPS full neighbor list into FairChem edge format
+  // (edge_index [2,E] int64 row0=neighbor row1=center, cell_offsets [E,3]).
+  // Single-tile (non-mn) orthorhombic path only. Fills ext_edge_index_ /
+  // ext_cell_offsets_ and returns E.
+  int64_t build_ext_graph(int nlocal);
 
   std::string artifact_dir;
   int *map;    // map type -> atomic number (0 unused)
@@ -80,6 +87,15 @@ class PairUMA : public Pair {
   std::vector<double> force_buf;
   double cell_buf[9];
   int pbc_buf[3];
+
+  // Neighbor list handed to us by LAMMPS (full list, cutoff = UMA cutoff + skin).
+  // Stored from init_list(); consumed in compute() to feed the engine an
+  // externally-built edge graph so the engine skips its own O(N^2) rebuild.
+  class NeighList *list;
+  // Externally-built edge graph scratch (single-tile path).
+  std::vector<int64_t> ext_edge_index_;   // [2,E] row0=neighbor(jr) row1=center(i)
+  std::vector<double> ext_cell_offsets_;   // [E,3] integer image triples (as double)
+  bool engine_build_graph_;                // UMA_ENGINE_BUILD_GRAPH=1 -> old path
 };
 
 }    // namespace LAMMPS_NS

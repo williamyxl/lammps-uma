@@ -102,6 +102,27 @@ class WorkerState:
 
         import torch
 
+        # Device selection: Intel XPU (Aurora) > CUDA > CPU. On XPU, apply the
+        # hen patches (XPU device allowlist for MLIPPredictUnit + the FP64
+        # prepare_wigner edge-chunk fix that restores correct backward forces at
+        # large edge counts, NaCl N>=10). See hen/docs/finding_xpu_ag_fd_cliff.
+        xpu_ok = hasattr(torch, "xpu") and torch.xpu.is_available()
+        if xpu_ok:
+            for p in (
+                "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen/shim",
+                "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen/patches",
+                "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen",
+            ):
+                if p not in sys.path and Path(p).is_dir():
+                    sys.path.insert(0, p)
+            from fairchem_xpu_parallel import patch_fairchem_xpu_device
+            patch_fairchem_xpu_device()
+            device = "xpu"
+        elif torch.cuda.is_available():
+            device = "cuda"
+        else:
+            device = "cpu"
+
         settings = inference_settings_default()
         settings.base_precision_dtype = getattr(torch, dtype)
         # Graph-parallel + external_graph trips CUDA index asserts on UMA.
@@ -115,11 +136,19 @@ class WorkerState:
 
         self.predictor = load_predict_unit(
             str(ckpt),
-            device="cuda" if torch.cuda.is_available() else "cpu",
+            device=device,
             inference_settings=settings,
             workers=workers,
         )
+        # Enforce FP64 module cast on XPU (matches the hen eager path).
+        if dtype == "float64":
+            for attr in ("model", "module", "_module"):
+                mod = getattr(self.predictor, attr, None)
+                if mod is not None:
+                    mod.double()
+                    break
         self.calc = FAIRChemCalculator(self.predictor, task_name=task)
+        self._device = device
         self.workers = workers
         self.dtype = dtype
         self.task = task
@@ -133,8 +162,13 @@ class WorkerState:
             "task": task,
             "checkpoint": str(ckpt),
             "external_graph_gen": bool(settings.external_graph_gen),
+            "device": device,
             "cuda": bool(torch.cuda.is_available()),
-            "n_visible": int(torch.cuda.device_count()) if torch.cuda.is_available() else 0,
+            "xpu": bool(xpu_ok),
+            "n_visible": (
+                int(torch.xpu.device_count()) if xpu_ok
+                else (int(torch.cuda.device_count()) if torch.cuda.is_available() else 0)
+            ),
         }
 
     def predict(

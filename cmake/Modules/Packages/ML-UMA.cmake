@@ -17,13 +17,24 @@ if(NOT MKL_INCLUDE_DIR)
 endif()
 find_package(Torch REQUIRED)
 
+# Backend select: Intel XPU (Aurora) vs CUDA. Default CUDA unless UMA_ENGINE_USE_XPU=ON.
+option(UMA_ENGINE_USE_XPU "Build ML-UMA for Intel XPU (Aurora)" OFF)
 if(NOT TARGET uma_engine)
-  set(UMA_ENGINE_USE_CUDA ON CACHE BOOL "" FORCE)
+  if(UMA_ENGINE_USE_XPU)
+    set(UMA_ENGINE_USE_XPU ON CACHE BOOL "" FORCE)
+    set(UMA_ENGINE_USE_CUDA OFF CACHE BOOL "" FORCE)
+  else()
+    set(UMA_ENGINE_USE_CUDA ON CACHE BOOL "" FORCE)
+  endif()
   add_subdirectory(${UMA_ENGINE_ROOT} ${CMAKE_BINARY_DIR}/uma-engine EXCLUDE_FROM_ALL)
 endif()
 
 target_link_libraries(lammps PRIVATE uma_engine ${TORCH_LIBRARIES})
 target_include_directories(lammps PRIVATE ${UMA_ENGINE_ROOT}/include)
+# pair_uma.cpp needs the XPU device branch compiled in.
+if(UMA_ENGINE_USE_XPU)
+  target_compile_definitions(lammps PRIVATE UMA_ENGINE_USE_XPU)
+endif()
 
 # Propagate vesin .so rpath onto the LAMMPS binary when present.
 set(_VESIN_ROOT "${UMA_ENGINE_ROOT}/third_party/vesin")

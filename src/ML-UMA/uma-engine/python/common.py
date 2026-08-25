@@ -4,6 +4,7 @@ Shared utilities for libTorch export and parity checking.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import torch
@@ -98,13 +99,122 @@ def parse_dtype_from_metadata(metadata_path) -> torch.dtype:
     return getattr(torch, dtype_name, torch.float32)
 
 
+def _cell_list_edges(atoms: Atoms, radius: float):
+    """O(N*neighbors) periodic neighbor list via a cell/bin list.
+
+    Replaces AtomicData.from_ase's radius_graph (effectively O(N^2): 27s @ N=18,
+    hangs @ N>=24) for LARGE trace exports. Returns (edge_index [2,E] int64
+    row0=neighbor row1=center, cell_offsets [E,3] float) matching FairChem's
+    convention: edge_distance_vec = pos[nbr] + offset@cell - pos[center].
+    Orthorhombic cells only (the NaCl test); falls back to from_ase otherwise.
+    """
+    import itertools
+    import numpy as np
+    import torch
+    cell = np.asarray(atoms.get_cell(), dtype=np.float64)
+    if not (np.allclose(cell, np.diag(np.diag(cell))) and np.all(atoms.get_pbc())):
+        return None  # non-orthorhombic or non-periodic -> caller uses from_ase
+    L = np.diag(cell).astype(np.float64)
+    pos = atoms.get_positions().astype(np.float64)
+    pos -= np.floor(pos / L) * L  # wrap into cell
+    n = len(atoms)
+    ncell = np.maximum((L / radius).astype(np.int64), 1)  # bins per axis
+    nx, ny, nz = int(ncell[0]), int(ncell[1]), int(ncell[2])
+    binsz = L / ncell
+    bi = np.minimum((pos / binsz).astype(np.int64), ncell - 1)  # [n,3] bin idx
+    # Flat bin id per atom, and atoms grouped by bin (sorted).
+    binid = (bi[:, 0] * ny + bi[:, 1]) * nz + bi[:, 2]          # [n]
+    order = np.argsort(binid, kind="stable")
+    binid_sorted = binid[order]
+    # start offset of each occupied bin in the sorted order
+    uniq, starts = np.unique(binid_sorted, return_index=True)
+    ends = np.append(starts[1:], n)
+    bin_start = {int(b): (int(s), int(e)) for b, s, e in zip(uniq, starts, ends)}
+    r2 = radius * radius
+    rows_nbr = []; rows_ctr = []; offs = []
+    # For each of 27 neighbor-bin directions, vectorize over all atoms at once.
+    for dcx, dcy, dcz in itertools.product((-1, 0, 1), repeat=3):
+        # center-atom neighbor bin (may wrap): image = floor(nb/ncell)
+        nbx = bi[:, 0] + dcx; wx = np.floor(nbx / nx).astype(np.int64); nbx -= wx * nx
+        nby = bi[:, 1] + dcy; wy = np.floor(nby / ny).astype(np.int64); nby -= wy * ny
+        nbz = bi[:, 2] + dcz; wz = np.floor(nbz / nz).astype(np.int64); nbz -= wz * nz
+        tgt = (nbx * ny + nby) * nz + nbz                       # [n] target bin id
+        # group centers by their target bin so we batch per occupied target bin
+        c_order = np.argsort(tgt, kind="stable")
+        tgt_s = tgt[c_order]
+        u2, s2 = np.unique(tgt_s, return_index=True)
+        e2 = np.append(s2[1:], n)
+        for tb, cs, ce in zip(u2, s2, e2):
+            se = bin_start.get(int(tb))
+            if se is None:
+                continue
+            js = order[se[0]:se[1]]                              # neighbor atoms in target bin
+            cs_atoms = c_order[cs:ce]                            # centers pointing here
+            wrap = np.array([int(wx[cs_atoms[0]]), int(wy[cs_atoms[0]]),
+                             int(wz[cs_atoms[0]])], dtype=np.int64)
+            # NOTE wrap is per-center; but centers in this group share (dc) and
+            # their own bin, so wrap differs only if they span the boundary. To be
+            # exact, compute per (center,neighbor) below.
+            # pairwise: centers cs_atoms x neighbors js
+            pc = pos[cs_atoms]                                   # [C,3]
+            pj = pos[js]                                         # [J,3]
+            # per-center wrap:
+            wcc = np.stack([wx[cs_atoms], wy[cs_atoms], wz[cs_atoms]], 1).astype(np.float64)  # [C,3]
+            # d = pj + wrap*L - pc  (broadcast [C,1,3] vs [1,J,3])
+            d = (pj[None, :, :] + (wcc[:, None, :] * L)) - pc[:, None, :]   # [C,J,3]
+            r2m = np.einsum("cjk,cjk->cj", d, d)                # [C,J]
+            mask = r2m <= r2
+            ci_idx, jj_idx = np.nonzero(mask)
+            if ci_idx.size == 0:
+                continue
+            ci_at = cs_atoms[ci_idx]; jj_at = js[jj_idx]
+            # drop self (same atom, zero image)
+            self_zero = (ci_at == jj_at) & (wx[ci_at] == 0) & (wy[ci_at] == 0) & (wz[ci_at] == 0)
+            keep = ~self_zero
+            ci_at = ci_at[keep]; jj_at = jj_at[keep]
+            rows_ctr.append(ci_at); rows_nbr.append(jj_at)
+            offs.append(np.stack([wx[ci_at], wy[ci_at], wz[ci_at]], 1))
+    if not rows_nbr:
+        return (torch.zeros((2, 0), dtype=torch.long), torch.zeros((0, 3)))
+    nbr = np.concatenate(rows_nbr); ctr = np.concatenate(rows_ctr)
+    off = np.concatenate(offs).astype(np.float64)
+    ei = torch.from_numpy(np.stack([nbr, ctr]).astype(np.int64))
+    co = torch.from_numpy(off)
+    return ei, co
+
+
 def atoms_to_atomic_data(
     atoms: Atoms,
     task_name: str,
     settings: InferenceSettings,
 ) -> AtomicData:
-    """Build AtomicData the same way FAIRChemCalculator does for external graphs."""
+    """Build AtomicData the same way FAIRChemCalculator does for external graphs.
+
+    For large systems set UMA_EXPORT_CELL_LIST=1 to use an O(N) cell-list edge
+    build (from_ase's radius_graph is O(N^2) and hangs at N>=24). The cell-list
+    path builds the AtomicData with r_edges=False then injects edge_index +
+    cell_offsets, matching FairChem's convention exactly.
+    """
     r_edges = settings.external_graph_gen
+    use_cell_list = (r_edges and
+                     os.environ.get("UMA_EXPORT_CELL_LIST", "0").strip()
+                     in ("1", "true", "yes"))
+    if use_cell_list:
+        edges = _cell_list_edges(atoms, GRAPH_RADIUS)
+        if edges is not None:
+            data = AtomicData.from_ase(
+                atoms, task_name=task_name, r_edges=False, radius=GRAPH_RADIUS,
+                max_neigh=None, r_data_keys=["spin", "charge"],
+                target_dtype=settings.base_precision_dtype)
+            ei, co = edges
+            data.edge_index = ei
+            data.cell_offsets = co.to(settings.base_precision_dtype)
+            # some AtomicData variants expect neighbors count / nedges
+            try:
+                data.neighbors = torch.tensor([ei.shape[1]], dtype=torch.long)
+            except Exception:
+                pass
+            return data
     max_neigh = GRAPH_MAX_NEIGHBORS if r_edges else None
     return AtomicData.from_ase(
         atoms,

@@ -11,6 +11,8 @@
 
 #include <torch/torch.h>
 
+#include "uma/device_compat.h"
+
 static bool load_structure(const std::string& path, std::vector<double>& pos,
                            std::vector<int>& z, std::vector<double>& cell) {
   // Format: N, then N lines "Z x y z", then 9 cell values (row-major).
@@ -47,6 +49,9 @@ int main(int argc, char** argv) {
   std::string structure;
   std::string forces_out;
   int num_devices = 1;
+  bool do_fd = false;
+  double fd_eps = 1e-4;
+  int fd_sample = 100;
 
   for (int i = 1; i < argc; ++i) {
     const std::string a = argv[i];
@@ -62,6 +67,14 @@ int main(int argc, char** argv) {
         return 1;
       }
       forces_out = argv[++i];
+    } else if (a == "--fd") {
+      do_fd = true;
+    } else if (a == "--fd-eps") {
+      if (i + 1 >= argc) { usage(argv[0]); return 1; }
+      fd_eps = std::stod(argv[++i]);
+    } else if (a == "--fd-sample") {
+      if (i + 1 >= argc) { usage(argv[0]); return 1; }
+      fd_sample = std::stoi(argv[++i]);
     } else if (a == "--help" || a == "-h") {
       usage(argv[0]);
       return 0;
@@ -85,12 +98,12 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  torch::Device device =
-      torch::cuda::is_available() ? torch::Device(torch::kCUDA) : torch::Device(torch::kCPU);
+  torch::Device device = uma::default_device();
   auto pred = uma::Predictor::from_artifact(artifact, device, num_devices);
   const bool f64 = pred.compute_dtype() == torch::kFloat64;
+  const char* dev_str = device.is_cuda() ? "cuda" : (device.is_xpu() ? "xpu" : "cpu");
   std::printf("compute_dtype=%s device=%s devices=%d gp=%s\n",
-              f64 ? "float64" : "float32", device.is_cuda() ? "cuda" : "cpu",
+              f64 ? "float64" : "float32", dev_str,
               pred.num_devices(), pred.uses_graph_parallel() ? "yes" : "no");
 
   std::vector<double> pos;
@@ -141,6 +154,44 @@ int main(int argc, char** argv) {
   }
   std::printf("n=%d energy=%.12f eV  fmax=%.10e  fmax_atom=%.10e\n", n, out.energy,
               fmax, fmax_atom);
+
+  // Optional C++ AG=FD gate: central difference on sampled atoms vs autograd.
+  if (do_fd) {
+    int want = std::min(std::max(fd_sample, 1), n);
+    std::vector<int> idxs;
+    if (want >= n) {
+      for (int i = 0; i < n; ++i) idxs.push_back(i);
+    } else {
+      double stride = static_cast<double>(n) / want;
+      for (int i = 0; i < want; ++i) idxs.push_back(static_cast<int>(i * stride));
+      if (idxs.front() != 0) idxs.insert(idxs.begin(), 0);
+      if (idxs.back() != n - 1) idxs.push_back(n - 1);
+    }
+    std::vector<double> pbuf = pos;
+    double max_agfd = 0.0, sum_agfd = 0.0;
+    long cnt = 0;
+    for (int ia : idxs) {
+      for (int ic = 0; ic < 3; ++ic) {
+        const size_t k = static_cast<size_t>(3 * ia + ic);
+        const double x0 = pbuf[k];
+        pbuf[k] = x0 + fd_eps;
+        auto ep = pred.predict_host(n, pbuf.data(), z.data(), cell.data(), pbc, nullptr);
+        pbuf[k] = x0 - fd_eps;
+        auto em = pred.predict_host(n, pbuf.data(), z.data(), cell.data(), pbc, nullptr);
+        pbuf[k] = x0;
+        const double f_fd = -(ep.energy - em.energy) / (2.0 * fd_eps);
+        const double f_ag = forces[k];
+        const double d = std::abs(f_ag - f_fd);
+        max_agfd = std::max(max_agfd, d);
+        sum_agfd += d;
+        ++cnt;
+      }
+    }
+    const double mean_agfd = cnt ? sum_agfd / cnt : 0.0;
+    const bool ok = max_agfd <= 1e-5;
+    std::printf("AG_FD sampled_atoms=%zu eps=%.1e max|AG-FD|=%.6e mean=%.6e %s\n",
+                idxs.size(), fd_eps, max_agfd, mean_agfd, ok ? "PASS" : "FAIL");
+  }
   if (!forces_out.empty()) {
     std::ofstream fo(forces_out);
     if (!fo) {

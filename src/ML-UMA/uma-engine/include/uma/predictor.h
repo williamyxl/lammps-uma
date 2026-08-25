@@ -48,6 +48,15 @@ class Predictor {
                      const torch::Tensor& pbc,             // [3] bool
                      int64_t charge = 0, int64_t spin = 0);
 
+  /// Like predict() but with a caller-supplied neighbor graph (no rebuild).
+  /// edge_index [2,E] int64 (row0=neighbor, row1=center); cell_offsets [E,3].
+  Prediction predict_extgraph(const torch::Tensor& pos,
+                              const torch::Tensor& atomic_numbers,
+                              const torch::Tensor& cell, const torch::Tensor& pbc,
+                              const torch::Tensor& edge_index,
+                              const torch::Tensor& cell_offsets,
+                              int64_t charge = 0, int64_t spin = 0);
+
   /// Host FP32 positions (downcasts if artifact is FP64).
   Prediction predict_host(int n, const float* pos_xyz, const int* atomic_numbers,
                           const double* cell_3x3, const int* pbc_3,
@@ -57,6 +66,31 @@ class Predictor {
   Prediction predict_host(int n, const double* pos_xyz, const int* atomic_numbers,
                           const double* cell_3x3, const int* pbc_3,
                           double* forces_out_optional = nullptr);
+
+  /// Host FP64 positions with a CALLER-SUPPLIED neighbor graph (external graph).
+  ///
+  /// Identical to predict_host(double) EXCEPT the engine does NOT rebuild the
+  /// neighbor list: it uses the supplied edge_index + cell_offsets directly.
+  /// Use this from LAMMPS pair_uma to avoid the O(N^2) internal build_neighbor_graph
+  /// (which hangs at large N).
+  ///
+  /// Edge convention (MUST match rebuild_neighbors() output, predictor.cpp:197):
+  ///   edge_index_2E is int64 row-major [2, n_edges]:
+  ///     row 0 (edge_index_2E[0*n_edges + e]) = neighbor atom j
+  ///     row 1 (edge_index_2E[1*n_edges + e]) = center   atom i
+  /// cell_offsets_E3 is float64 row-major [n_edges, 3]: INTEGER periodic shifts
+  ///   stored as double; edge_distance_vec = pos[j] + offset @ cell - pos[i].
+  ///
+  /// NOTE: positions are NOT wrapped into the cell in this path (unlike
+  /// predict_host). The supplied offsets already encode periodicity and the
+  /// edge_distance_vec is translation-invariant, so wrapping is unnecessary and
+  /// would be inconsistent with offsets computed against unwrapped LAMMPS coords.
+  Prediction predict_host_extgraph(int n, const double* pos_xyz,
+                                   const int* atomic_numbers, const double* cell9,
+                                   const int* pbc3, int64_t n_edges,
+                                   const int64_t* edge_index_2E,
+                                   const double* cell_offsets_E3,
+                                   double* forces_out);
 
   /// Override position/energy compute dtype (must match TorchScript artifact dtype).
   void set_compute_dtype(torch::ScalarType dtype);
@@ -75,6 +109,20 @@ class Predictor {
 
   void ensure_buffers(int64_t n);
   void rebuild_neighbors();
+
+  // Shared post-neighbor forward/backward body used by both predict() (which
+  // rebuilds the neighbor list first) and predict_extgraph() (which sets
+  // edge_index_/cell_offsets_ from the caller first). Assumes pos_,
+  // atomic_numbers_, cell_, pbc_, charge_, spin_, edge_index_, cell_offsets_
+  // are already populated. Does NOT rebuild neighbors and does NOT wrap positions.
+  Prediction predict_body();
+
+  // Common input staging shared by predict() and predict_extgraph(): fills the
+  // persistent pos_/atomic_numbers_/cell_/pbc_/charge_/spin_ buffers. Returns N.
+  int64_t stage_inputs(const torch::Tensor& pos,
+                       const torch::Tensor& atomic_numbers,
+                       const torch::Tensor& cell, const torch::Tensor& pbc,
+                       int64_t charge, int64_t spin);
 
   torch::jit::script::Module module_;
   bool has_traced_module_ = false;

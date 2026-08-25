@@ -24,9 +24,25 @@ torch::Tensor wrap_positions_to_cell(const torch::Tensor& pos,
                                      const torch::Tensor& pbc);
 
 /// Single-system neighbor list (pymatgen-external-graph compatible).
+/// Dispatches to the O(N*neighbors) cell-list for large orthorhombic boxes
+/// (floor(L_d/cutoff) >= 3 on every periodic axis) and to the O(N^2) all-pairs
+/// path otherwise. Set env UMA_NL_ALLPAIRS=1 to force the all-pairs path.
 NeighborGraph build_neighbor_graph(const torch::Tensor& pos,
                                    const torch::Tensor& cell,
                                    const torch::Tensor& pbc,
                                    const NeighborListConfig& config = {});
+
+/// O(N^2) all-pairs implementation (original; always correct). Exposed for A/B.
+NeighborGraph build_neighbor_graph_allpairs(const torch::Tensor& pos,
+                                            const torch::Tensor& cell,
+                                            const torch::Tensor& pbc,
+                                            const NeighborListConfig& config = {});
+
+/// O(N*neighbors) linked-cell implementation. Requires an orthorhombic box with
+/// >= 3 bins per periodic axis; falls back to all-pairs if that is not met.
+NeighborGraph build_neighbor_graph_celllist(const torch::Tensor& pos,
+                                            const torch::Tensor& cell,
+                                            const torch::Tensor& pbc,
+                                            const NeighborListConfig& config = {});
 
 }  // namespace uma

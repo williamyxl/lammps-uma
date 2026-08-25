@@ -1,7 +1,9 @@
 #include "uma/neighbor_list.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
@@ -186,6 +188,157 @@ void gen_candidates_for_center(const std::vector<Vec3>& positions,
   }
 }
 
+// True if the cell is (numerically) orthorhombic: off-diagonals ~0 and
+// diagonal lengths strictly positive.
+bool is_orthorhombic(const std::array<std::array<double, 3>, 3>& cell) {
+  double diag_scale = 0.0;
+  for (int d = 0; d < 3; ++d) {
+    diag_scale = std::max(diag_scale, std::abs(cell[d][d]));
+  }
+  const double tol = 1e-9 * std::max(diag_scale, 1.0);
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      if (i == j) {
+        if (std::abs(cell[i][j]) <= tol) {
+          return false;  // degenerate axis
+        }
+      } else if (std::abs(cell[i][j]) > tol) {
+        return false;  // non-zero off-diagonal
+      }
+    }
+  }
+  return true;
+}
+
+// Cell-list (linked-cell) per-center candidate generator for orthorhombic
+// boxes with >= 3 bins along every periodic axis. Reproduces EXACTLY the same
+// (neighbor, image-offset, distance) candidate set as
+// gen_candidates_for_center: same cutoff test, same self/image exclusion via
+// distance_tolerance, same integer image triples.
+//
+// Grid: ncell[d] = floor(L_d / cutoff) bins on periodic axes (>= 3 required by
+// the caller so the 27-cell stencil covers the full cutoff sphere and any
+// periodic wrap is at most +/-1 image). Non-periodic axes use a single bin and
+// contribute no image offset. A neighbor found in stencil cell (ci + dc) whose
+// index wraps by w full periods contributes image-offset component w on that
+// axis, matching the all-pairs `ix/iy/iz` image indices.
+struct CellGrid {
+  std::array<int, 3> ncell;
+  std::array<double, 3> len;  // box length along each axis (L_d for periodic)
+  std::array<bool, 3> pbc;
+  std::vector<std::vector<int64_t>> buckets;  // flattened ncell[0]*ncell[1]*ncell[2]
+  std::array<int, 3> cell_of(const Vec3& p) const {
+    std::array<int, 3> c{0, 0, 0};
+    for (int d = 0; d < 3; ++d) {
+      if (ncell[d] <= 1) {
+        c[d] = 0;
+        continue;
+      }
+      const double coord = (d == 0 ? p.x : (d == 1 ? p.y : p.z));
+      double f = coord / len[d];  // wrapped positions => f in [0,1)
+      int idx = static_cast<int>(std::floor(f * ncell[d]));
+      // Guard against FP rounding at the upper boundary.
+      if (idx < 0) idx = 0;
+      if (idx >= ncell[d]) idx = ncell[d] - 1;
+      c[d] = idx;
+    }
+    return c;
+  }
+  int64_t flat(int cx, int cy, int cz) const {
+    return (static_cast<int64_t>(cx) * ncell[1] + cy) * ncell[2] + cz;
+  }
+};
+
+bool build_cell_grid(const std::vector<Vec3>& positions,
+                     const std::array<std::array<double, 3>, 3>& cell,
+                     const std::array<bool, 3>& pbc,
+                     const NeighborListConfig& config,
+                     CellGrid& grid) {
+  for (int d = 0; d < 3; ++d) {
+    grid.pbc[d] = pbc[d];
+    grid.len[d] = std::abs(cell[d][d]);
+    if (pbc[d]) {
+      const int nc = static_cast<int>(std::floor(grid.len[d] / config.cutoff));
+      if (nc < 3) {
+        return false;  // stencil would not cover the cutoff sphere / images
+      }
+      grid.ncell[d] = nc;
+    } else {
+      grid.ncell[d] = 1;
+    }
+  }
+  const int64_t total =
+      static_cast<int64_t>(grid.ncell[0]) * grid.ncell[1] * grid.ncell[2];
+  grid.buckets.assign(static_cast<size_t>(total), {});
+  for (int64_t i = 0; i < static_cast<int64_t>(positions.size()); ++i) {
+    const auto c = grid.cell_of(positions[i]);
+    grid.buckets[static_cast<size_t>(grid.flat(c[0], c[1], c[2]))].push_back(i);
+  }
+  return true;
+}
+
+void gen_candidates_for_center_celllist(const std::vector<Vec3>& positions,
+                                        int64_t center,
+                                        const CellGrid& grid,
+                                        const std::array<std::array<double, 3>, 3>& cell,
+                                        const std::array<bool, 3>& pbc,
+                                        const NeighborListConfig& config,
+                                        std::vector<NeighborCandidate>& out) {
+  const auto cc = grid.cell_of(positions[center]);
+  for (int dx = -1; dx <= 1; ++dx) {
+    for (int dy = -1; dy <= 1; ++dy) {
+      for (int dz = -1; dz <= 1; ++dz) {
+        const int dc[3] = {dx, dy, dz};
+        int nb[3];
+        int wrap[3];  // integer image offset contributed by this stencil step
+        bool skip = false;
+        for (int d = 0; d < 3; ++d) {
+          const int raw = (d == 0 ? cc[0] : (d == 1 ? cc[1] : cc[2])) + dc[d];
+          const int nd = grid.ncell[d];
+          if (!pbc[d]) {
+            if (raw < 0 || raw >= nd) {
+              skip = true;  // no periodic image across a non-periodic axis
+              break;
+            }
+            nb[d] = raw;
+            wrap[d] = 0;
+          } else {
+            // Floor-divide to fold raw into [0, nd) and record the wrap count.
+            int w = 0;
+            int idx = raw;
+            while (idx < 0) {
+              idx += nd;
+              w -= 1;
+            }
+            while (idx >= nd) {
+              idx -= nd;
+              w += 1;
+            }
+            nb[d] = idx;
+            wrap[d] = w;
+          }
+        }
+        if (skip) {
+          continue;
+        }
+        const int ox = wrap[0];
+        const int oy = wrap[1];
+        const int oz = wrap[2];
+        const Vec3 image_shift = lattice_image_shift(ox, oy, oz, cell);
+        const auto& bucket =
+            grid.buckets[static_cast<size_t>(grid.flat(nb[0], nb[1], nb[2]))];
+        for (int64_t neighbor : bucket) {
+          const Vec3 neighbor_pos = add(positions[neighbor], image_shift);
+          const double dist = norm(sub(neighbor_pos, positions[center]));
+          if (dist >= config.distance_tolerance && dist <= config.cutoff) {
+            out.push_back({neighbor, ox, oy, oz, dist});
+          }
+        }
+      }
+    }
+  }
+}
+
 }  // namespace
 
 torch::Tensor wrap_positions_to_cell(const torch::Tensor& pos,
@@ -206,40 +359,41 @@ torch::Tensor wrap_positions_to_cell(const torch::Tensor& pos,
   return out.to(pos.device(), pos.scalar_type());
 }
 
-NeighborGraph build_neighbor_graph(const torch::Tensor& pos,
-                                   const torch::Tensor& cell,
-                                   const torch::Tensor& pbc,
-                                   const NeighborListConfig& config) {
-  if (!pos.defined() || pos.size(0) == 0) {
-    throw std::runtime_error("pos must be non-empty");
-  }
+namespace {
 
-  auto cell_mat = cell_from_tensor(cell);
-  auto pbc_flags = pbc_from_tensor(pbc);
-  auto positions = positions_from_tensor(pos);
-  wrap_positions(positions, cell_mat, pbc_flags);
-
-  const int64_t n = static_cast<int64_t>(positions.size());
-  const auto rep = image_repeats(cell_mat, pbc_flags, config.cutoff);
-
+// Shared sort-by-distance + max_neighbors truncation + tensor emission. This is
+// the UNCHANGED tail of the original build_neighbor_graph; both the all-pairs
+// and cell-list paths funnel through here so their output is bit-identical given
+// the same candidate sets.
+NeighborGraph emit_graph(
+    const torch::Tensor& pos,
+    const std::vector<std::vector<NeighborCandidate>>& per_center,
+    const NeighborListConfig& config) {
+  const int64_t n = static_cast<int64_t>(per_center.size());
   std::vector<int64_t> src;
   std::vector<int64_t> dst;
   std::vector<std::array<double, 3>> offsets;
-
   src.reserve(n * config.max_neighbors);
   dst.reserve(n * config.max_neighbors);
   offsets.reserve(n * config.max_neighbors);
 
   for (int64_t center = 0; center < n; ++center) {
-    std::vector<NeighborCandidate> candidates;
-    candidates.reserve(256);
-
-    gen_candidates_for_center(positions, center, /*nbr_begin=*/0, /*nbr_end=*/n,
-                              cell_mat, pbc_flags, rep, config, candidates);
-
+    std::vector<NeighborCandidate> candidates = per_center[center];
+    // Sort by distance, with a total-order tie-break on (neighbor, ox, oy, oz).
+    // The tie-break is REQUIRED for identical output: with plain distance-only
+    // sorting the original std::sort is unstable, so when max_neighbors cuts
+    // through a shell of exactly-equal distances the surviving neighbors depend
+    // on generation order — which differs between the all-pairs and cell-list
+    // paths. A deterministic total order makes truncation order-independent, so
+    // both paths keep the SAME edges (and makes the all-pairs path itself
+    // reproducible run-to-run).
     std::sort(candidates.begin(), candidates.end(),
               [](const NeighborCandidate& a, const NeighborCandidate& b) {
-                return a.distance < b.distance;
+                if (a.distance != b.distance) return a.distance < b.distance;
+                if (a.neighbor != b.neighbor) return a.neighbor < b.neighbor;
+                if (a.ox != b.ox) return a.ox < b.ox;
+                if (a.oy != b.oy) return a.oy < b.oy;
+                return a.oz < b.oz;
               });
     const int keep = std::min<int>(
         static_cast<int>(candidates.size()), config.max_neighbors);
@@ -272,6 +426,104 @@ NeighborGraph build_neighbor_graph(const torch::Tensor& pos,
   }
 
   return {edge_index, cell_offsets};
+}
+
+bool allpairs_forced() {
+  const char* v = std::getenv("UMA_NL_ALLPAIRS");
+  return v != nullptr && v[0] != '\0' && v[0] != '0';
+}
+
+}  // namespace
+
+// O(N^2) all-pairs neighbor graph (original implementation, always correct).
+NeighborGraph build_neighbor_graph_allpairs(const torch::Tensor& pos,
+                                            const torch::Tensor& cell,
+                                            const torch::Tensor& pbc,
+                                            const NeighborListConfig& config) {
+  if (!pos.defined() || pos.size(0) == 0) {
+    throw std::runtime_error("pos must be non-empty");
+  }
+
+  auto cell_mat = cell_from_tensor(cell);
+  auto pbc_flags = pbc_from_tensor(pbc);
+  auto positions = positions_from_tensor(pos);
+  wrap_positions(positions, cell_mat, pbc_flags);
+
+  const int64_t n = static_cast<int64_t>(positions.size());
+  const auto rep = image_repeats(cell_mat, pbc_flags, config.cutoff);
+
+  std::vector<std::vector<NeighborCandidate>> per_center(n);
+  for (int64_t center = 0; center < n; ++center) {
+    per_center[center].reserve(256);
+    gen_candidates_for_center(positions, center, /*nbr_begin=*/0, /*nbr_end=*/n,
+                              cell_mat, pbc_flags, rep, config,
+                              per_center[center]);
+  }
+  return emit_graph(pos, per_center, config);
+}
+
+// O(N * neighbors) cell-list neighbor graph. Requires an orthorhombic box with
+// >= 3 bins along every periodic axis; returns false-equivalent (throws) only
+// if misused. Produces candidate sets identical to the all-pairs path.
+NeighborGraph build_neighbor_graph_celllist(const torch::Tensor& pos,
+                                            const torch::Tensor& cell,
+                                            const torch::Tensor& pbc,
+                                            const NeighborListConfig& config) {
+  auto cell_mat = cell_from_tensor(cell);
+  auto pbc_flags = pbc_from_tensor(pbc);
+  auto positions = positions_from_tensor(pos);
+  wrap_positions(positions, cell_mat, pbc_flags);
+
+  const int64_t n = static_cast<int64_t>(positions.size());
+  CellGrid grid;
+  if (!build_cell_grid(positions, cell_mat, pbc_flags, config, grid)) {
+    // Not enough bins — caller should have gated on this; fall back.
+    return build_neighbor_graph_allpairs(pos, cell, pbc, config);
+  }
+
+  std::vector<std::vector<NeighborCandidate>> per_center(n);
+  for (int64_t center = 0; center < n; ++center) {
+    per_center[center].reserve(256);
+    gen_candidates_for_center_celllist(positions, center, grid, cell_mat,
+                                       pbc_flags, config, per_center[center]);
+  }
+  return emit_graph(pos, per_center, config);
+}
+
+NeighborGraph build_neighbor_graph(const torch::Tensor& pos,
+                                   const torch::Tensor& cell,
+                                   const torch::Tensor& pbc,
+                                   const NeighborListConfig& config) {
+  if (!pos.defined() || pos.size(0) == 0) {
+    throw std::runtime_error("pos must be non-empty");
+  }
+
+  // A/B switch: force the original O(N^2) path for validation.
+  if (allpairs_forced()) {
+    return build_neighbor_graph_allpairs(pos, cell, pbc, config);
+  }
+
+  // Dispatch to the cell-list only when it is provably safe: orthorhombic box
+  // with >= 3 bins along every periodic axis (floor(L_d/cutoff) >= 3). Small or
+  // triclinic systems use the all-pairs path (fast for small N, always correct).
+  auto cell_mat = cell_from_tensor(cell);
+  auto pbc_flags = pbc_from_tensor(pbc);
+  if (is_orthorhombic(cell_mat)) {
+    bool ok = true;
+    for (int d = 0; d < 3; ++d) {
+      if (pbc_flags[d]) {
+        const double len = std::abs(cell_mat[d][d]);
+        if (static_cast<int>(std::floor(len / config.cutoff)) < 3) {
+          ok = false;
+          break;
+        }
+      }
+    }
+    if (ok) {
+      return build_neighbor_graph_celllist(pos, cell, pbc, config);
+    }
+  }
+  return build_neighbor_graph_allpairs(pos, cell, pbc, config);
 }
 
 }  // namespace uma

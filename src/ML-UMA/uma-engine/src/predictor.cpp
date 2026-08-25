@@ -9,6 +9,9 @@
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
+#include "uma/block_context.h"
+#include "uma/checkpoint_module.h"
+#include "uma/device_compat.h"
 #include "uma/graph_parallel.h"
 #include "uma/neighbor_list.h"
 #include "uma/postprocess.h"
@@ -17,11 +20,11 @@
 namespace {
 
 torch::Device resolve_device(torch::Device device) {
-  if (device.is_cuda() && !torch::cuda::is_available()) {
-    std::cerr << "Warning: CUDA requested but unavailable; falling back to CPU\n";
-    return torch::kCPU;
+  torch::Device resolved = uma::resolve_device_compat(device);
+  if (!resolved.is_cuda() && !resolved.is_xpu() && !device.is_cpu()) {
+    std::cerr << "Warning: requested accelerator unavailable; falling back to CPU\n";
   }
-  return device;
+  return resolved;
 }
 
 // Borrowed from graspa-mlip fairchem Predictor: avoid TorchScript TE hang.
@@ -106,6 +109,37 @@ Predictor Predictor::from_artifact(const std::string& artifact_dir,
   device = resolve_device(device);
   const std::string traced_path = artifact_dir + "/model_traced.pt";
   auto module = torch::jit::load(traced_path, device);
+  // Per-block traceable AC: if the artifact ships model_block_{i}.pt, the traced
+  // top graph calls uma_ckpt::block(idx, ...). Load the per-block sub-modules
+  // into the process-wide BlockContext BEFORE any forward so the op can dispatch.
+  // Defensive: legacy artifacts without block files leave the monolithic path.
+  // Option (j) PRIMARY path: per-CHUNK AC. If the artifact ships
+  // model_chunk_{i}.pt, the traced block loop calls uma_ckpt::chunk(block_idx,
+  // ...) per edge-chunk; load the chunk modules into the process-wide
+  // BlockContext BEFORE any forward so the op can dispatch. Fall back to the
+  // per-block path when only model_block_{i}.pt exists (legacy artifacts leave
+  // the monolithic path).
+  // Option (j) architecture: top model_traced.pt calls uma_ckpt::block per block
+  // -> each block module calls uma_ckpt::chunk per edge-chunk. BOTH the block
+  // modules (for uma_ckpt::block) AND the chunk modules (for uma_ckpt::chunk)
+  // must be loaded. (Legacy per-block-only artifacts have no chunk modules;
+  // legacy monolithic have neither.)
+  const bool have_blocks = maybe_load_blocks(artifact_dir, device);
+  const bool have_chunks = maybe_load_chunks(artifact_dir, device);
+  // Option (P1-b): the PROLOGUE edge_degree_embedding is the last un-checkpointed
+  // full-edge transient (12.82 GiB at N=18). If the artifact ships
+  // model_edgedeg_chunk.pt, the traced prologue loop calls uma_ckpt::edge_degree
+  // per edge-chunk; load the single edge_degree module into the process-wide
+  // BlockContext BEFORE any forward so the op can dispatch. Defensive no-op when
+  // absent (keeps the un-checkpointed full-edge prologue path).
+  const bool have_edgedeg = maybe_load_edgedeg(artifact_dir, device);
+  if (have_blocks || have_chunks || have_edgedeg) {
+    std::cerr << "uma-engine: loaded " << BlockContext::instance().num_blocks()
+              << " block + " << BlockContext::instance().num_chunks()
+              << " chunk sub-modules (AC"
+              << (have_chunks ? ", per-chunk option j" : ", per-block")
+              << (have_edgedeg ? ", +prologue edge_degree P1-b" : "") << ")\n";
+  }
   return Predictor(std::move(module), device, std::move(metadata), /*num_devices=*/1);
 }
 
@@ -174,17 +208,11 @@ void Predictor::rebuild_neighbors() {
   cell_offsets_ = graph.cell_offsets.to(device_, compute_dtype_);
 }
 
-Prediction Predictor::predict(const torch::Tensor& pos,
-                              const torch::Tensor& atomic_numbers,
-                              const torch::Tensor& cell,
-                              const torch::Tensor& pbc, int64_t charge,
-                              int64_t spin) {
-  if (gp_) {
-    return gp_->predict(pos, atomic_numbers, cell, pbc, charge, spin);
-  }
-  if (!has_traced_module_) {
-    throw std::runtime_error("Predictor: no traced module and no GP runtime");
-  }
+int64_t Predictor::stage_inputs(const torch::Tensor& pos,
+                                const torch::Tensor& atomic_numbers,
+                                const torch::Tensor& cell,
+                                const torch::Tensor& pbc, int64_t charge,
+                                int64_t spin) {
   if (!pos.defined() || pos.dim() != 2 || pos.size(1) != 3) {
     throw std::runtime_error("pos must be [N,3]");
   }
@@ -209,12 +237,71 @@ Prediction Predictor::predict(const torch::Tensor& pos,
 
   charge_.fill_(charge);
   spin_.fill_(spin);
+  return n;
+}
+
+Prediction Predictor::predict(const torch::Tensor& pos,
+                              const torch::Tensor& atomic_numbers,
+                              const torch::Tensor& cell,
+                              const torch::Tensor& pbc, int64_t charge,
+                              int64_t spin) {
+  if (gp_) {
+    return gp_->predict(pos, atomic_numbers, cell, pbc, charge, spin);
+  }
+  if (!has_traced_module_) {
+    throw std::runtime_error("Predictor: no traced module and no GP runtime");
+  }
+  stage_inputs(pos, atomic_numbers, cell, pbc, charge, spin);
 
   // FairChem AtomicData wraps into the cell; model + edge offsets share that frame.
   pos_.copy_(wrap_positions_to_cell(pos_, cell_, pbc_));
 
   rebuild_neighbors();
 
+  return predict_body();
+}
+
+Prediction Predictor::predict_extgraph(const torch::Tensor& pos,
+                                       const torch::Tensor& atomic_numbers,
+                                       const torch::Tensor& cell,
+                                       const torch::Tensor& pbc,
+                                       const torch::Tensor& edge_index,
+                                       const torch::Tensor& cell_offsets,
+                                       int64_t charge, int64_t spin) {
+  if (gp_) {
+    throw std::runtime_error(
+        "predict_extgraph: external-graph path is single-tile Predictor only "
+        "(GP runtime not yet supported)");
+  }
+  if (!has_traced_module_) {
+    throw std::runtime_error("Predictor: no traced module and no GP runtime");
+  }
+  stage_inputs(pos, atomic_numbers, cell, pbc, charge, spin);
+
+  // Caller-supplied neighbor graph. Edge convention MUST match rebuild_neighbors
+  // (predictor.cpp:197): row0=neighbor j, row1=center i.
+  if (!edge_index.defined() || edge_index.dim() != 2 || edge_index.size(0) != 2) {
+    throw std::runtime_error("predict_extgraph: edge_index must be [2,E]");
+  }
+  if (!cell_offsets.defined() || cell_offsets.dim() != 2 ||
+      cell_offsets.size(1) != 3) {
+    throw std::runtime_error("predict_extgraph: cell_offsets must be [E,3]");
+  }
+  if (cell_offsets.size(0) != edge_index.size(1)) {
+    throw std::runtime_error(
+        "predict_extgraph: edge_index and cell_offsets edge count mismatch");
+  }
+  edge_index_ = edge_index.to(device_, torch::kLong).contiguous();
+  cell_offsets_ = cell_offsets.to(device_, compute_dtype_).contiguous();
+
+  // Intentionally do NOT call wrap_positions_to_cell here: the supplied offsets
+  // already encode periodicity against the caller's (unwrapped) coordinates, and
+  // edge_distance_vec = pos[j] + offset @ cell - pos[i] is translation-invariant.
+  return predict_body();
+}
+
+Prediction Predictor::predict_body() {
+  const auto dtype = compute_dtype_;
   // Clone so the persistent buffer is not marked requires_grad.
   auto pos_grad = pos_.detach().clone().set_requires_grad(true);
 
@@ -230,7 +317,28 @@ Prediction Predictor::predict(const torch::Tensor& pos,
   torch::Tensor normed_raw;
   {
     torch::autograd::AutoGradMode grad_guard(true);
-    normed_raw = module_.forward(args).toTensor();
+    const bool per_chunk_ac = BlockContext::instance().num_chunks() > 0;
+    const bool per_block_ac = BlockContext::instance().num_blocks() > 0;
+    const bool prologue_ac = BlockContext::instance().edgedeg_loaded();
+    if (per_chunk_ac || per_block_ac || prologue_ac) {
+      // PER-CHUNK (option j) / PER-BLOCK / PROLOGUE-edge_degree (P1-b) activation
+      // checkpointing is active (uma_ckpt::chunk / uma_ckpt::block /
+      // uma_ckpt::edge_degree ops in the graph each recompute independently). Run
+      // the top module NORMALLY (grad on) so only ONE chunk (or block, or
+      // prologue edge-chunk) is live at a time. Do NOT also wrap the whole module
+      // in CheckpointModuleFn: that outer checkpoint's backward recomputes the
+      // ENTIRE module with grad on, retaining everything at once and defeating
+      // per-chunk/per-block/prologue AC.
+      normed_raw = module_.forward(args).toTensor();
+    } else if (checkpoint_enabled()) {
+      // Whole-module C++ activation checkpointing (no per-block modules):
+      // recompute forward in backward instead of retaining activations.
+      normed_raw = CheckpointModuleFn::apply(&module_, pos_grad, atomic_numbers_,
+                                             cell_, pbc_, edge_index_,
+                                             cell_offsets_, charge_, spin_);
+    } else {
+      normed_raw = module_.forward(args).toTensor();
+    }
   }
   auto normed = normed_raw.to(dtype);
   auto energy = denorm_energy(normed, metadata_.normalizer_mean,
@@ -321,6 +429,53 @@ Prediction Predictor::predict_host(int n, const double* pos_xyz,
   if (forces_out_optional) {
     auto f_cpu = pred.forces.to(torch::kCPU).contiguous();
     std::memcpy(forces_out_optional, f_cpu.data_ptr<double>(),
+                sizeof(double) * static_cast<size_t>(n) * 3);
+  }
+  return pred;
+}
+
+Prediction Predictor::predict_host_extgraph(
+    int n, const double* pos_xyz, const int* atomic_numbers, const double* cell9,
+    const int* pbc3, int64_t n_edges, const int64_t* edge_index_2E,
+    const double* cell_offsets_E3, double* forces_out) {
+  if (gp_) {
+    throw std::runtime_error(
+        "predict_host_extgraph: external-graph path is single-tile Predictor "
+        "only (GP runtime not yet supported)");
+  }
+  // Build pos/z/cell/pbc tensors from raw pointers (mirrors predict_host FP64).
+  auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3},
+                              torch::kFloat64)
+                 .clone();
+  auto z = torch::empty({n}, torch::kLong);
+  auto z_acc = z.accessor<int64_t, 1>();
+  for (int i = 0; i < n; ++i) {
+    z_acc[i] = atomic_numbers[i];
+  }
+  auto cell = torch::empty({3, 3}, torch::kFloat64);
+  auto cell_acc = cell.accessor<double, 2>();
+  for (int i = 0; i < 3; ++i) {
+    for (int j = 0; j < 3; ++j) {
+      cell_acc[i][j] = cell9[3 * i + j];
+    }
+  }
+  auto pbc = torch::tensor({pbc3[0] != 0, pbc3[1] != 0, pbc3[2] != 0},
+                           torch::kBool);
+
+  // Caller-supplied neighbor graph. Edge convention: row0=neighbor, row1=center
+  // (SAME as rebuild_neighbors output, predictor.cpp:197). Integer periodic
+  // shifts are supplied as double in cell_offsets_E3 [n_edges,3].
+  auto edge_index = torch::from_blob(const_cast<int64_t*>(edge_index_2E),
+                                     {2, n_edges}, torch::kInt64)
+                        .clone();
+  auto cell_offsets = torch::from_blob(const_cast<double*>(cell_offsets_E3),
+                                       {n_edges, 3}, torch::kFloat64)
+                          .clone();
+
+  auto pred = predict_extgraph(pos, z, cell, pbc, edge_index, cell_offsets, 0, 0);
+  if (forces_out) {
+    auto f_cpu = pred.forces.to(torch::kCPU).contiguous();
+    std::memcpy(forces_out, f_cpu.data_ptr<double>(),
                 sizeof(double) * static_cast<size_t>(n) * 3);
   }
   return pred;

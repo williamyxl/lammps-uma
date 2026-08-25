@@ -34,6 +34,9 @@
 #if defined(UMA_ENGINE_USE_NCCL)
 #include <nccl.h>
 #endif
+#if defined(UMA_ENGINE_USE_XCCL)
+#include "uma/xccl_peer.h"
+#endif
 
 namespace uma {
 namespace kokkos_peer {
@@ -44,6 +47,9 @@ class SharedPeerGatherSlot {
   static constexpr int kTransportShm = 0;
   static constexpr int kTransportCudaIpc = 1;
   static constexpr int kTransportNccl = 2;
+  // Native oneCCL (XCCL) on-device collectives (XPU). KVS bootstrap over MPI;
+  // data path stays on device (Level-Zero IPC). Sole inter-tile transport on XPU.
+  static constexpr int kTransportXccl = 4;
 
 #if defined(UMA_ENGINE_USE_CUDA)
   using IpcHandle = cudaIpcMemHandle_t;
@@ -97,8 +103,8 @@ class SharedPeerGatherSlot {
     size_t n = sizeof(int64_t);
     if (transport == kTransportCudaIpc) {
       n += sizeof(IpcHandle);
-    } else if (transport == kTransportNccl) {
-      // control-only trailing; nbytes slots unused
+    } else if (transport == kTransportNccl || transport == kTransportXccl) {
+      // control-only trailing; cross-rank traffic goes via NCCL/XCCL.
     } else {
       n += kMaxBytesPerRank;
     }
@@ -306,6 +312,28 @@ class SharedPeerGatherSlot {
 #endif
   }
 
+  // Native oneCCL (XCCL) transport. KVS is bootstrapped over MPI by the caller
+  // (rank 0 create_main_kvs + MPI_Bcast address; others create_kvs). The
+  // XcclPeer owns the SYCL device/context/stream + ccl::communicator and runs
+  // on-device allreduce/allgatherv (no host staging).
+  void init_xccl_external(int rank, int world, const void* /*unused*/,
+                          int device_index) {
+#if !defined(UMA_ENGINE_USE_XCCL)
+    (void)rank; (void)world; (void)device_index;
+    throw std::runtime_error("SharedPeerGatherSlot: xccl requested without XCCL");
+#else
+    if (rank < 0 || world < 1 || rank >= world) {
+      throw std::runtime_error("init_xccl_external: bad rank/world");
+    }
+    my_rank_ = rank;
+    external_world_ = world;
+    xccl_ = XcclPeer::create(rank, world, device_index);  // KVS-over-MPI inside
+    xccl_ready_ = true;
+    std::cerr << "SharedPeerGatherSlot: xccl(on-device) ready rank=" << rank
+              << " world=" << world << " dev=" << device_index << "\n";
+#endif
+  }
+
   // Size of the opaque id the caller must broadcast (ncclUniqueId).
   static size_t unique_id_bytes() {
 #if defined(UMA_ENGINE_USE_NCCL)
@@ -458,6 +486,23 @@ class SharedPeerGatherSlot {
 
   torch::Tensor all_gather_concat(int rank, const torch::Tensor& local,
                                   int64_t n_atoms) {
+#if defined(UMA_ENGINE_USE_XCCL)
+    if (xccl_ready_) {
+      // Padded per-rank shard -> on-device allgather -> unpad to [n_atoms,...].
+      const int world = external_world_;
+      const int64_t pad = padded_local_size(n_atoms, world);
+      auto padded = pad_nodes(local.contiguous(), pad);
+      auto gathered = xccl_->all_gather(padded);  // [world*pad, ...]
+      auto sizes = size_list(n_atoms, world);
+      std::vector<torch::Tensor> parts;
+      parts.reserve(static_cast<size_t>(world));
+      for (int r = 0; r < world; ++r) {
+        parts.push_back(gathered.narrow(0, r * pad, sizes[static_cast<size_t>(r)])
+                            .contiguous());
+      }
+      return torch::cat(parts, 0).contiguous();
+    }
+#endif
 #if defined(UMA_ENGINE_USE_NCCL)
     if (shm_ && shm_->transport == kTransportNccl) {
       return all_gather_nccl_(rank, local, n_atoms);
@@ -468,6 +513,11 @@ class SharedPeerGatherSlot {
   }
 
   torch::Tensor all_reduce(int rank, const torch::Tensor& local) {
+#if defined(UMA_ENGINE_USE_XCCL)
+    if (xccl_ready_) {
+      return xccl_->all_reduce_sum(local.contiguous());
+    }
+#endif
 #if defined(UMA_ENGINE_USE_NCCL)
     if (shm_ && shm_->transport == kTransportNccl) {
       return all_reduce_nccl_(rank, local);
@@ -478,6 +528,12 @@ class SharedPeerGatherSlot {
   }
 
   void barrier(int rank) {
+#if defined(UMA_ENGINE_USE_XCCL)
+    if (xccl_ready_) {
+      xccl_->barrier();
+      return;
+    }
+#endif
     if (shm_ && shm_->transport == kTransportNccl) {
 #if defined(UMA_ENGINE_USE_NCCL) && defined(UMA_ENGINE_USE_CUDA)
       auto t = torch::zeros({1}, torch::dtype(torch::kFloat64)
@@ -907,6 +963,12 @@ class SharedPeerGatherSlot {
   int my_rank_ = -1;
   // World size when bootstrapped over MPI (no shm segment to read it from).
   int external_world_ = 0;
+
+  // Native XCCL (oneCCL) transport state.
+#if defined(UMA_ENGINE_USE_XCCL)
+  std::shared_ptr<XcclPeer> xccl_;
+#endif
+  bool xccl_ready_ = false;
 
   // Process-local NCCL state.
 #if defined(UMA_ENGINE_USE_NCCL)
