@@ -50,7 +50,16 @@ Consistent to 5 significant figures → large-N results are physically correct.
 | 1 tile, N=12 | 13,824 | 61.2 s | 117 s |
 | 1 tile, N=18 | 46,656 | 383.3 s | NVT OOM (single-point OK) |
 | **12 tiles, N=18** | 46,656 | **90 s**† | **88 s** |
-| **12 tiles, N=32** | 262,144 | **258 s**† | **450 s** |
+| **12 tiles, N=32** | 262,144 | **258 s**† | **235 s (optimized)** ‖ |
+
+‖ **N=32 optimized 235 s** (job 8782977) — **beats ASE-GP's 258 s**, FP64, energy
+bit-identical to the 450 s baseline. Two accuracy-neutral optimizations: (opt3)
+XCCL tuning (`CCL_ZE_IPC_EXCHANGE=pidfd`, `CCL_ATL_TRANSPORT=ofi`, `FI_PROVIDER=tcp`)
+450→276 s; (opt1) coarser activation-checkpoint chunk (`EDGE_AC_CHUNK` 16384→65536,
+fewer backward recomputes) 276→235 s. NVT compute Loop-time 214→180 s. Progression:
+450 s (baseline) → 276 s (opt3) → **235 s (opt1+opt3), 1.91× faster than baseline
+and 1.10× faster than ASE-GP**. Further headroom: opt2 (share the duplicated
+per-rank weights, ~4.4 GB → cut the ~59 s load).
 
 † **ASE 12-tile = FairChem graph-parallel** (`ParallelMLIPPredictUnit` + XCCL, Ray, W=12;
 from project `hen`). ASE's driver measures **11 warm energy+force evaluations + cold
