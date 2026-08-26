@@ -1,5 +1,6 @@
 #include "uma/block_context.h"
 
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -10,6 +11,45 @@
 #include <torch/torch.h>
 
 namespace uma {
+
+namespace {
+// Perf knobs: bypass the activation checkpoint for a given op and run its
+// sub-module forward DIRECTLY under autograd (retain activations, no backward
+// recompute). Removes that op's ~forward-sized recompute cost but retains its
+// activations -> higher HBM. Numerically identical (same graph, retained vs
+// recomputed). Default OFF (checkpointing on) so large systems that need AC to
+// fit are unaffected.
+//
+// GRANULAR so the memory/speed tradeoff can be tuned per op level. Measured at
+// N=32 W=12: the CHUNK activations (SO2 + [Ec,25,25] wigner x ~11 chunks x 4
+// blocks) are the memory blocker -- full UMA_NO_RECOMPUTE=1 OOMs (62.5/64 GiB).
+// The BLOCK and EDGE_DEGREE recomputes retain only node-sized activations, so
+// skipping THOSE reclaims recompute time without the chunk memory blowup.
+//   UMA_NO_RECOMPUTE=1        -> master: all three (block+chunk+edge_degree)
+//   UMA_NO_RECOMPUTE_BLOCK=1  -> block only
+//   UMA_NO_RECOMPUTE_CHUNK=1  -> chunk only (memory-heavy; use with care)
+//   UMA_NO_RECOMPUTE_EDEG=1   -> edge_degree prologue only
+// Each is evaluated once and cached.
+bool env_flag_1(const char* name) {
+  const char* e = std::getenv(name);
+  return e != nullptr && e[0] == '1' && e[1] == '\0';
+}
+bool no_recompute_block() {
+  static const bool v =
+      env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_BLOCK");
+  return v;
+}
+bool no_recompute_chunk() {
+  static const bool v =
+      env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_CHUNK");
+  return v;
+}
+bool no_recompute_edeg() {
+  static const bool v =
+      env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_EDEG");
+  return v;
+}
+}  // namespace
 
 BlockContext& BlockContext::instance() {
   static BlockContext ctx;
@@ -146,6 +186,15 @@ torch::Tensor uma_ckpt_block_autograd(int64_t idx, const torch::Tensor& x,
                                       const torch::Tensor& edge_index,
                                       const torch::Tensor& sys_node_emb) {
   auto* block = BlockContext::instance().block_ptr(static_cast<int>(idx));
+  if (no_recompute_block()) {
+    // Retain-activations fast path: run the block forward under autograd (no
+    // NoGradGuard, no checkpoint) so backward reuses retained activations
+    // instead of recomputing. Same math, more memory, less compute.
+    std::vector<torch::jit::IValue> args = {
+        x, edge_distance_vec, edge_distance, atomic_numbers, edge_index,
+        sys_node_emb};
+    return block->forward(args).toTensor();
+  }
   return BlockCheckpointFn::apply(block, x, edge_distance_vec, edge_distance,
                                   atomic_numbers, edge_index, sys_node_emb);
 }
@@ -165,6 +214,16 @@ torch::Tensor uma_ckpt_chunk_autograd(int64_t block_idx,
   // wigner/x_edge are NO LONGER passed: the chunk module recomputes them from
   // the per-chunk precursors (edge_distance_vec, edge_distance, atomic_numbers)
   // INTERNALLY, so no full-edge wigner transient ever crosses this boundary.
+  if (no_recompute_chunk()) {
+    // Retain-activations fast path (see no_recompute_chunk). WARNING: this
+    // retains EVERY chunk's SO2 intermediates + [Ec,25,25] wigner at once (the
+    // exact memory per-chunk AC was designed to avoid), so it is only safe when
+    // HBM has headroom (e.g. N<=32 on 12 tiles). Same math as the checkpoint.
+    std::vector<torch::jit::IValue> args = {
+        x_full,     edge_distance_vec, edge_distance, atomic_numbers,
+        edge_index, node_offset,       mole_start};
+    return chunk_module->forward(args).toTensor();
+  }
   return ChunkCheckpointFn::apply(chunk_module, x_full, edge_distance_vec,
                                   edge_distance, atomic_numbers, edge_index,
                                   node_offset, mole_start);
@@ -181,6 +240,15 @@ torch::Tensor uma_ckpt_edge_degree_autograd(
   // node-sized). wigner/x_edge are NOT passed: the module recomputes them from
   // the per-chunk precursors (edge_distance_vec, edge_distance, atomic_numbers)
   // INTERNALLY, so no full-edge wigner transient ever crosses this boundary.
+  if (no_recompute_edeg()) {
+    // Retain-activations fast path (see no_recompute_edeg). The prologue
+    // accumulates into x; running it directly under autograd retains its
+    // intermediates for backward instead of recomputing. Same math.
+    std::vector<torch::jit::IValue> args = {
+        x,          edge_distance_vec, edge_distance, atomic_numbers,
+        edge_index, node_offset,       mole_start};
+    return edgedeg_module->forward(args).toTensor();
+  }
   return EdgeDegreeCheckpointFn::apply(edgedeg_module, x, edge_distance_vec,
                                        edge_distance, atomic_numbers, edge_index,
                                        node_offset, mole_start);

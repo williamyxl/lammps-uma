@@ -1060,8 +1060,27 @@ def main() -> int:
             restore_trace_patches()
 
         top_path = out / "model_traced.pt"
+        # opt2: the top module only DISPATCHES uma_ckpt.block / uma_ckpt.edge_degree
+        # ops (the heavy block/MOLE/edge_degree weights execute inside the separate
+        # model_block_*/model_chunk_*/model_edgedeg modules). Those weights are
+        # baked but DEAD in the top graph (~2 GiB/rank). freeze() folds constants
+        # and drops attributes/params unreachable from forward -> strips the dead
+        # weights. Bit-exact (removes only unused tensors). Env UMA_NO_FREEZE=1 to
+        # disable.
+        if os.environ.get("UMA_NO_FREEZE", "0").strip() not in ("1", "true", "yes"):
+            try:
+                _frozen = torch.jit.freeze(traced.eval())
+                traced = _frozen
+                print("opt2: froze top module (dead weights stripped)", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f"opt2: freeze skipped ({type(exc).__name__}: {exc})", flush=True)
         traced.save(str(top_path))
         torch.jit.load(str(top_path), map_location="cpu")
+        try:
+            _mb = os.path.getsize(str(top_path)) / 1048576.0
+            print(f"opt2: model_traced.pt = {_mb:.1f} MB", flush=True)
+        except OSError:
+            pass
         block_paths = []
         for i, tb in enumerate(traced_blocks):
             bp = out / f"model_block_{i}.pt"
@@ -1184,14 +1203,26 @@ def main() -> int:
                 return ""
             parts = []
             for sm in m.modules():
-                if hasattr(sm, "graph"):
-                    try:
-                        parts.append(sm.graph.str())
-                    except Exception:
-                        pass
+                # opt2: torch.jit.freeze inlines/renames forward, so the `graph`
+                # property getter can raise RuntimeError ("Method 'forward' is
+                # not defined") rather than being absent. hasattr() only swallows
+                # AttributeError, so guard the whole access; frozen graphs are
+                # then simply skipped (this scan is a best-effort op-count check,
+                # NOT a correctness gate).
+                try:
+                    parts.append(sm.graph.str())
+                except Exception:
+                    pass
             return "\n".join(parts)
 
-        graph_texts = [_all_method_graphs(out / "model_traced.pt")]
+        top_graph_text = _all_method_graphs(out / "model_traced.pt")
+        # opt2: a frozen top module exposes no readable graph string, so the
+        # top-level ops (uma_ckpt::block / uma_ckpt::edge_degree) are not
+        # countable. Detect this so the structure check does NOT falsely FAIL on
+        # the block/edge_degree counts (the per-block graphs, which carry
+        # all_gather_nodes + chunk, are NOT frozen and are still checked).
+        top_opaque = (top_graph_text.strip() == "")
+        graph_texts = [top_graph_text]
         for i in range(int(backbone.num_layers)):
             graph_texts.append(_all_method_graphs(out / f"model_block_{i}.pt"))
             graph_texts.append(_all_method_graphs(out / f"model_chunk_{i}.pt"))
@@ -1205,18 +1236,25 @@ def main() -> int:
             "all_gather_nodes": n_gather, "block": n_block,
             "chunk": n_chunk, "edge_degree": n_edeg,
             "expected_gather_per_block": world > 1,
+            "top_frozen_opaque": bool(top_opaque),
         }
         print(f"[graph-check] all_gather_nodes={n_gather} block={n_block} "
               f"chunk={n_chunk} edge_degree={n_edeg} (num_layers="
-              f"{int(backbone.num_layers)})", flush=True)
+              f"{int(backbone.num_layers)})"
+              f"{' [top frozen: block/edge_degree counts N/A]' if top_opaque else ''}",
+              flush=True)
         if gp:
+            # block/edge_degree live ONLY in the (opaque-when-frozen) top graph;
+            # skip those two counts if the top module is frozen (opt2).
             gp_ok = (n_gather == int(backbone.num_layers)
-                     and n_block == int(backbone.num_layers)
-                     and n_chunk > 0 and n_edeg > 0)
+                     and n_chunk > 0
+                     and (top_opaque or (n_block == int(backbone.num_layers)
+                                         and n_edeg > 0)))
             report["graph_check"]["gp_structure_ok"] = bool(gp_ok)
             print(f"GP GRAPH-STRUCTURE {'PASS' if gp_ok else 'FAIL'} "
-                  f"(expect all_gather_nodes==num_layers, block==num_layers, "
-                  f"chunk>0, edge_degree>0)", flush=True)
+                  f"(expect all_gather_nodes==num_layers, chunk>0"
+                  f"{'' if top_opaque else ', block==num_layers, edge_degree>0'})",
+                  flush=True)
         else:
             report["graph_check"]["single_tile_no_gather_ok"] = (n_gather == 0)
 

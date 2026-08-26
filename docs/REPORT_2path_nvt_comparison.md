@@ -58,8 +58,49 @@ XCCL tuning (`CCL_ZE_IPC_EXCHANGE=pidfd`, `CCL_ATL_TRANSPORT=ofi`, `FI_PROVIDER=
 450→276 s; (opt1) coarser activation-checkpoint chunk (`EDGE_AC_CHUNK` 16384→65536,
 fewer backward recomputes) 276→235 s. NVT compute Loop-time 214→180 s. Progression:
 450 s (baseline) → 276 s (opt3) → **235 s (opt1+opt3), 1.91× faster than baseline
-and 1.10× faster than ASE-GP**. Further headroom: opt2 (share the duplicated
-per-rank weights, ~4.4 GB → cut the ~59 s load).
+and 1.10× faster than ASE-GP**.
+
+**opt2 (`torch.jit.freeze` of the top module) — validated, kept as default; storage/HBM
+win, wall-neutral** (job 8784408). The traced top module only *dispatches* the
+`uma_ckpt.block` / `uma_ckpt.edge_degree` ops (the heavy weights live in the separate
+`model_block_*`/`model_chunk_*`/`model_edgedeg` modules), so it baked ~2.22 GiB/rank of
+graph-unreachable weights. `torch.jit.freeze(traced.eval())` strips them:
+`model_traced.pt` **2224.5 MB → 2.6 MB/rank** (99.9%), N=32 W=12 artifact **53 GB → 27 GB**.
+Numerically exact: W=2 N=4 Gate 1 (GP-vs-1-tile dE=9.1e-13 eV, max|dF|=9.6e-16, cos=1.0;
+1-tile-vs-ASE dE=2.8e-11; AG=FD max 1.08e-8) and N=32 step-10 PE = **−879646.224481715 eV,
+dE = 0.000e+00** vs the opt1+opt3 baseline. Wall was **not** improved (248 s vs 235 s, within
+run variance; Loop 184.3 s vs 179.975 s): runtime load is dominated by the real per-chunk
+weights (4×554 MB/rank), which `torch.jit.load` still reads, not by the now-stripped dead
+top graph. Net: opt2 halves on-disk artifact size and frees HBM headroom with zero accuracy
+cost, but is not the path to a faster wall — remaining headroom is de-duplicating the
+per-rank chunk weights (they are identical across the 12 ranks).
+
+**opt4 (partial no-recompute) — validated, the next real wall win: 235 s → ~193 s (−18%),
+Loop 179.975 s → ~137 s (−24%).** Profiling the N=32 W=12 force call (engine `UMA_MP_PERF=1`,
+job 8784422) showed the split: graph/NL build 1.67 s (9%), forward 4.65 s (25%), **backward
+12.05 s (65%)**, force all_reduce 0.24 s (1.3%). Backward dominates because activation
+checkpointing (AC) *recomputes the forward* to get forces. New granular engine knobs in
+`block_context.cpp` bypass the checkpoint per op level and instead retain activations:
+`UMA_NO_RECOMPUTE` (all), `UMA_NO_RECOMPUTE_BLOCK`, `UMA_NO_RECOMPUTE_CHUNK`,
+`UMA_NO_RECOMPUTE_EDEG` (default OFF = checkpoint, unchanged). Findings:
+- Full `UMA_NO_RECOMPUTE=1` **OOMs** at N=32 W=12 (retains every chunk's SO2 + [Ec,25,25]
+  wigner: 62.5/64 GiB) — this is exactly why chunk AC exists.
+- **Partial `UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1`** (retain the node-sized
+  block + prologue activations, keep the memory-heavy chunk AC) **fits and is fast**: wall
+  190/196 s, Loop 136.2/137.4 s (two runs, jobs 8784500/8784623), bwd/call 12.05 s → 7.79 s.
+  Numerically equivalent (step-10 dE = 1.2e-10 / 4.7e-10 eV vs baseline) — retain vs
+  recompute yields the same gradient.
+
+Two experiments that did **not** help: (i) coarser AC `EDGE_AC_CHUNK=131072` (job 8784521)
+= 236 s / Loop 178.3 s, unchanged — recompute cost scales with total edge work, not chunk
+count; (ii) fewer tiles for N=32 (job 8784576): W=8 = 342 s, W=12 = 232 s — fewer tiles
+means more edges/tile and a strictly slower wall, so W=12 remains best for latency.
+
+**Recommended default for N=32 W=12 NVT:** opt1 (`EDGE_AC_CHUNK=65536`) + opt2 (freeze) +
+opt3 (XCCL env) + **opt4 (`UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1`)** → **~193 s,
+1.22× faster than the 235 s opt1+opt3 baseline and 1.34× faster than ASE-GP's 258 s**, FP64,
+numerically equivalent. Further headroom would require a selective per-chunk retain (retain a
+subset of chunks that fits HBM) to shave the remaining ~3 s/call of chunk recompute.
 
 † **ASE 12-tile = FairChem graph-parallel** (`ParallelMLIPPredictUnit` + XCCL, Ray, W=12;
 from project `hen`). ASE's driver measures **11 warm energy+force evaluations + cold
