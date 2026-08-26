@@ -50,14 +50,15 @@ Consistent to 5 significant figures → large-N results are physically correct.
 
 **10-step NVT@300 K (completed all 10 steps unless noted):**
 Path C is split into **C1 = pre-opt4** (full checkpointing) and **C2 = opt4** (partial
-no-recompute; §2a). opt4 is a 12-tile GP-path knob, so it is n/a for the single-tile rows.
+no-recompute; §2a). opt4 works on both the single-tile and 12-tile paths (same `block_context.cpp`
+knobs); it OOMs where HBM is tight (1-tile N=18, 12-tile N≥36).
 | Case | atoms | Path A (ASE) | Path C1 (pre-opt4) | Path C2 (opt4) |
 |---|--:|--:|--:|--:|
-| 1 tile, N=6 | 1,728 | 7.7 s | 25 s | n/a (1-tile) |
-| 1 tile, N=12 | 13,824 | 61.2 s | 117 s | n/a (1-tile) |
-| 1 tile, N=18 | 46,656 | 383.3 s | NVT OOM (single-point OK) | n/a (1-tile) |
+| 1 tile, N=6 | 1,728 | 7.7 s | 20 s (Loop 10.9 s) | **16 s** (Loop 8.3 s) |
+| 1 tile, N=12 | 13,824 | 61.2 s | 110 s (Loop 87.0 s) | **89 s** (Loop 65.8 s) |
+| 1 tile, N=18 | 46,656 | 383.3 s | 364 s (Loop 299.0 s) | **OOM** (opt4 exceeds HBM) |
 | **12 tiles, N=18** | 46,656 | **90 s**† | **70 s** (Loop 30.9 s) | **34 s** (Loop 23.2 s) |
-| **12 tiles, N=32** | 262,144 | **258 s**† | **235 s** ‖ | **193 s** ‖ |
+| **12 tiles, N=32** | 262,144 | **258 s**† | **235 s**\* | **193 s**\* |
 | **12 tiles, N=34** | 314,432 | n/a (ASE-GP ceiling N=32) | **299 s** (Loop 218.4 s) | **210 s** (Loop 166.9 s) |
 | **12 tiles, N=36** | 373,248 | n/a (ASE-GP ceiling N=32) | **343 s** (Loop 267.4 s) | **OOM** (opt4 exceeds HBM) |
 | **12 tiles, N=38** | 438,976 | n/a (ASE-GP ceiling N=32) | **408 s** (Loop 317.6 s) | **OOM** (opt4 exceeds HBM) |
@@ -66,12 +67,15 @@ C1/C2 walls are the current optimized stack (opt1+opt2+opt3; C2 adds opt4). All 
 rows completed the full 10-step NVT with **identical step-10 energy** (N=18 −155753.154048;
 N=32 −879646.224482; N=34 −1,055,737.433775; N=36 −1,253,109.42; N=38 −1,474,399.12).
 **opt4 (C1→C2) gain by size** (Loop / wall):
-N=18: 30.9→23.2 s (**−25%**) / 70→34 s; N=32: 179.975→137 s (**−24%**) / 235→193 s;
-N=34: 218.4→166.9 s (**−24%**) / 299→210 s.
-**C2 memory ceiling: N=34 (fits) → N=36 (OOM).** opt4 fits at N≤34 but OOMs at N=36
-(`UR_RESULT_ERROR_OUT_OF_RESOURCES`, job 8785022) and N=38 — use C1 for N≥36.
-The old N=18 = 88 s was the pre-opt-stack baseline; the current C1 is 70 s.
-Jobs: N=18 8784969, N=34 8785293, N=36 8785022 (each runs both C1+C2).
+- 1-tile: N=6 10.9→8.3 s (**−24%**) / 20→16 s; N=12 87.0→65.8 s (**−24%**) / 110→89 s;
+  N=18 OOM (1-tile memory ceiling; single-tile N=18 NVT is tight even for C1).
+- 12-tile: N=18 30.9→23.2 s (**−25%**) / 70→34 s; N=32 179.975→137 s (**−24%**) / 235→193 s;
+  N=34 218.4→166.9 s (**−24%**) / 299→210 s.
+opt4 consistently gives **~−24% Loop** wherever it fits. **C2 ceiling by config:**
+1-tile: fits N≤12, OOMs N=18; 12-tile: fits N≤34, OOMs N≥36
+(`UR_RESULT_ERROR_OUT_OF_RESOURCES`, job 8785022). Use C1 outside those ranges.
+The old N=18 12-tile C1 = 88 s was the pre-opt-stack baseline; the current C1 is 70 s.
+Jobs: 1-tile N=6/12/18 8785403; 12-tile N=18 8784969, N=34 8785293, N=36 8785022.
 
 ---
 
