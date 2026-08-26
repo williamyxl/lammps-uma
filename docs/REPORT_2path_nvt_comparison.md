@@ -4,7 +4,7 @@
 - **A. ASE FairChem** — `FAIRChemCalculator` + `NoseHooverChainNVT` (tchain=3, tdamp=0.1 ps, dt=1 fs), single Python process (single-tile) or `ParallelMLIPPredictUnit` + XCCL (ASE-GP, 12-tile). FP64.
 - **C. Our LAMMPS `pair_style uma`** — native C++/LibTorch, TorchScript-traced UMA, native XCCL graph-parallel on multiple tiles. No Python at runtime, FP64. Two engine execution paths that differ **only in the backward pass** (identical forward, identical energy graph):
   - **C1 = pre-opt4 (full activation checkpointing).** Every message-passing block, edge-chunk, and the edge-degree prologue is wrapped in a C++ recompute Function: the forward runs under `NoGradGuard` (no activations retained) and the **backward re-runs the forward** to get forces. Minimum HBM; works at all sizes up to the N=38 ceiling. Config: opt1 (`EDGE_AC_CHUNK=65536`) + opt2 (freeze) + opt3 (XCCL env), no `UMA_NO_RECOMPUTE_*`.
-  - **C2 = opt4 (partial no-recompute).** The **block + edge-degree** checkpoints are bypassed — those sub-modules run directly under autograd so their (node-sized) activations are **retained** and the backward does **not** recompute them; the memory-heavy **edge-chunk** checkpoint is kept. Config: C1 + `UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1`. Faster backward, higher HBM — only usable where memory has headroom (fits ≤ N=32 on 12 tiles; **OOMs at N≥36**).
+  - **C2 = opt4 (partial no-recompute).** The **block + edge-degree** checkpoints are bypassed — those sub-modules run directly under autograd so their (node-sized) activations are **retained** and the backward does **not** recompute them; the memory-heavy **edge-chunk** checkpoint is kept. Config: C1 + `UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1`. Faster backward, higher HBM — only usable where memory has headroom (fits ≤ N=34 on 12 tiles; **OOMs at N≥36**).
 
 *(FC LAMMPS `fix external` was dropped — no such FairChem/UMA component exists, and it would be engine-equivalent to path A.)*
 
@@ -58,17 +58,20 @@ no-recompute; §2a). opt4 is a 12-tile GP-path knob, so it is n/a for the single
 | 1 tile, N=18 | 46,656 | 383.3 s | NVT OOM (single-point OK) | n/a (1-tile) |
 | **12 tiles, N=18** | 46,656 | **90 s**† | **70 s** (Loop 30.9 s) | **34 s** (Loop 23.2 s) |
 | **12 tiles, N=32** | 262,144 | **258 s**† | **235 s** ‖ | **193 s** ‖ |
+| **12 tiles, N=34** | 314,432 | n/a (ASE-GP ceiling N=32) | **299 s** (Loop 218.4 s) | **210 s** (Loop 166.9 s) |
 | **12 tiles, N=36** | 373,248 | n/a (ASE-GP ceiling N=32) | **343 s** (Loop 267.4 s) | **OOM** (opt4 exceeds HBM) |
 | **12 tiles, N=38** | 438,976 | n/a (ASE-GP ceiling N=32) | **408 s** (Loop 317.6 s) | **OOM** (opt4 exceeds HBM) |
 
 C1/C2 walls are the current optimized stack (opt1+opt2+opt3; C2 adds opt4). All 12-tile C1/C2
-rows completed the full 10-step NVT with **identical step-10 energy** (N=18 −155753.154048 for
-both C1 and C2; N=32 −879646.224482; N=36 −1,253,109.42; N=38 −1,474,399.12). **opt4 (C1→C2)
-gain by size:** N=18 Loop 30.9→23.2 s (**−25%**), wall 70→34 s; N=32 Loop 179.975→137 s
-(**−24%**), wall 235→193 s. **C2 memory ceiling is between N=32 and N=36:** opt4 fits at N=32
-but OOMs at **N=36** (`UR_RESULT_ERROR_OUT_OF_RESOURCES`, job 8785022) and N=38 — for N≥36 use
-C1. The old N=18 = 88 s figure was the pre-opt-stack baseline; the current C1 is 70 s.
-Jobs: N=18 8784969, N=36 8785022 (both C1+C2 in one job).
+rows completed the full 10-step NVT with **identical step-10 energy** (N=18 −155753.154048;
+N=32 −879646.224482; N=34 −1,055,737.433775; N=36 −1,253,109.42; N=38 −1,474,399.12).
+**opt4 (C1→C2) gain by size** (Loop / wall):
+N=18: 30.9→23.2 s (**−25%**) / 70→34 s; N=32: 179.975→137 s (**−24%**) / 235→193 s;
+N=34: 218.4→166.9 s (**−24%**) / 299→210 s.
+**C2 memory ceiling: N=34 (fits) → N=36 (OOM).** opt4 fits at N≤34 but OOMs at N=36
+(`UR_RESULT_ERROR_OUT_OF_RESOURCES`, job 8785022) and N=38 — use C1 for N≥36.
+The old N=18 = 88 s was the pre-opt-stack baseline; the current C1 is 70 s.
+Jobs: N=18 8784969, N=34 8785293, N=36 8785022 (each runs both C1+C2).
 
 ---
 
@@ -104,7 +107,7 @@ noise, far below the parity floor. Both pass full per-atom parity vs ASE-GP (§1
 | graph+NL / force-call | 1.67 s | 1.67 s | 0% |
 | force all_reduce / call | 0.24 s | 0.24 s | 0% |
 | peak HBM headroom @ N=32/12t | ample | fits (higher) | — |
-| **max N @ 12 tiles (NVT)** | **N=38** (408 s) | **N=32** (OOMs at N≥36) | capacity cost |
+| **max N @ 12 tiles (NVT)** | **N=38** (408 s) | **N=34** (OOMs at N≥36) | capacity cost |
 
 **Performance verdict:** opt4 alone buys **−24% Loop / −18% wall at N=32** by removing the
 block+prologue backward recompute (bwd 12.05 s → 7.79 s). The forward, graph, and collective
@@ -112,13 +115,13 @@ costs are untouched. jobs: C1 8782977; C2 8784500 / 8784623; profile 8784422.
 
 ### Which path to use
 
-- **N ≤ 32 on 12 tiles → C2 (opt4).** Same accuracy, 1.22–1.31× faster (measured N=18 and N=32).
+- **N ≤ 34 on 12 tiles → C2 (opt4).** Same accuracy, ~−24% Loop (measured N=18, N=32, N=34).
 - **N ≥ 36 (up to the N=38 ceiling) → C1 (pre-opt4).** C2's retained activations OOM at **N=36**
   (job 8785022, `UR_RESULT_ERROR_OUT_OF_RESOURCES`) and N=38 (job 8784742: needed 3.77 GiB,
   3.13 GiB free); C1 is the only path that fits. C1 at N=36 = 343 s, N=38 = 408 s (Loop 317.6 s),
   ~1.96× faster than the original 800 s baseline via opt1+2+3.
-- **C2 memory ceiling: between N=32 (fits) and N=36 (OOM).** Rule of thumb:
-  `UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1` for N ≤ 32 on 12 tiles; leave it off (C1)
+- **C2 memory ceiling: N=34 fits, N=36 OOMs.** Rule of thumb:
+  `UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1` for N ≤ 34 on 12 tiles; leave it off (C1)
   for N ≥ 36.
 
 ---
@@ -196,7 +199,7 @@ is noted per row because opt4's retain-activations mode is N-limited (see §2):
 |--:|--:|--:|--:|:--|--:|--:|
 | 18 | 46,656 | 88 s | **34 s** (C2) / 70 s (C1) | **C2** (opt4 fits) | 287.0 | −155,753 |
 | 32 | 262,144 | 450 s | **193 s** (C2) / 235 s (C1) | **C2** (opt4) | 285.4 | −879,646 |
-| 34 | 314,432 | 534 s | (re-measure pending) | C1 (C2 fit untested) | 285.2 | −1,055,737 |
+| 34 | 314,432 | 534 s | **210 s** (C2) / 299 s (C1) | **C2** (opt4 fits) | 285.2 | −1,055,737 |
 | 36 | 373,248 | 666 s | **343 s** (C1) | **C1** (C2/opt4 OOMs) | 285.3 | −1,253,109 |
 | 38 | 438,976 | 800 s | **408 s** (C1, Loop 317.6 s) | **C1** (C2/opt4 OOMs) | 285.2 | −1,474,399 |
 | 40 | 512,000 | OOM | OOM | — | — | OOM |
@@ -226,10 +229,10 @@ Single-point (`run 0`) walltimes for reference (orig baseline): N=32 54 s, N=34 
 - **Two LAMMPS execution paths (identical accuracy, §2a):** **C1** = full checkpointing
   (opt1+opt2+opt3), fits to the N=38 ceiling; **C2** = C1 + opt4 partial no-recompute
   (`UMA_NO_RECOMPUTE_BLOCK/EDEG`), which skips the block+prologue backward recompute for
-  a **−24% Loop / −18% wall** gain but needs more HBM (≤ N=32 on 12 tiles).
+  a **~−24% Loop** gain but needs more HBM (fits N≤34, OOMs N≥36 on 12 tiles).
 - **Throughput:** N=32 W=12 NVT **450 s → C1 235 s → C2 193 s** (C2 now 1.34× faster than
   ASE-GP's 258 s); N=38 W=12 **800 s → C1 408 s** (C2/opt4 OOMs at N=38). opt2 also cut
   on-disk artifacts 53 GB → 27 GB. C1 and C2 are numerically equivalent (step-10 dE ≤ ~1e-9
   eV vs the original baseline).
-- **Not yet done:** re-measure N=18/34/36 with C1/C2 (and test whether C2 fits at N=34/36);
-  a warm, load-excluded steps/s benchmark; selective per-chunk retain to extend C2 to N≳36.
+- **Not yet done:** re-measure N=18 C1 vs old-baseline 88 s; a warm, load-excluded steps/s
+  benchmark; selective per-chunk retain to extend C2 beyond the current N=34 ceiling.
