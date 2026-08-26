@@ -50,7 +50,8 @@ Consistent to 5 significant figures → large-N results are physically correct.
 | 1 tile, N=12 | 13,824 | 61.2 s | 117 s |
 | 1 tile, N=18 | 46,656 | 383.3 s | NVT OOM (single-point OK) |
 | **12 tiles, N=18** | 46,656 | **90 s**† | **88 s** |
-| **12 tiles, N=32** | 262,144 | **258 s**† | **235 s (optimized)** ‖ |
+| **12 tiles, N=32** | 262,144 | **258 s**† | **193 s (opt1+2+3+4)** ‖ |
+| **12 tiles, N=38** | 438,976 | n/a (ASE-GP ceiling N=32) | **408 s (opt1+2+3)** |
 
 ‖ **N=32 optimized 235 s** (job 8782977) — **beats ASE-GP's 258 s**, FP64, energy
 bit-identical to the 450 s baseline. Two accuracy-neutral optimizations: (opt3)
@@ -102,6 +103,14 @@ opt3 (XCCL env) + **opt4 (`UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1`)** 
 numerically equivalent. Further headroom would require a selective per-chunk retain (retain a
 subset of chunks that fits HBM) to shave the remaining ~3 s/call of chunk recompute.
 
+**opt4 memory ceiling — it is N-dependent.** opt4 retains the node-sized block + prologue
+activations, which grow with N, so it is only usable where HBM has headroom. Measured at
+W=12: opt4 fits and helps at **N=32** (retains node-sized activations comfortably) but
+**OOMs at N=38** (job 8784742: "Tried to allocate 3.77 GiB, 3.13 GiB free" — 54.4/64 GiB
+already held). So for the largest systems (N=38, the 12-tile ceiling) opt4 must be OFF and
+full checkpointing (opt1+opt2+opt3) is the operating point. Rule of thumb: enable opt4 up to
+~N=32/12 tiles; leave it off (checkpoint) for N≳36.
+
 † **ASE 12-tile = FairChem graph-parallel** (`ParallelMLIPPredictUnit` + XCCL, Ray, W=12;
 from project `hen`). ASE's driver measures **11 warm energy+force evaluations + cold
 load** (= the force calls of a 10-step NVT: run 0 + 10 steps), not a literal
@@ -116,30 +125,41 @@ on energy** — N=18 both −157578.531115; N=32 −885377.06004 (ASE) vs −885
   wall includes per-rank **cold model load** — so small-N 1-tile Path C is
   load-dominated, not a fair per-step number.
 - 12-tile: both include cold load. At **N=18 they are ~equal (90 s ASE-GP vs 88 s
-  ours)**. At **N=32, ASE-GP (258 s) is currently faster than ours (450 s)** — our
-  per-chunk activation-checkpointing does extra recompute and our per-layer XCCL
-  path is not yet tuned, whereas hen's ASE-GP path is optimized (`ef_mean` warm).
-  This is expected for a correctness-first C++ port; **throughput optimization
-  (esp. checkpoint recompute + collective tuning) is the clear next step.**
-- This comparison establishes **correctness + capacity**; a like-for-like warm,
-  load-excluded steps/s benchmark is future work.
+  ours)**. At **N=32, our optimized stack (193 s) now beats ASE-GP (258 s) by 1.34×**
+  after opt1 (coarser AC chunk) + opt3 (XCCL tuning) + opt4 (skip block/prologue
+  recompute). The original correctness-first port was 450 s; the throughput
+  optimization called out here as "the clear next step" has now been done.
+- This comparison establishes **correctness + capacity + optimized throughput**; a
+  like-for-like warm, load-excluded steps/s benchmark is still future work.
 
 ---
 
 ## 3. Capacity / max-N — Path C `pair_style uma`, 12 tiles, 10-step NVT@300 K
 
 Single-crystal NaCl across all 12 XPU tiles (native XCCL graph-parallel, FP64).
-**All rows below completed the full 10-step NVT** (step-10 T ≈ 285 K, energy-conserving):
-| N | atoms | 10-step NVT wall | step-10 T (K) | step-10 PE (eV) |
-|--:|--:|--:|--:|--:|
-| 18 | 46,656 | 88 s | 287.0 | −155,753 |
-| 32 | 262,144 | 450 s | 285.4 | −879,646 |
-| 34 | 314,432 | 534 s | 285.2 | −1,055,737 |
-| 36 | 373,248 | 666 s | 285.3 | −1,253,109 |
-| 38 | 438,976 | 800 s | 285.2 | −1,474,399 |
-| 40 | 512,000 | — | — | OOM |
+**All rows below completed the full 10-step NVT** (step-10 T ≈ 285 K, energy-conserving).
+The **"orig baseline"** column is the first correctness-first port (`edge_ac_chunk=16384`,
+no opt2/opt3/opt4). The **"current best"** column is the optimized stack; the config used
+is noted per row because opt4's retain-activations mode is N-limited (see §2):
+| N | atoms | orig baseline wall | current best wall | best config | step-10 T (K) | step-10 PE (eV) |
+|--:|--:|--:|--:|:--|--:|--:|
+| 18 | 46,656 | 88 s | (re-measure pending) | opt1+2+3+4 | 287.0 | −155,753 |
+| 32 | 262,144 | 450 s | **193 s** | opt1+2+3+**4** | 285.4 | −879,646 |
+| 34 | 314,432 | 534 s | (re-measure pending) | opt1+2+3(+4?) | 285.2 | −1,055,737 |
+| 36 | 373,248 | 666 s | (re-measure pending) | opt1+2+3 | 285.3 | −1,253,109 |
+| 38 | 438,976 | 800 s | **408 s** (Loop 317.6 s) | opt1+2+3 (opt4 OOMs) | 285.2 | −1,474,399 |
+| 40 | 512,000 | OOM | OOM | — | — | OOM |
 
-Single-point (`run 0`) walltimes for reference: N=32 54 s, N=34 57 s, N=36 88 s, N=38 77 s.
+- **N=32 current best = 193 s** (opt1+opt2+opt3+opt4; jobs 8784500/8784623), 2.33× faster
+  than the 450 s original baseline and 1.34× faster than ASE-GP (258 s), step-10 PE
+  −879,646.224 (dE≈1e-10 vs baseline).
+- **N=38 current best = 408 s** (Loop 317.6 s; opt1+opt2+opt3, opt4 disabled because it
+  OOMs at N=38 — job 8784742), 1.96× faster than the 800 s original baseline, full 10-step
+  NVT, step-10 PE −1,474,399.12 (matches the original baseline energy). N=40 still OOMs.
+- N=18/34/36 current-best walls are not yet re-measured with the optimized stack (their
+  original-baseline numbers stand); N=38 and N=32 are the re-measured endpoints.
+
+Single-point (`run 0`) walltimes for reference (orig baseline): N=32 54 s, N=34 57 s, N=36 88 s, N=38 77 s.
 
 - **12-tile single-crystal ceiling = N=38 (438,976 atoms)**, verified with **full 10-step NVT** (not just single point); N=40 OOMs.
 - **This exceeds the FairChem/ASE graph-parallel reference (N=32, 262,144 atoms)** — vanilla single-tile ASE OOMs at N=32, and our per-chunk C++ checkpointing reaches larger single-crystal sizes than the Python GP reference, with full MD dynamics.
@@ -152,4 +172,9 @@ Single-point (`run 0`) walltimes for reference: N=32 54 s, N=34 57 s, N=36 88 s,
 - **Correctness:** `pair_style uma` = ASE FairChem to machine precision (ΔE ~1e-9 meV/atom, forces ~1e-14, cos=1.0), verified at N=6/12/18 (1 tile) and N=18 (12 tiles); AG=FD passes.
 - **Capacity:** 1 tile → 46,656 atoms; 12 tiles → **full 10-step NVT verified up to N=38 (438,976 atoms)** (N=18/32/34/36/38); N=40 OOMs — beyond the Python reference (N=32).
 - **Known limitation:** N-specific AC shard chunk-count can drift by 1 under MD atom motion (hit at N=24 NVT only; single-point OK); single-tile N=18 NVT is memory-tight for the traced path (use 12 tiles). Both fixable (edge-padding to a fixed chunk multiple).
-- **Not yet done:** optimized throughput benchmark (warm, load-excluded); the current walltimes include cold-load and are for capacity/correctness, not peak MD performance.
+- **Throughput (optimized stack):** N=32 W=12 NVT **450 s → 193 s** (opt1+opt2+opt3+opt4),
+  now 1.34× faster than ASE-GP (258 s); N=38 W=12 **800 s → 408 s** (opt1+opt2+opt3; opt4
+  OOMs at N=38). opt2 also cut on-disk artifacts 53 GB → 27 GB. All numerically equivalent
+  (step-10 dE ≤ ~1e-9 eV vs the original baseline).
+- **Not yet done:** re-measure N=18/34/36 with the optimized stack; a warm, load-excluded
+  steps/s benchmark; selective per-chunk retain to extend opt4's speedup to N≳36.
