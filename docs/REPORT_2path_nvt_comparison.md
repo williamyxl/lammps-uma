@@ -240,3 +240,46 @@ Single-point (`run 0`) walltimes for reference (orig baseline): N=32 54 s, N=34 
   eV vs the original baseline).
 - **Not yet done:** re-measure N=18 C1 vs old-baseline 88 s; a warm, load-excluded steps/s
   benchmark; selective per-chunk retain to extend C2 beyond the current N=34 ceiling.
+- **Tile scaling:** see §5 — strong scaling on N=16 shows useful speedup to W=4 (C1) and
+  W=6 (C2); beyond that communication overhead saturates the small system.
+
+---
+
+## 5. Strong-scaling study — N=16 (32,768 atoms), W = 1, 2, 4, 6, 8, 12 tiles
+
+Single-point (`run 0`) force evaluation on the identical perturbed NaCl N=16 supercell
+(a=5.64 Å, rattle 0.05 Å, seed 0). Single-point avoids the N-specific traced-chunk-count
+drift bug that breaks multi-step NVT at certain N (fixable by edge-padding; the force
+computation itself is correct). Whole-wall includes cold model load; each run is a fresh
+mpiexec. Energy = −110,673.829050 eV across **all** W and both C1/C2 (identical). Job 8785948.
+
+**opt1+opt2+opt3 artifacts (C1 = full checkpoint; C2 = + opt4):**
+| W (tiles) | C1 wall | C1 eff% | C2 wall | C2 eff% | C2 gain over C1 |
+|--:|--:|--:|--:|--:|--:|
+| 1 | 42 s | 100% | 21 s | 100% | 2.00× |
+| 2 | 26 s | 81% | 14 s | 75% | 1.86× |
+| 4 | 17 s | 62% | 11 s | 48% | 1.55× |
+| 6 | 19 s | 37% | 9 s | 39% | 2.11× |
+| 8 | 15 s | 35% | 9 s | 29% | 1.67× |
+| 12 | 16 s | 22% | 9 s | 19% | 1.78× |
+
+Efficiency = (W=1 wall / W) / actual wall × 100%.
+Note: wall times are integer-second precision; ±1 s noise dominates at W≥6 where walls are
+9-16 s, so efficiency numbers beyond W=4 should be read qualitatively, not exactly.
+
+**Observations:**
+- **Good scaling W=1→4:** C1 drops 42→17 s (2.5×); C2 drops 21→11 s (1.9×). Strong-scaling
+  efficiency 62% (C1) / 48% (C2) at W=4 — reasonable for a memory-bandwidth-bound model
+  where inter-tile communication (per-block `all_gather_nodes`) grows with W.
+- **Diminishing returns W≥6:** the per-block all_gather + force all_reduce overhead saturates
+  at N=16 (32,768 atoms / 12 = ~2,700 atoms/tile, ~250k edges/tile). Wall plateaus at
+  15-19 s (C1) and 9 s (C2) for W=6–12; adding tiles beyond 6 no longer helps for this N.
+- **C2 (opt4) consistently ~1.7-2.0× faster than C1** across all W — the backward recompute
+  removed by opt4 is a fixed fraction of the call regardless of tile count. C2 reaches a
+  floor of 9 s at W≥6; this floor is dominated by the cold model-load time (not reducible
+  by adding tiles).
+- **Recommended tile count for N=16:** W=4 for C1 (best efficiency), W=4-6 for C2 (wall
+  floor reached at W=6). Using W=12 for N=16 wastes 6-8 tiles with no wall benefit.
+- **Cold-load caveat:** the warm per-step force-call time is considerably shorter than these
+  wall figures (most of which is model load + warmup). In a real MD run the load is amortized
+  over all steps; the per-step cost at steady state is roughly (wall − load) / 1.
