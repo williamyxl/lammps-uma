@@ -1,0 +1,43 @@
+# Multi-node spatial domain-decomposition single-point (Phase A, deep halo k=1).
+#
+# Each MPI rank owns a LAMMPS subdomain and evaluates the single-tile UMA
+# Predictor over its owned+ghost atoms. LAMMPS supplies ghosts to the full model
+# receptive field via `comm_modify cutoff` = num_layers * cutoff = 4 * 6 = 24 A.
+# Forces are kept per owned atom (exact at k=1). Enabled by env UMA_DD=1.
+#
+#   UMA_DD=1 mpiexec -n <ranks> lmp -in in.dd_sp -var artifact /path/to/artifact
+#
+# artifact is the SINGLE-TILE artifact (model_traced.pt + chunk/block/edgedeg),
+# NOT the GP w*/r* tree: every rank runs the whole single-tile model on its slab.
+# Element order: type 1 = Na, type 2 = Cl.
+
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+
+read_data       ${datafile}
+mass            1 22.989769         # Na
+mass            2 35.453            # Cl
+
+# Single-tile predictor on each rank (devices 1). DD is selected by UMA_DD=1 in
+# the environment, not by a pair_style keyword, so the pair_coeff line is the
+# same single-tile form. The engine sees one XPU tile per rank (ZE_AFFINITY_MASK).
+pair_style      uma precision double devices 1
+pair_coeff      * * ${artifact} Na Cl
+
+# Deep halo: ghosts must reach the full receptive field (num_layers*cutoff=24 A).
+# comm cutoff = 24.0 (ghost shell); neighbor skin small (single point, no drift).
+comm_modify     cutoff 24.0 vel no
+neighbor        0.5 bin
+neigh_modify    delay 0 every 1 check yes
+
+thermo          1
+thermo_style    custom step temp pe etotal press fmax
+thermo_modify   norm no format float %.16e
+
+# First frame: single point + per-atom force dump sorted by id (for ASE parity).
+dump            f0 all custom 1 forces_step0.dump id type x y z fx fy fz
+dump_modify     f0 sort id format float %.16e
+run             0
+undump          f0

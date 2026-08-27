@@ -58,6 +58,25 @@ class PairUMA : public Pair {
   // ext_cell_offsets_ and returns E.
   int64_t build_ext_graph(int nlocal);
 
+  // --- Multi-node spatial domain decomposition (Phase A, deep halo k=1) ------
+  // Distinct from the mn_active GP-over-MPI path above. Under DD each rank owns
+  // a LAMMPS subdomain; LAMMPS supplies ghosts out to the model receptive field
+  // (num_layers * cutoff, set via `comm_modify cutoff`). The engine graph spans
+  // owned+ghost atoms as first-class nodes; forces are kept for owned atoms
+  // only. Ghosts carry absolute unwrapped coords, so edge_vec = x[j]-x[i]
+  // directly -> no cell offsets, no orthorhombic-only restriction.
+  // Enabled by env UMA_DD=1. Returns E; fills dd_edge_index_ / dd positions.
+  void run_compute_dd(int eflag, int vflag);
+  int64_t build_dd_graph(int nall);        // edges among owned+ghost within cutoff
+  void mole_composition_allreduce();        // owned-only per-Z counts, cross-rank
+  bool dd_active_;                           // UMA_DD=1
+  int64_t dd_edge_count_;
+  std::vector<int64_t> dd_edge_index_;      // [2,E] row0=neighbor row1=center
+  std::vector<double> dd_cell_offsets_;     // [E,3] zeros (ghosts are absolute)
+  std::vector<double> dd_pos_;              // [nall,3] owned+ghost, boxlo-shifted
+  std::vector<int> dd_z_;                   // [nall] atomic numbers owned+ghost
+  std::vector<double> dd_force_;            // [nall,3] forces for all graph nodes
+
   std::string artifact_dir;
   int *map;    // map type -> atomic number (0 unused)
   double cutoff;

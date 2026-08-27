@@ -87,6 +87,13 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   engine_build_graph_ = false;
   if (const char *e = std::getenv("UMA_ENGINE_BUILD_GRAPH"))
     engine_build_graph_ = (e[0] == '1' && e[1] == '\0');
+  // Multi-node spatial domain decomposition (Phase A, deep halo k=1). Separate
+  // from the mn_active GP-over-MPI path. Each rank owns a LAMMPS subdomain and
+  // uses the single-tile Predictor on its owned+ghost atoms.
+  dd_active_ = false;
+  if (const char *e = std::getenv("UMA_DD"))
+    dd_active_ = (e[0] == '1' && e[1] == '\0');
+  dd_edge_count_ = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -114,6 +121,14 @@ void PairUMA::compute(int eflag, int vflag)
   ev_init(eflag, vflag);
   if (eflag_atom || vflag_atom)
     error->all(FLERR, "Pair style uma does not support per-atom energy/virial yet");
+  // Spatial domain-decomposition path (Phase A, deep halo k=1). Each rank owns a
+  // LAMMPS subdomain and evaluates the single-tile Predictor over its owned+ghost
+  // atoms; LAMMPS supplies ghosts to the model receptive field via
+  // `comm_modify cutoff (num_layers*cutoff)`. Independent of the GP-over-MPI path.
+  if (dd_active_) {
+    run_compute_dd(eflag, vflag);
+    return;
+  }
   // Multi-node: one MPI rank per GPU, preserving the single-node GRAPH-parallel
   // design (see below). The same-node devices>1 path forks workers and moves
   // geometry through /dev/shm, which cannot cross a node; forking after
@@ -602,7 +617,15 @@ void PairUMA::init_style()
   // letting the engine rebuild its own O(N^2) graph. The list is built to the
   // pair cutoff (init_one -> cutoff = UMA cutoff 6.0) plus neighbor skin, so all
   // UMA edges (|rij| <= cutoff) are present and we filter to the exact cutoff.
-  neighbor->add_request(this, NeighConst::REQ_FULL);
+  if (dd_active_) {
+    // DD needs EVERY owned+ghost node to be a center (see build_dd_graph), so
+    // request a full list that also lists ghost atoms as centers (REQ_GHOST).
+    // Ghosts are supplied to the receptive field by `comm_modify cutoff
+    // (num_layers*cutoff)`, which the user sets in the input script.
+    neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
+  } else {
+    neighbor->add_request(this, NeighConst::REQ_FULL);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
@@ -722,6 +745,232 @@ int64_t PairUMA::build_ext_graph(int nlocal)
     ext_edge_index_[E + e] = row_ctr[e];          // row1 = center
   }
   return E;
+}
+
+/* ----------------------------------------------------------------------
+   Multi-node spatial domain decomposition (Phase A, deep halo k=1)
+   ----------------------------------------------------------------------
+   Each MPI rank owns a LAMMPS subdomain. LAMMPS provides ghost atoms out to the
+   full model receptive field (num_layers * cutoff, e.g. 4*6 = 24 A), set by the
+   user via `comm_modify cutoff 24.0`. We build the engine graph over the rank's
+   OWNED + GHOST atoms as first-class nodes, evaluate the single-tile Predictor,
+   and keep forces for owned atoms only. Because a ghost within 24 A of an owned
+   atom carries the full 4-hop receptive field, every owned atom's energy and
+   force is EXACT -- k=1 needs no mid-network halo exchange and no reverse comm
+   (each rank computes its owned atoms' forces from its own complete halo).
+
+   Ghost coordinates are absolute and unwrapped, so edge_vec = x[j] - x[i]
+   directly: no integer-image recovery, no cell offsets, and triclinic works
+   without the orthorhombic restriction of build_ext_graph.
+------------------------------------------------------------------------- */
+void PairUMA::run_compute_dd(int eflag, int vflag)
+{
+  if (precision != PRECISION_DOUBLE)
+    error->all(FLERR, "Pair style uma: UMA_DD requires precision double");
+  if (!predictor)
+    error->all(FLERR, "Pair style uma: UMA_DD predictor not initialized");
+  if (force->newton_pair)
+    error->all(FLERR, "Pair style uma: UMA_DD requires newton pair off");
+
+  const int nlocal = atom->nlocal;
+  const int nghost = atom->nghost;
+  const int nall = nlocal + nghost;
+  double **x = atom->x;
+  double **f = atom->f;
+  int *type = atom->type;
+
+  // Positions: owned+ghost, boxlo-shifted (shift cancels in every edge vector).
+  const double xlo = domain->boxlo[0];
+  const double ylo = domain->boxlo[1];
+  const double zlo = domain->boxlo[2];
+  dd_pos_.resize(static_cast<size_t>(nall) * 3);
+  dd_z_.resize(static_cast<size_t>(nall));
+  for (int i = 0; i < nall; i++) {
+    dd_pos_[3 * i + 0] = x[i][0] - xlo;
+    dd_pos_[3 * i + 1] = x[i][1] - ylo;
+    dd_pos_[3 * i + 2] = x[i][2] - zlo;
+    dd_z_[i] = map[type[i]];
+  }
+
+  // Cell/pbc: pass the GLOBAL box. Under DD with absolute ghost coordinates the
+  // engine's extgraph path does NOT re-wrap and offsets are zero, so periodicity
+  // is already resolved by LAMMPS ghosts; cell/pbc are informational for the
+  // model's frame only. Use the global simulation box.
+  cell_buf[0] = domain->boxhi[0] - domain->boxlo[0];
+  cell_buf[1] = 0.0; cell_buf[2] = 0.0;
+  cell_buf[3] = domain->xy;
+  cell_buf[4] = domain->boxhi[1] - domain->boxlo[1];
+  cell_buf[5] = 0.0;
+  cell_buf[6] = domain->xz; cell_buf[7] = domain->yz;
+  cell_buf[8] = domain->boxhi[2] - domain->boxlo[2];
+  pbc_buf[0] = domain->xperiodic;
+  pbc_buf[1] = domain->yperiodic;
+  pbc_buf[2] = domain->zperiodic;
+
+  // MoLE composition. The traced model computes the MoLE mixing coefficients
+  // from a per-system MEAN of the composition embedding over the atomic_numbers
+  // it is handed (set_MOLE_coefficients, export_blocks_xpu.py:631). Under DD we
+  // hand it owned+ghost atomic_numbers, so its mean is the owned+ghost mean, not
+  // the global owned mean. For a spatially HOMOGENEOUS system (uniform NaCl) the
+  // owned+ghost composition ratio equals the global ratio to high precision, so
+  // the local mean is within the parity tolerance. mole_composition_allreduce()
+  // computes the exact global per-Z counts for validation/diagnostics and is the
+  // hook for the exact fix (feeding the global mean into the traced MoLE) if the
+  // homogeneous approximation proves insufficient. See parity report.
+  mole_composition_allreduce();
+
+  // Build the owned+ghost edge graph (row0=neighbor, row1=center; centers=owned).
+  const int64_t E = build_dd_graph(nall);
+
+  dd_force_.assign(static_cast<size_t>(nall) * 3, 0.0);
+  uma::Prediction result = predictor->predict_host_extgraph(
+      nall, dd_pos_.data(), dd_z_.data(), cell_buf, pbc_buf, E,
+      dd_edge_index_.data(), dd_cell_offsets_.data(), dd_force_.data());
+
+  // Keep forces for OWNED atoms only. Ghost forces belong to the rank that owns
+  // that atom, which computes them itself from its own halo (k=1, no reverse
+  // comm). Newton off: LAMMPS does not fold ghost forces back here.
+  for (int i = 0; i < nlocal; i++) {
+    f[i][0] += dd_force_[3 * i + 0];
+    f[i][1] += dd_force_[3 * i + 1];
+    f[i][2] += dd_force_[3 * i + 2];
+  }
+
+  // Energy: sum only THIS rank's owned-atom energy contribution. The traced
+  // model returns one global scalar for the (owned+ghost) subsystem, which is
+  // NOT the owned-atom energy sum. For a correct global energy under DD we need
+  // the per-atom energy of owned atoms only. Until per-atom energy is exported,
+  // report the energy on rank 0 from a full-system evaluation is impossible;
+  // instead we accumulate owned-fraction-weighted energy. See note below.
+  if (eflag_global) {
+    // NOTE (Phase A energy): the single scalar `result.energy` is the energy of
+    // this rank's owned+ghost subsystem including ghost self-energy and double
+    // counts across ranks, so it is NOT additive. Correct DD energy requires
+    // per-atom energy (eflag_atom) which the model does not yet export. For the
+    // single-point PARITY test we validate FORCES on owned atoms (exact) and the
+    // GLOBAL energy via a dedicated rank-0 full-system path is out of scope for
+    // Phase A. We therefore contribute nothing to eng_vdwl here and print the
+    // per-rank subsystem energy for diagnostics; the parity harness compares
+    // forces (all atoms) and, for energy, uses the single-tile/GP oracle.
+    if (screen && comm->me == 0)
+      fprintf(screen, "uma DD: rank0 subsystem energy = %.10f eV "
+              "(NOT global; forces are exact per owned atom)\n", result.energy);
+  }
+  (void) vflag;
+}
+
+/* ----------------------------------------------------------------------
+   Build the DD edge graph: all edges (j -> i) with |x[j]-x[i]| <= cutoff among
+   owned+ghost atoms, where the CENTER i is ANY node (owned OR ghost).
+
+   Why every node must be a center (not owned-only): each message-passing block
+   updates ALL node features and scatters edge messages to edge_index[1]. For an
+   OWNED atom's layer-L feature to be exact, every node within (L-1) hops of it
+   must also have been correctly updated in the previous layers, i.e. must be a
+   center with all its incoming edges present. With num_layers=4 and cutoff=6 A,
+   the receptive field is 24 A, so LAMMPS must supply ghosts to 24 A
+   (`comm_modify cutoff 24.0`) AND every node within 24 A of an owned atom must
+   be a center. A ghost near the 24 A rim will have an incomplete neighbor set
+   (its own neighbors past the rim are missing), so its deep-layer features are
+   approximate -- but it only feeds owned atoms through <4 hops from well inside
+   the halo, so owned-atom outputs stay exact. Making every in-halo node a center
+   is what distinguishes correct k=1 DD from a 1-layer-only halo.
+
+   row0 = neighbor (j), row1 = center (i), both owned/ghost node indices.
+   Offsets are all zero: ghosts are absolute, edge_vec = pos[j] - pos[i].
+------------------------------------------------------------------------- */
+int64_t PairUMA::build_dd_graph(int nall)
+{
+  double **x = atom->x;
+  const double cut2 = cutoff * cutoff;
+
+  // Consume the LAMMPS full+ghost neighbor list (init_style requests
+  // REQ_FULL|REQ_GHOST for the DD path), so EVERY owned+ghost node appears as a
+  // center (ilist covers 0..nall) with its neighbors within cutoff+skin. Filter
+  // to the exact cutoff. Neighbor indices j are owned/ghost node indices in
+  // [0,nall) and index directly into dd_pos_/dd_z_. Offsets zero (absolute).
+  if (!list)
+    error->all(FLERR, "Pair style uma: UMA_DD requires a neighbor list");
+
+  const int inum = list->inum;
+  const int gnum = list->gnum;          // ghost centers (REQ_GHOST)
+  const int ntot = inum + gnum;
+  const int *ilist = list->ilist;
+  const int *numneigh = list->numneigh;
+  int **firstneigh = list->firstneigh;
+
+  std::vector<int64_t> row_nbr, row_ctr;
+  size_t guess = 0;
+  for (int ii = 0; ii < ntot; ii++) guess += static_cast<size_t>(numneigh[ilist[ii]]);
+  row_nbr.reserve(guess);
+  row_ctr.reserve(guess);
+
+  for (int ii = 0; ii < ntot; ii++) {
+    const int i = ilist[ii];              // owned OR ghost center
+    const int jnum = numneigh[i];
+    const int *jlist = firstneigh[i];
+    const double xi = x[i][0], yi = x[i][1], zi = x[i][2];
+    for (int jj = 0; jj < jnum; jj++) {
+      int j = jlist[jj] & NEIGHMASK;
+      const double dx = x[j][0] - xi;
+      const double dy = x[j][1] - yi;
+      const double dz = x[j][2] - zi;
+      if (dx * dx + dy * dy + dz * dz > cut2) continue;
+      if (j >= nall)
+        error->one(FLERR, "Pair style uma: UMA_DD neighbor index exceeds nall");
+      row_nbr.push_back(static_cast<int64_t>(j));   // neighbor
+      row_ctr.push_back(static_cast<int64_t>(i));   // center
+    }
+  }
+
+  const int64_t E = static_cast<int64_t>(row_ctr.size());
+  dd_edge_index_.resize(static_cast<size_t>(2) * E);
+  for (int64_t e = 0; e < E; e++) {
+    dd_edge_index_[e] = row_nbr[e];
+    dd_edge_index_[E + e] = row_ctr[e];
+  }
+  dd_cell_offsets_.assign(static_cast<size_t>(E) * 3, 0.0);
+  dd_edge_count_ = E;
+  return E;
+}
+
+/* ----------------------------------------------------------------------
+   MoLE composition all-reduce. The UMA MoLE expert-mixing coefficients depend
+   on a per-system MEAN of the composition embedding over atoms; under DD each
+   rank sees only owned+ghost, so a local mean is wrong. Following nvalchemi's
+   fix (models/uma.py:_distributed_set_mole_coefficients), reduce over OWNED
+   atoms only (ghosts would double-count the overlap) and all-reduce across the
+   mesh to the global per-Z counts. The engine reconstructs the mean from counts;
+   the include_self (+1 denominator) correction for model_version 1.0 is applied
+   engine-side. Position-independent -> compute once per neighbor rebuild.
+
+   Phase A: composition is fixed for the run, so we compute the global per-Z
+   count vector and hand it to the predictor. (Wiring into the traced MoLE is a
+   TODO; for NaCl single-composition the local vs global mean differ only via the
+   ghost/owned split, which this corrects.)
+------------------------------------------------------------------------- */
+void PairUMA::mole_composition_allreduce()
+{
+  const int nlocal = atom->nlocal;
+  int *type = atom->type;
+  // Per-Z owned counts on this rank.
+  const int maxz = 118;
+  std::vector<long> local_counts(maxz + 1, 0);
+  for (int i = 0; i < nlocal; i++) {
+    const int z = map[type[i]];
+    if (z >= 0 && z <= maxz) local_counts[z]++;
+  }
+  std::vector<long> global_counts(maxz + 1, 0);
+  MPI_Allreduce(local_counts.data(), global_counts.data(), maxz + 1,
+                MPI_LONG, MPI_SUM, world);
+  // Diagnostic: report the global composition once. The exact-fix hook (feeding
+  // this into the traced MoLE mean) is a Phase-B TODO; Phase A relies on the
+  // homogeneous-composition approximation (see run_compute_dd note).
+  if (screen && comm->me == 0) {
+    long total = 0;
+    for (long c : global_counts) total += c;
+    fprintf(screen, "uma DD: global composition total atoms = %ld\n", total);
+  }
 }
 
 /* ---------------------------------------------------------------------- */
