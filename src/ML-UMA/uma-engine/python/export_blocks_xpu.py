@@ -798,7 +798,10 @@ def main() -> int:
         print(f"WARN wigner-chunk not applied: {exc}", flush=True)
 
     from common import atoms_to_atomic_data, inference_settings_with_dtype
-    from export_wrapper import make_traced_export_wrapper
+    from export_wrapper import (
+        make_traced_export_wrapper,
+        make_node_energy_export_wrapper,
+    )
     from metadata import build_export_metadata
     from model_loader import get_atom_refs, load_prepared_hydra_model
     from trace_patch import apply_trace_patches, restore_trace_patches
@@ -864,7 +867,16 @@ def main() -> int:
     # DEEP COPY of the prepared model (clone_prepared_model), so patching its
     # backbone forward + block callables is isolated from `model` (used later as
     # the untouched monolithic reference in the RECONSTRUCT check).
-    wrapper = make_traced_export_wrapper(model, task).eval().to(trace_dev)
+    # DD k=4 (UMA_DD_HALO=1): trace the NodeEnergyExportWrapper, which returns
+    # (node_energy[N], total_energy) with per-atom energy INSIDE the autograd
+    # graph. Spatial DD needs per-atom energy so each rank can backprop from its
+    # OWNED-only energy sum (forces) and sum owned energies for the global energy.
+    # Non-DD keeps the scalar-only wrapper (unchanged product path).
+    dd_export = os.environ.get("UMA_DD_HALO", "0").strip() in ("1", "true", "yes")
+    if dd_export:
+        wrapper = make_node_energy_export_wrapper(model, task).eval().to(trace_dev)
+    else:
+        wrapper = make_traced_export_wrapper(model, task).eval().to(trace_dev)
     backbone = wrapper.inner.backbone
 
     # INTRA-block edge-chunk AC: per-block checkpointing (uma_ckpt) bounds
@@ -1008,6 +1020,40 @@ def main() -> int:
         example[5] = coff.index_select(0, idx).contiguous()
         print(f"GP rank {rank}/{world}: sharded edges "
               f"{int(eidx.shape[1])} -> {int(example[4].shape[1])}", flush=True)
+
+    # DD k=4: pad the trace example to a fixed edge cap so the unrolled chunk
+    # loop (ceil(E/EDGE_AC_CHUNK)) is baked at the SAME count every rank uses at
+    # runtime (which also pads to UMA_DD_EDGE_CAP). Append a dummy node and fill
+    # with dummy->dummy self-loops. example layout:
+    #   [0]=pos[n,3] [1]=z[n] [2]=cell [3]=pbc [4]=edge_index[2,E] [5]=coff[E,3]
+    #   [6]=charge [7]=spin
+    if dd_export:
+        cap = int(os.environ.get("UMA_DD_EDGE_CAP", "0"))
+        if cap <= 0:
+            raise SystemExit("UMA_DD_HALO=1 requires UMA_DD_EDGE_CAP > 0 "
+                             "(the fixed traced edge/chunk capacity)")
+        pos_e = example[0]; z_e = example[1]
+        eidx = example[4]; coff = example[5]
+        n_real = int(pos_e.shape[0])
+        E_real = int(eidx.shape[1])
+        if E_real > cap:
+            raise SystemExit(f"trace edge count {E_real} exceeds UMA_DD_EDGE_CAP "
+                             f"{cap}; raise the cap or trace a smaller N")
+        dummy = n_real                          # appended dummy node index
+        far = 1.0e6
+        pos_pad = torch.full((1, 3), far, dtype=pos_e.dtype, device=pos_e.device)
+        example[0] = torch.cat([pos_e, pos_pad], dim=0).contiguous()
+        example[1] = torch.cat(
+            [z_e, z_e.new_full((1,), int(z_e[0]) if z_e.numel() else 1)],
+            dim=0).contiguous()
+        n_pad = cap - E_real
+        pad_e = torch.full((2, n_pad), dummy, dtype=eidx.dtype, device=eidx.device)
+        pad_c = torch.zeros((n_pad, 3), dtype=coff.dtype, device=coff.device)
+        example[4] = torch.cat([eidx, pad_e], dim=1).contiguous()
+        example[5] = torch.cat([coff, pad_c], dim=0).contiguous()
+        print(f"DD k=4: trace edges padded {E_real} -> {cap} "
+              f"(+dummy node {dummy}); chunk count baked at "
+              f"{-(-cap // edge_ac_chunk)}", flush=True)
 
     report = {"n_trace": n_trace, "natoms": nat,
               "num_layers": int(backbone.num_layers),
@@ -1164,6 +1210,20 @@ def main() -> int:
         meta_d["gp"] = bool(gp)
         meta_d["gp_node_offset"] = int(node_offset)
         meta_d["total_atoms"] = int(total_atoms)
+        # DD k=4: artifact traced with the per-layer halo op + per-atom energy.
+        meta_d["dd_halo"] = bool(dd_export)
+        if dd_export:
+            meta_d["dd_k"] = int(backbone.num_layers)      # exchanges/fwd (k=4)
+            meta_d["dd_halo_op"] = "uma_halo::exchange"
+            meta_d["returns_node_energy"] = True           # top returns (node_e, total)
+            meta_d["edge_ac_chunk"] = edge_ac_chunk
+            meta_d["export_notes"].append(
+                "DD k=4 spatial domain decomposition: top module returns "
+                "(node_energy[N], total_energy); uma_halo::exchange called before "
+                "each of num_layers blocks to refresh the 6 A ghost features. "
+                "C++ backprops from sum(node_energy[owned]); halo backward routes "
+                "ghost grads to owners. Edge list padded to a fixed cap "
+                "(UMA_DD_EDGE_CAP) so the traced chunk count is rank-invariant.")
         if gp:
             meta_d["export_format"] = "per_block_ckpt_gp"
             meta_d["gp_gather_op"] = "uma_peer::all_gather_nodes"

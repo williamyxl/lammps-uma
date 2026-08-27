@@ -888,9 +888,14 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   }
 
   dd_force_.assign(static_cast<size_t>(nnodes) * 3, 0.0);
-  uma::Prediction result = predictor->predict_host_extgraph(
-      nnodes, dd_pos_.data(), dd_z_.data(), cell_buf, pbc_buf, E,
-      dd_edge_index_.data(), dd_cell_offsets_.data(), dd_force_.data());
+  dd_energy_.assign(static_cast<size_t>(nnodes), 0.0);
+  // DD path: per-atom energy + owned-only backprop. nlocal owned rows are the
+  // backprop root; the dummy node (index nall) and ghosts are excluded from the
+  // owned energy sum. predict_body_dd returns Prediction.energy = owned sum.
+  uma::Prediction result = predictor->predict_host_extgraph_dd(
+      nnodes, nlocal, dd_pos_.data(), dd_z_.data(), cell_buf, pbc_buf, E,
+      dd_edge_index_.data(), dd_cell_offsets_.data(),
+      dd_energy_.data(), dd_force_.data());
 
   // Keep forces for OWNED atoms only (rows [0,nlocal); ghosts [nlocal,nall) and
   // the dummy node [nall] are discarded). Under k=4 the halo-exchange BACKWARD
@@ -902,26 +907,13 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
     f[i][2] += dd_force_[3 * i + 2];
   }
 
-  // Energy: sum only THIS rank's owned-atom energy contribution. The traced
-  // model returns one global scalar for the (owned+ghost) subsystem, which is
-  // NOT the owned-atom energy sum. For a correct global energy under DD we need
-  // the per-atom energy of owned atoms only. Until per-atom energy is exported,
-  // report the energy on rank 0 from a full-system evaluation is impossible;
-  // instead we accumulate owned-fraction-weighted energy. See note below.
-  if (eflag_global) {
-    // NOTE (Phase A energy): the single scalar `result.energy` is the energy of
-    // this rank's owned+ghost subsystem including ghost self-energy and double
-    // counts across ranks, so it is NOT additive. Correct DD energy requires
-    // per-atom energy (eflag_atom) which the model does not yet export. For the
-    // single-point PARITY test we validate FORCES on owned atoms (exact) and the
-    // GLOBAL energy via a dedicated rank-0 full-system path is out of scope for
-    // Phase A. We therefore contribute nothing to eng_vdwl here and print the
-    // per-rank subsystem energy for diagnostics; the parity harness compares
-    // forces (all atoms) and, for energy, uses the single-tile/GP oracle.
-    if (screen && comm->me == 0)
-      fprintf(screen, "uma DD: rank0 subsystem energy = %.10f eV "
-              "(NOT global; forces are exact per owned atom)\n", result.energy);
-  }
+  // Energy: each rank contributes its OWNED-atom energy sum. predict_body_dd
+  // returned Prediction.energy = sum(node_energy[0:nlocal]) using the per-atom
+  // energy head (NodeEnergyExportWrapper), so summing across ranks via LAMMPS'
+  // eng_vdwl reduction gives the exact global energy (each atom counted once, on
+  // its owner). This is additive by construction, unlike the whole-subsystem
+  // scalar. dd_energy_ holds per-node energy for optional per-atom output later.
+  if (eflag_global) eng_vdwl += result.energy;
   (void) vflag;
 }
 

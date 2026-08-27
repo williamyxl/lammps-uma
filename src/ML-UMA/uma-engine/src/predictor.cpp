@@ -481,4 +481,126 @@ Prediction Predictor::predict_host_extgraph(
   return pred;
 }
 
+/* ---------------------------------------------------------------------- */
+/* DD k=4: per-atom energy + owned-only backprop.                         */
+/* ---------------------------------------------------------------------- */
+
+Prediction Predictor::predict_host_extgraph_dd(
+    int n, int nlocal, const double* pos_xyz, const int* atomic_numbers,
+    const double* cell9, const int* pbc3, int64_t n_edges,
+    const int64_t* edge_index_2E, const double* cell_offsets_E3,
+    double* energy_out, double* forces_out) {
+  if (gp_)
+    throw std::runtime_error("predict_host_extgraph_dd: single-tile only");
+  if (!has_traced_module_)
+    throw std::runtime_error("predict_host_extgraph_dd: no traced module");
+  if (nlocal < 0 || nlocal > n)
+    throw std::runtime_error("predict_host_extgraph_dd: bad nlocal");
+
+  // Stage inputs (mirror predict_host_extgraph), then set the external graph.
+  auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3},
+                              torch::kFloat64).clone();
+  auto z = torch::empty({n}, torch::kLong);
+  auto z_acc = z.accessor<int64_t, 1>();
+  for (int i = 0; i < n; ++i) z_acc[i] = atomic_numbers[i];
+  auto cell = torch::empty({3, 3}, torch::kFloat64);
+  auto cell_acc = cell.accessor<double, 2>();
+  for (int i = 0; i < 3; ++i)
+    for (int j = 0; j < 3; ++j) cell_acc[i][j] = cell9[3 * i + j];
+  auto pbc = torch::tensor({pbc3[0] != 0, pbc3[1] != 0, pbc3[2] != 0},
+                           torch::kBool);
+  auto edge_index = torch::from_blob(const_cast<int64_t*>(edge_index_2E),
+                                     {2, n_edges}, torch::kInt64).clone();
+  auto cell_offsets = torch::from_blob(const_cast<double*>(cell_offsets_E3),
+                                       {n_edges, 3}, torch::kFloat64).clone();
+
+  stage_inputs(pos, z, cell, pbc, 0, 0);
+  if (edge_index.size(0) != 2)
+    throw std::runtime_error("predict_host_extgraph_dd: edge_index must be [2,E]");
+  edge_index_ = edge_index.to(device_, torch::kLong).contiguous();
+  cell_offsets_ = cell_offsets.to(device_, compute_dtype_).contiguous();
+
+  auto pred = predict_body_dd(nlocal, energy_out);
+  if (forces_out) {
+    auto f_cpu = pred.forces.to(torch::kCPU).contiguous();
+    std::memcpy(forces_out, f_cpu.data_ptr<double>(),
+                sizeof(double) * static_cast<size_t>(n) * 3);
+  }
+  return pred;
+}
+
+Prediction Predictor::predict_body_dd(int nlocal, double* energy_out) {
+  const auto dtype = compute_dtype_;
+  auto pos_grad = pos_.detach().clone().set_requires_grad(true);
+  std::vector<torch::jit::IValue> args = {pos_grad,   atomic_numbers_,
+                                          cell_,      pbc_,
+                                          edge_index_, cell_offsets_,
+                                          charge_,    spin_};
+
+  torch::Tensor node_e_raw;
+  {
+    torch::autograd::AutoGradMode grad_guard(true);
+    // DD artifact top returns a tuple (node_energy[n], total). Per-chunk/block/
+    // prologue AC ops recompute independently, so run the module normally.
+    auto out = module_.forward(args);
+    torch::Tensor first;
+    if (out.isTuple()) {
+      first = out.toTuple()->elements()[0].toTensor();  // node_energy[n]
+    } else {
+      throw std::runtime_error(
+          "predict_body_dd: DD artifact must return (node_energy, total); got a "
+          "single tensor (re-export with UMA_DD_HALO=1)");
+    }
+    node_e_raw = first;
+  }
+
+  // Per-atom physical energy. denorm is E*rmsd + mean; mean is a PER-SYSTEM
+  // constant, so for a per-atom vector apply rmsd per-atom and add mean ONCE
+  // (below, to the owned sum) rather than per-atom. UMA omat mean is 0.0, so this
+  // is exact; the explicit split avoids a silent per-atom mean bug if mean != 0.
+  const double norm_mean = metadata_.normalizer_mean;
+  auto node_e = node_e_raw.reshape({-1}).to(dtype) *
+                torch::tensor(metadata_.normalizer_rmsd,
+                              node_e_raw.options().dtype(dtype));
+  if (element_refs_.defined()) {
+    // PER-ATOM element reference: node_e[i] += refs[z[i]]. NOTE: the scalar path
+    // uses undo_element_references (scatter_add by batch into one system energy),
+    // which is WRONG for a per-atom vector (it would pile every ref onto atom 0).
+    // Here add the per-atom reference directly, preserving sum-identity.
+    auto refs = element_refs_.to(node_e.device(), node_e.scalar_type());
+    auto z = atomic_numbers_.to(torch::kLong);
+    node_e = node_e + refs.index({z});
+  }
+
+  // Backprop from the OWNED-only energy sum. Backpropagating the whole-subsystem
+  // sum would inject spurious gradients from ghost-energy terms (also counted on
+  // the ghost's owner); the owned-only root + the halo backward (ghost grad ->
+  // owner) gives the exact global force on each owned atom.
+  const int64_t n = node_e.size(0);
+  const int64_t nl = std::min<int64_t>(nlocal, n);
+  // Owned energy sum; add the per-system normalizer mean once (0 for omat).
+  auto e_owned = node_e.narrow(0, 0, nl).sum();
+  if (norm_mean != 0.0)
+    e_owned = e_owned + torch::tensor(norm_mean, node_e.options());
+
+  auto grads = torch::autograd::grad({e_owned}, {pos_grad},
+                                     /*grad_outputs=*/{},
+                                     /*retain_graph=*/false,
+                                     /*create_graph=*/false,
+                                     /*allow_unused=*/false);
+  auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
+
+  // Per-node energy out (host FP64); caller sums owned rows into eng_vdwl.
+  if (energy_out) {
+    auto e_cpu = node_e.to(torch::kCPU, torch::kFloat64).contiguous();
+    std::memcpy(energy_out, e_cpu.data_ptr<double>(),
+                sizeof(double) * static_cast<size_t>(n));
+  }
+
+  Prediction out;
+  out.energy = e_owned.item<double>();   // this rank's OWNED energy contribution
+  out.forces = forces;
+  return out;
+}
+
 }  // namespace uma

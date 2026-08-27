@@ -76,7 +76,8 @@ class PairUMA : public Pair {
   std::vector<double> dd_cell_offsets_;     // [E,3] zeros (ghosts are absolute)
   std::vector<double> dd_pos_;              // [nall,3] owned+ghost, boxlo-shifted
   std::vector<int> dd_z_;                   // [nall] atomic numbers owned+ghost
-  std::vector<double> dd_force_;            // [nall,3] forces for all graph nodes
+  std::vector<double> dd_force_;            // [nnodes,3] forces for all graph nodes
+  std::vector<double> dd_energy_;           // [nnodes] per-node energy (DD k=4)
 
   // Per-layer halo exchange (k=4) scratch. The engine's uma_halo::exchange op
   // calls back into this pair style; halo_buf_ holds [nall, halo_per_node] node

@@ -92,6 +92,22 @@ class Predictor {
                                    const double* cell_offsets_E3,
                                    double* forces_out);
 
+  /// DD k=4 external-graph path. The DD artifact's top module returns
+  /// (node_energy[n], total). Backprop from E_owned = sum(node_energy[0:nlocal])
+  /// (NOT the whole subsystem: ghost-energy terms would inject spurious force
+  /// gradients), so owned-atom forces are correct once the halo backward routes
+  /// ghost grads to owners. Writes per-node energy into energy_out[n] (owned rows
+  /// summed by the caller into eng_vdwl) and forces into forces_out[n*3].
+  /// Returns Prediction.energy = sum(node_energy[0:nlocal]) (this rank's owned
+  /// energy contribution).
+  Prediction predict_host_extgraph_dd(int n, int nlocal, const double* pos_xyz,
+                                      const int* atomic_numbers,
+                                      const double* cell9, const int* pbc3,
+                                      int64_t n_edges,
+                                      const int64_t* edge_index_2E,
+                                      const double* cell_offsets_E3,
+                                      double* energy_out, double* forces_out);
+
   /// Override position/energy compute dtype (must match TorchScript artifact dtype).
   void set_compute_dtype(torch::ScalarType dtype);
 
@@ -116,6 +132,11 @@ class Predictor {
   // atomic_numbers_, cell_, pbc_, charge_, spin_, edge_index_, cell_offsets_
   // are already populated. Does NOT rebuild neighbors and does NOT wrap positions.
   Prediction predict_body();
+
+  // DD k=4 body: reads the tuple (node_energy, total) from the DD artifact,
+  // applies per-atom denorm/refs, backprops from sum(node_energy[0:nlocal]), and
+  // writes per-node physical energy to energy_out (if non-null).
+  Prediction predict_body_dd(int nlocal, double* energy_out);
 
   // Common input staging shared by predict() and predict_extgraph(): fills the
   // persistent pos_/atomic_numbers_/cell_/pbc_/charge_/spin_ buffers. Returns N.

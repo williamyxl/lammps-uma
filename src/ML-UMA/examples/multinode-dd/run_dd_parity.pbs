@@ -30,8 +30,9 @@ NODES=${NODES:-2}
 TPN=${TPN:-12}
 RANKS=$((NODES*TPN))
 NAT=$((8*N*N*N))
-# SINGLE-TILE artifact (model_traced.pt + block/chunk/edgedeg), NOT the w*/r* GP tree.
-ARTIFACT=${ARTIFACT:-${LU}/scripts/out/opt1/n32_chunk65536_singletile}
+# k=4 DD single-tile artifact (UMA_DD_HALO=1 export; returns per-atom energy,
+# calls uma_halo::exchange). One artifact serves all ranks. Edge cap must match.
+ARTIFACT=${ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
 ORACLE=${ORACLE:-${HEN}/pbs/out/ase12_n32}
 RUNDIR=${RUNDIR:-${EX}/run_dd_n${N}_${NODES}x${TPN}}; mkdir -p "${RUNDIR}"
 
@@ -48,6 +49,9 @@ export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
 export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
 export UMA_DD=1                          # <-- selects the domain-decomposition path
+# k=4 halo: edge list padded to a fixed cap so the traced chunk count is
+# rank-invariant. Must match the cap the k=4 artifact was TRACED at (export step).
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}   # 14 x 65536; covers 2-node worst rank
 
 # geometry (bit-identical to the oracle) + input
 python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
@@ -69,10 +73,9 @@ NATDUMP=$(grep -c "^[0-9]" forces_step0.dump 2>/dev/null || echo 0)
 echo "forces_step0.dump rows≈${NATDUMP} (expect ${NAT})"
 
 echo "=== PARITY vs 12-tile ASE-GP oracle (N=${N}) ==="
-# LAMMPS energy under DD is per-rank subsystem (not global) in Phase A, so the
-# energy gate is skipped here; the FORCE gate over ALL atoms is the correctness
-# test. (Global energy via per-atom-energy export is Phase B.)
+# k=4 DD: per-atom energy head gives an ADDITIVE global energy (eng_vdwl sum over
+# owned atoms), so BOTH the energy and force gates are active.
+#   energy: |dE| per-atom <= 1e-3 meV/atom ; force: per-atom max|dF| <= 1e-5 eV/A
 LMP_DIR="${RUNDIR}" ASE_DIR="${ORACLE}" F_TOL=1e-5 MIN_SAMPLE=100 \
-  UMA_DD_SKIP_ENERGY=1 \
   python "${LU}/scripts/parity_vs_asegp.py" 2>&1 | tail -12
 echo "DONE"
