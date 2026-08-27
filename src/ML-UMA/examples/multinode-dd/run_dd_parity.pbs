@@ -44,8 +44,16 @@ source "${ACTIVATE}"
 TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
 ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
 COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
-export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+# MULTI-NODE fabric fix: the conda env ships libfabric.so.1 WITHOUT the Aurora
+# 'cxi' (Slingshot) provider. If conda's libfabric loads first, Cray MPICH fails
+# MPI_Init across nodes ("OFI fi_getinfo failed: No data available"). Put the
+# SYSTEM libfabric ahead of conda so the real cxi provider is found.
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# Aurora inter-node fabric provider (Slingshot). DD's only cross-rank comm is
+# LAMMPS MPI (halo exchange + energy reduce); no oneCCL on the model path.
+export FI_PROVIDER=cxi
 export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
 export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
 export UMA_DD=1                          # <-- selects the domain-decomposition path
