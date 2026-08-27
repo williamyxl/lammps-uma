@@ -902,9 +902,15 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
       ei[k] = dd_edge_index_[k];                       // row0 real
       ei[edge_cap + k] = dd_edge_index_[old + k];      // row1 real
     }
+    // Padded edges MUST be inert: neighbor=atom 0 (a real node), center=dummy.
+    // The dummy sits at (far,far,far), so edge_distance = |pos[dummy]-pos[0]| >>
+    // cutoff -> radial envelope = 0 -> zero message. Center is the dummy, whose
+    // energy/force are discarded (excluded from owned sum). A dummy->dummy
+    // SELF-LOOP would have edge_distance = 0 (NOT > cutoff): r=0 poisons the edge
+    // basis (SO2/envelope) and corrupts the whole batch -- that was the bug.
     for (int64_t k = old; k < edge_cap; k++) {
-      ei[k] = dummy;                                   // row0 = dummy neighbor
-      ei[edge_cap + k] = dummy;                        // row1 = dummy center
+      ei[k] = 0;                                       // row0 = neighbor = atom 0
+      ei[edge_cap + k] = dummy;                        // row1 = center = dummy (far)
     }
     dd_edge_index_.swap(ei);
     dd_cell_offsets_.assign(static_cast<size_t>(edge_cap) * 3, 0.0);

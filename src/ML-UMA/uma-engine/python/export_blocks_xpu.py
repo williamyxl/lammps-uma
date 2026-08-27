@@ -1122,7 +1122,7 @@ def main() -> int:
             if E_real > cap:
                 raise SystemExit(f"trace edge count {E_real} exceeds "
                                  f"UMA_DD_EDGE_CAP {cap}; raise the cap")
-            # DD path: appended dummy node (legacy behaviour).
+            # DD path: appended dummy node placed far away.
             dummy = n_real
             far = 1.0e6
             pos_pad = torch.full((1, 3), far, dtype=pos_e.dtype, device=pos_e.device)
@@ -1131,9 +1131,15 @@ def main() -> int:
                 [z_e, z_e.new_full((1,), int(z_e[0]) if z_e.numel() else 1)],
                 dim=0).contiguous()
             n_pad = cap - E_real
-            pad_e = torch.full((2, n_pad), dummy, dtype=eidx.dtype,
-                               device=eidx.device)
+            # Inert padded edges: neighbor=atom 0 (real), center=dummy (far away)
+            # so edge_distance >> cutoff -> envelope 0 -> zero message. MUST match
+            # the runtime padding (pair_uma build_dd_graph). A dummy->dummy
+            # SELF-LOOP would have r=0 and poison the edge basis -- do NOT use it.
+            pad_e = torch.empty((2, n_pad), dtype=eidx.dtype, device=eidx.device)
+            pad_e[0, :] = 0            # neighbor = atom 0 (real node)
+            pad_e[1, :] = dummy        # center = dummy (far)
             pad_c = torch.zeros((n_pad, 3), dtype=coff.dtype, device=coff.device)
+            # C++ appends pad edges (cat({real, pad})); match that ordering.
             example[4] = torch.cat([eidx, pad_e], dim=1).contiguous()
             example[5] = torch.cat([coff, pad_c], dim=0).contiguous()
             edge_pad_cap = int(cap)
