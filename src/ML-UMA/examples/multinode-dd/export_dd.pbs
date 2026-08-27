@@ -1,0 +1,21 @@
+#!/bin/bash -l
+#PBS -N uma_dd_export
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:55:00
+#PBS -j oe
+#PBS -k doe
+# Export the k=4 DD single-tile artifact (per-atom energy + halo op) on one tile.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+export N=${N:-8}
+echo "=== DD k=4 export: cap=${UMA_DD_EDGE_CAP} trace N=${N} ==="
+cd "${EX}"
+mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 bash export_dd_artifact.sh
+echo "EXPORT_DONE rc=$?"

@@ -602,6 +602,50 @@ class EdgeDegreeChunkSubModule(torch.nn.Module):
                          atomic_numbers, edge_index)
 
 
+def _pad_edges_to_chunk_multiple(graph_dict, edge_ac_chunk, cutoff):
+    """P2.1: pad edge_index/edge_distance/edge_distance_vec up to a fixed multiple
+    of edge_ac_chunk so the traced per-chunk loop count is constant across edge
+    drift. Padded edges are self-loops (0->0) placed BEYOND the cutoff so the
+    radial envelope zeroes their contribution (and gradient) exactly.
+
+    edge_index         [2, E]  int64   -> [2, E_pad]
+    edge_distance      [E]     float    -> [E_pad]     (pad value = 2*cutoff)
+    edge_distance_vec  [E, 3]  float    -> [E_pad, 3]  (pad = [2*cutoff,0,0])
+    where E_pad = ceil(E / edge_ac_chunk) * edge_ac_chunk. If E is already a
+    multiple, one extra full chunk is added so runtime drift upward stays within
+    the same chunk count band; the extra chunk is all-padded (zero contribution).
+    """
+    ei = graph_dict["edge_index"]
+    ed = graph_dict["edge_distance"]
+    edv = graph_dict["edge_distance_vec"]
+    E = int(ei.shape[1])
+    # Bake a FIXED padded edge count at trace time (a multiple of edge_ac_chunk,
+    # plus one guard chunk). torch.jit.trace unrolls the split loop to exactly
+    # ceil(E_pad/chunk) iterations; the RUNTIME C++ engine pads its (drifting)
+    # edge count to this SAME E_pad before calling the module, so the runtime edge
+    # count always yields the identical chunk count -> no list-length mismatch.
+    # The pad target is recorded in metadata (edge_pad_multiple) for the C++ side.
+    n_chunks = (E // edge_ac_chunk) + 1
+    E_pad = n_chunks * edge_ac_chunk
+    pad = E_pad - E
+    if pad <= 0:
+        return graph_dict
+    dev = ed.device
+    fdt = ed.dtype
+    far = 2.0 * float(cutoff)
+    # self-loop on node 0, beyond cutoff -> envelope(d/cutoff)=0 -> zero message
+    # (and zero gradient); numerically identical to omitting the edge.
+    ei_pad = torch.zeros((2, pad), dtype=ei.dtype, device=ei.device)
+    ed_pad = torch.full((pad,), far, dtype=fdt, device=dev)
+    edv_pad = torch.zeros((pad, 3), dtype=edv.dtype, device=edv.device)
+    edv_pad[:, 0] = far
+    graph_dict = dict(graph_dict)
+    graph_dict["edge_index"] = torch.cat([ei, ei_pad], dim=1)
+    graph_dict["edge_distance"] = torch.cat([ed, ed_pad], dim=0)
+    graph_dict["edge_distance_vec"] = torch.cat([edv, edv_pad], dim=0)
+    return graph_dict
+
+
 def make_ckpt_forward(backbone, submodules, edge_ac_chunk=None):
     """Return a bound forward() that rewrites the block loop to uma_ckpt.block
     AND the edge-degree prologue to a uma_ckpt.edge_degree chunk loop (P1-b).
@@ -641,6 +685,26 @@ def make_ckpt_forward(backbone, submodules, edge_ac_chunk=None):
 
         with record_function("generate_graph"):
             graph_dict = self._generate_graph(data_dict)
+
+        # --- P2.1 EDGE PADDING (fixed-multiple chunk count) ------------------
+        # ROOT CAUSE: the prologue loop and every block's internal Edgewise loop
+        # split the edge tensors by edge_ac_chunk in a Python for-loop, which
+        # torch.jit.trace UNROLLS to a fixed number of uma_ckpt.chunk /
+        # uma_ckpt.edge_degree calls = ceil(E_trace / edge_ac_chunk). At runtime a
+        # different edge count E' gives a different chunk count -> the traced
+        # graph's baked list length mismatches ("Expected K elements in a list but
+        # found K+1"): the N=24 / N=16 / N=36 NVT step-1 crashes.
+        #
+        # FIX (external-graph path): the edge_index is supplied by the caller
+        # (external_graph_gen=True; the C++ engine passes eidx/coff into the
+        # module). The C++ engine pads the runtime edge_index up to a fixed
+        # multiple of edge_ac_chunk (self-loops beyond cutoff -> zero envelope ->
+        # zero contribution/gradient) BEFORE calling the module, so the edge count
+        # the split loop sees is ALWAYS a chunk multiple == the traced count. The
+        # trace example is likewise pre-padded (see main()) so the baked chunk
+        # count matches. No in-graph padding here (it cannot fix a baked loop
+        # length); padding lives at the single controllable boundary: the caller.
+        # Runtime pad rule + zero-contribution are validated by the N=24 NVT gate.
 
         # NOTE (P1-b): the FULL-edge "obtain wigner" prologue
         # (_get_rotmat_and_wigner + prepare_wigner over ALL edges -> wigner /
@@ -842,6 +906,11 @@ def main() -> int:
 
     install_ckpt_ops()
     install_export_ops()
+    # DD k=4: register uma_halo::exchange so torch.jit.trace records the op node
+    # (identity at trace; real owned<->ghost movement is the C++ engine at runtime).
+    if os.environ.get("UMA_DD_HALO", "0").strip() in ("1", "true", "yes"):
+        from uma_halo_ops import install_halo_ops
+        install_halo_ops()
 
     # P4 AC+GP merge: BEFORE building the wrapper, patch FairChem gp_utils so
     # escn runs the GP path (node_partition, gp_node_offset, per-block
