@@ -1,4 +1,43 @@
-# Multi-node spatial domain decomposition (DD) — Phase A
+# Multi-node spatial domain decomposition (DD)
+
+## Status (2026-08-27): k=4 implemented, compiles clean, ready to run
+
+**k=4 per-layer halo exchange, 6 A halo** — the design that fits N=32 on 2 nodes.
+Engine library and `pair_uma.cpp` both build/syntax-check clean against
+torch 2.13.0+xpu on Aurora. Remaining: export the k=4 artifact and run the
+2-node job (needs a queue allocation).
+
+### Run recipe (2-node N=32, energy + force parity vs 12-tile ASE-GP oracle)
+
+```bash
+cd src/ML-UMA/examples/multinode-dd
+# 1) build LAMMPS+engine (validated script)
+bash ../../../scripts/phase6_build_lammps_xccl.sh
+# 2) export the k=4 DD artifact (per-atom energy + halo op; edge cap 917504)
+UMA_DD_EDGE_CAP=917504 N=8 bash export_dd_artifact.sh
+# 3) 2-node single point + parity (energy AND force gates)
+qsub -v N=32,NODES=2,TPN=12 run_dd_parity.pbs
+```
+
+Gates (parity_vs_asegp.py vs hen/pbs/out/ase12_n32):
+`|dE| <= 1e-3 meV/atom` and per-atom `max|dF| <= 1e-5 eV/A` over all 262,144 atoms.
+
+### How k=4 works here
+
+- 6.5 A ghost shell (`comm_modify cutoff 6.5`); each rank ~18.8k owned+ghost
+  atoms (R~1.7x) — fits a tile (ceiling ~46,656).
+- The k=4 artifact calls `uma_halo::exchange` before each of the 4 blocks; the op
+  routes to LAMMPS `comm->forward_comm/reverse_comm` (owned<->ghost) via
+  pack/unpack hooks in pair_uma. Forward refreshes ghost features; backward
+  accumulates ghost gradients onto owners.
+- Per-atom energy (NodeEnergyExportWrapper): each rank backprops from
+  `sum(node_energy[owned])` (owned-only root avoids spurious ghost-energy force
+  gradients) and adds `sum owned energy` to eng_vdwl -> additive global energy.
+- Edge padding to a fixed cap (917504) keeps the traced chunk count rank-invariant.
+
+---
+
+## Phase A (superseded by k=4; kept for reference)
 
 Branch: `uma-multinode-dd`. Goal: run the N=32 NaCl single point across multiple
 nodes and match the **12-tile (1-node) ASE-GP oracle** (`hen/pbs/out/ase12_n32`,
