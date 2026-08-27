@@ -15,6 +15,7 @@
 #include "uma/graph_parallel.h"
 #include "uma/neighbor_list.h"
 #include "uma/postprocess.h"
+#include "uma/graph_shard.h"
 #include "uma/vesin_nl.h"
 
 namespace {
@@ -305,12 +306,35 @@ Prediction Predictor::predict_body() {
   // Clone so the persistent buffer is not marked requires_grad.
   auto pos_grad = pos_.detach().clone().set_requires_grad(true);
 
+  // P2.1: pad the edge count up to the fixed traced capacity so the traced
+  // per-chunk loop count matches the runtime edge count (fixes the N-specific
+  // chunk-drift crash). Self-loops beyond cutoff -> zero contribution. cap==0 =>
+  // legacy artifact, no padding.
+  auto edge_index_run = edge_index_;
+  auto cell_offsets_run = cell_offsets_;
+  if (metadata_.edge_pad_cap > 0) {
+    const int64_t e_now =
+        edge_index_run.defined() ? edge_index_run.size(1) : 0;
+    if (e_now > metadata_.edge_pad_cap) {
+      throw std::runtime_error(
+          "uma-engine: runtime edge count " + std::to_string(e_now) +
+          " exceeds traced edge_pad_cap " +
+          std::to_string(metadata_.edge_pad_cap) +
+          " (edge drift beyond the guard chunk; re-export with a larger N or "
+          "chunk).");
+    }
+    graph_shard::pad_edges_to_capacity(edge_index_run, cell_offsets_run,
+                                       metadata_.edge_pad_cap,
+                                       metadata_.edge_pad_atom);
+    cell_offsets_run = cell_offsets_run.to(dtype).contiguous();
+  }
+
   std::vector<torch::jit::IValue> args = {pos_grad,
                                           atomic_numbers_,
                                           cell_,
                                           pbc_,
-                                          edge_index_,
-                                          cell_offsets_,
+                                          edge_index_run,
+                                          cell_offsets_run,
                                           charge_,
                                           spin_};
 

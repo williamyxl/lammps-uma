@@ -1,5 +1,7 @@
 #include "uma/halo_context.h"
 
+#include <cstdio>
+#include <cstdlib>
 #include <stdexcept>
 #include <vector>
 
@@ -64,7 +66,29 @@ torch::Tensor run_exchange(const torch::Tensor& x,
   auto x2d = x.reshape({nall, -1}).to(torch::kCPU, torch::kFloat64).contiguous();
   const int64_t per_node = x2d.size(1);
 
+  // One-time diagnostic: checksum a ghost row before/after to confirm the
+  // exchange actually overwrites ghost features (UMA_DD_DEBUG).
+  static int dbg_calls = 0;
+  const bool dbg = (std::getenv("UMA_DD_DEBUG") != nullptr) && (dbg_calls < 10);
+  double before = 0.0;
+  if (dbg) {
+    double* p = x2d.data_ptr<double>();
+    // sum of last real row (a ghost, if nall large): row nall-2
+    const int64_t r = (nall >= 2) ? (nall - 2) : 0;
+    for (int64_t k = 0; k < per_node; k++) before += p[r * per_node + k];
+  }
+
   fn(x2d.data_ptr<double>(), nall, per_node);
+
+  if (dbg) {
+    double after = 0.0;
+    double* p = x2d.data_ptr<double>();
+    const int64_t r = (nall >= 2) ? (nall - 2) : 0;
+    for (int64_t k = 0; k < per_node; k++) after += p[r * per_node + k];
+    std::fprintf(stderr, "[halo dbg call %d] ghost-row checksum before=%.6e after=%.6e changed=%d\n",
+                 dbg_calls, before, after, (before != after));
+    dbg_calls++;
+  }
 
   return x2d.reshape(orig_sizes).to(orig_device, orig_dtype);
 }
@@ -100,6 +124,14 @@ torch::Tensor uma_halo_op_exchange(const torch::Tensor& x) {
     // Single-rank / non-DD: identity (no ghosts to refresh).
     return x;
   }
+  // Diagnostic A/B: UMA_DD_NO_HALO=1 makes the op identity at runtime (ghosts
+  // stay frozen at their block outputs). If parity is UNCHANGED vs the real
+  // exchange, the exchange is a no-op (bug); if WORSE, the exchange is working.
+  static const bool no_halo = [] {
+    const char* e = std::getenv("UMA_DD_NO_HALO");
+    return e && e[0] == '1' && e[1] == '\0';
+  }();
+  if (no_halo) return x;
   return ctx.forward_exchange(x);
 }
 

@@ -355,6 +355,38 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   auto eidx = shard.edge_index;
   auto coff = shard.cell_offsets.to(dtype).contiguous();
 
+  // P2.1: pad this rank's shard edge count up to the fixed traced capacity so the
+  // traced per-chunk loop (baked ceil(edge_pad_cap/edge_ac_chunk) iterations)
+  // always matches the runtime chunk count, regardless of per-step edge drift.
+  // Padded edges are self-loops on atom edge_pad_atom with cell_offset[:,0]=2 ->
+  // |r| >> cutoff -> envelope 0 -> zero contribution/gradient. This fixes the
+  // N=24/N=16/N=36 NVT step-1 "Expected K elements in a list" crash. cap==0 =>
+  // legacy artifact, no padding.
+  if (metadata_.edge_pad_cap > 0) {
+    const int64_t e_now = eidx.defined() ? eidx.size(1) : 0;
+    if (e_now > metadata_.edge_pad_cap) {
+      throw std::runtime_error(
+          "uma-engine: runtime shard edge count " + std::to_string(e_now) +
+          " exceeds traced edge_pad_cap " +
+          std::to_string(metadata_.edge_pad_cap) +
+          " (edge drift beyond the guard chunk; re-export with a larger N or "
+          "chunk). rank=" + std::to_string(rank_));
+    }
+    // The pad edge CENTER (scatter target) must be a node THIS rank owns, else
+    // the scatter writes outside the local node accumulator -> GPU segfault. Use
+    // this rank's first owned global node (node_partition[rank][0]), NOT the
+    // baked metadata value (which is only r0's node_offset). Matches the Python
+    // trace pad (pad_atom = node_offset). For W==1 this is 0.
+    int64_t pad_atom = 0;
+    {
+      auto part = graph_shard::node_partition(n, world_, rank_);
+      if (part.numel() > 0) pad_atom = part[0].item<int64_t>();
+    }
+    graph_shard::pad_edges_to_capacity(eidx, coff, metadata_.edge_pad_cap,
+                                       pad_atom);
+    coff = coff.to(dtype).contiguous();
+  }
+
   auto pos_grad = pos.detach().clone().set_requires_grad(true);
   auto charge = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(dev));
   auto spin = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(dev));
