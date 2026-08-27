@@ -1118,6 +1118,56 @@ void PairUMA::install_halo_callbacks()
   };
   // HaloContext nall == nnodes so the op's row-count check matches the tensor.
   uma::HaloContext::instance().set_callbacks(fwd, rev, nlocal, nnodes);
+
+  // Self-test (UMA_DD_HALO_TEST=1): verify the real comm plan moves data the way
+  // the halo op assumes. Fill each row with its atom's global tag (per_node
+  // copies), forward_comm, then check EVERY ghost row == tag[its owner]. Then
+  // set owned=1, ghost=1, reverse_comm, and check owned row == 1 + (#ghost copies
+  // of that atom). Pinpoints pack/unpack/index bugs without the model.
+  if (std::getenv("UMA_DD_HALO_TEST")) {
+    const int na = atom->nlocal + atom->nghost;
+    const int pn = static_cast<int>(comm_forward);
+    const tagint *tag = atom->tag;
+    std::vector<double> buf(static_cast<size_t>(na) * pn, 0.0);
+    // forward test: row value = tag (owned rows only set; ghosts 0)
+    for (int i = 0; i < nlocal; i++)
+      for (int k = 0; k < pn; k++) buf[i * pn + k] = static_cast<double>(tag[i]);
+    halo_buf_ = buf.data(); halo_per_node_ = pn;
+    comm->forward_comm(this);
+    halo_buf_ = nullptr;
+    int fwd_bad = 0;
+    for (int g = nlocal; g < na; g++) {
+      const double want = static_cast<double>(tag[g]);   // ghost's own tag == owner tag
+      if (buf[g * pn] != want) fwd_bad++;
+    }
+    int fwd_bad_all = 0;
+    MPI_Allreduce(&fwd_bad, &fwd_bad_all, 1, MPI_INT, MPI_SUM, world);
+    if (comm->me == 0 && screen)
+      fprintf(screen, "uma DD HALO_TEST forward: ghost!=owner_tag count = %d (0 = OK)\n",
+              fwd_bad_all);
+
+    // reverse test: owned=0, ghost=1; reverse_comm should accumulate onto owners
+    // -> owned[a] == (# ghost copies of a across ALL ranks). Verify the global
+    // sum of owned rows == total ghost count (each ghost delivers exactly 1).
+    std::fill(buf.begin(), buf.end(), 0.0);
+    for (int g = nlocal; g < na; g++)
+      for (int k = 0; k < pn; k++) buf[g * pn + k] = 1.0;
+    halo_buf_ = buf.data(); halo_per_node_ = pn;
+    comm->reverse_comm(this, pn);
+    halo_buf_ = nullptr;
+    double owned_sum = 0.0;
+    for (int i = 0; i < nlocal; i++) owned_sum += buf[i * pn];   // col 0
+    double ghost_cnt = static_cast<double>(na - nlocal);
+    double owned_sum_all = 0.0, ghost_cnt_all = 0.0;
+    MPI_Allreduce(&owned_sum, &owned_sum_all, 1, MPI_DOUBLE, MPI_SUM, world);
+    MPI_Allreduce(&ghost_cnt, &ghost_cnt_all, 1, MPI_DOUBLE, MPI_SUM, world);
+    if (comm->me == 0 && screen)
+      fprintf(screen,
+              "uma DD HALO_TEST reverse: sum(owned after reverse)=%.1f  "
+              "total ghosts=%.1f  (equal = OK; each ghost delivers 1 to its owner)\n",
+              owned_sum_all, ghost_cnt_all);
+    error->all(FLERR, "Pair style uma: UMA_DD_HALO_TEST done (unset to run normally)");
+  }
 }
 
 /* ---- LAMMPS comm hooks: operate on halo_buf_ [nall, halo_per_node_] --------- */

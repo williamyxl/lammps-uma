@@ -1,0 +1,91 @@
+#!/bin/bash -l
+#PBS -N uma_dd_nohalo
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=2:ncpus=208
+#PBS -l walltime=00:20:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# Phase A: 2-node spatial domain-decomposition single-point N=32, then parity
+# vs the 12-tile (1-node) ASE-GP oracle (hen/pbs/out/ase12_n32). Every multinode
+# DD run must reproduce the SAME N=32 single-point E + per-atom forces.
+#
+#   qsub -v N=32,NODES=2,TPN=12 run_dd_parity.pbs
+#
+# ranks = NODES*TPN (one XPU tile per rank). Uses the SINGLE-TILE artifact.
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-32}
+NODES=${NODES:-2}
+TPN=${TPN:-12}
+RANKS=$((NODES*TPN))
+NAT=$((8*N*N*N))
+# k=4 DD single-tile artifact (UMA_DD_HALO=1 export; returns per-atom energy,
+# calls uma_halo::exchange). One artifact serves all ranks. Edge cap must match.
+ARTIFACT=${ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+ORACLE=${ORACLE:-${HEN}/pbs/out/ase12_n32}
+RUNDIR=${RUNDIR:-${EX}/run_dd_n${N}_${NODES}x${TPN}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+[ -f "${ARTIFACT}/metadata.json" ] || { echo "missing single-tile artifact metadata: ${ARTIFACT}"; exit 1; }
+[ -f "${ORACLE}/forces_w12.npy" ]  || { echo "missing oracle forces: ${ORACLE}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+# MULTI-NODE fabric fix: the conda env ships libfabric.so.1 WITHOUT the Aurora
+# 'cxi' (Slingshot) provider. If conda's libfabric loads first, Cray MPICH fails
+# MPI_Init across nodes ("OFI fi_getinfo failed: No data available"). Put the
+# SYSTEM libfabric ahead of conda so the real cxi provider is found.
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+# Aurora inter-node fabric provider (Slingshot). DD's only cross-rank comm is
+# LAMMPS MPI (halo exchange + energy reduce); no oneCCL on the model path.
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD=1
+export UMA_DD_DEBUG=1
+export UMA_DD_NO_HALO=1                          # <-- selects the domain-decomposition path
+# k=4 halo: edge list padded to a fixed cap so the traced chunk count is
+# rank-invariant. Must match the cap the k=4 artifact was TRACED at (export step).
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}   # 14 x 65536; covers 2-node worst rank
+
+# geometry (bit-identical to the oracle) + input
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+cp -f "${EX}/in.dd_sp" "${RUNDIR}/in.dd_sp"
+
+cd "${RUNDIR}"
+echo "=== UMA DD single-point: N=${N} (${NAT} atoms), ${NODES} nodes x ${TPN} tiles = ${RANKS} ranks ==="
+t0=$SECONDS
+# one XPU tile per rank via gpu_tile_compact.sh; UMA_DD path builds owned+ghost graph per rank
+mpiexec -n ${RANKS} --ppn ${TPN} \
+  gpu_tile_compact.sh \
+  "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" -var datafile "data.nacl_n${N}" \
+  > lmp.log 2>&1
+rc=$?
+echo "lmp exit=${rc} wall=$((SECONDS-t0))s"
+grep -iE "out of memory|OUT_OF|ERROR|exceeds nall" lmp.log | grep -vi index_reduce | head -5
+echo "--- first frame ---"; grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1
+NATDUMP=$(grep -c "^[0-9]" forces_step0.dump 2>/dev/null || echo 0)
+echo "forces_step0.dump rows≈${NATDUMP} (expect ${NAT})"
+
+echo "=== PARITY vs 12-tile ASE-GP oracle (N=${N}) ==="
+# k=4 DD: per-atom energy head gives an ADDITIVE global energy (eng_vdwl sum over
+# owned atoms), so BOTH the energy and force gates are active.
+#   energy: |dE| per-atom <= 1e-3 meV/atom ; force: per-atom max|dF| <= 1e-5 eV/A
+LMP_DIR="${RUNDIR}" ASE_DIR="${ORACLE}" F_TOL=1e-5 MIN_SAMPLE=100 \
+  python "${LU}/scripts/parity_vs_asegp.py" 2>&1 | tail -12
+echo "DONE"

@@ -2,6 +2,7 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cmath>
 #include <stdexcept>
 #include <vector>
 
@@ -66,27 +67,38 @@ torch::Tensor run_exchange(const torch::Tensor& x,
   auto x2d = x.reshape({nall, -1}).to(torch::kCPU, torch::kFloat64).contiguous();
   const int64_t per_node = x2d.size(1);
 
-  // One-time diagnostic: checksum a ghost row before/after to confirm the
-  // exchange actually overwrites ghost features (UMA_DD_DEBUG).
+  // Diagnostic (UMA_DD_DEBUG): relative L2 norm of the change the exchange makes
+  // to ALL ghost rows [nlocal_guess, nall). Only rank 0's first few calls print.
+  // A well-working k=4 exchange should make a NONtrivial correction each layer;
+  // a near-zero change means the exchange is a no-op; a huge change may indicate
+  // it is clobbering good data. HaloContext doesn't know nlocal here, so estimate
+  // ghost region from the callback's own knowledge via a static hook is overkill;
+  // instead norm over the LAST 40% of rows (ghost-heavy) as a proxy.
   static int dbg_calls = 0;
-  const bool dbg = (std::getenv("UMA_DD_DEBUG") != nullptr) && (dbg_calls < 10);
-  double before = 0.0;
+  const bool dbg = (std::getenv("UMA_DD_DEBUG") != nullptr) && (dbg_calls < 8);
+  std::vector<double> snap;
+  const int64_t r0 = static_cast<int64_t>(nall * 0.6);   // proxy ghost region start
   if (dbg) {
     double* p = x2d.data_ptr<double>();
-    // sum of last real row (a ghost, if nall large): row nall-2
-    const int64_t r = (nall >= 2) ? (nall - 2) : 0;
-    for (int64_t k = 0; k < per_node; k++) before += p[r * per_node + k];
+    snap.assign(p + r0 * per_node, p + nall * per_node);
   }
 
   fn(x2d.data_ptr<double>(), nall, per_node);
 
   if (dbg) {
-    double after = 0.0;
     double* p = x2d.data_ptr<double>();
-    const int64_t r = (nall >= 2) ? (nall - 2) : 0;
-    for (int64_t k = 0; k < per_node; k++) after += p[r * per_node + k];
-    std::fprintf(stderr, "[halo dbg call %d] ghost-row checksum before=%.6e after=%.6e changed=%d\n",
-                 dbg_calls, before, after, (before != after));
+    double dn = 0.0, bn = 0.0;
+    for (int64_t idx = 0; idx < static_cast<int64_t>(snap.size()); ++idx) {
+      const double b = snap[idx];
+      const double a = p[r0 * per_node + idx];
+      dn += (a - b) * (a - b);
+      bn += b * b;
+    }
+    std::fprintf(stderr,
+                 "[halo dbg call %d] ghost-region ||delta||/||x|| = %.4e "
+                 "(||x||=%.3e)\n",
+                 dbg_calls, (bn > 0 ? std::sqrt(dn / bn) : std::sqrt(dn)),
+                 std::sqrt(bn));
     dbg_calls++;
   }
 
