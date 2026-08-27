@@ -74,31 +74,34 @@ torch::Tensor run_exchange(const torch::Tensor& x,
   // it is clobbering good data. HaloContext doesn't know nlocal here, so estimate
   // ghost region from the callback's own knowledge via a static hook is overkill;
   // instead norm over the LAST 40% of rows (ghost-heavy) as a proxy.
+  // Exact ghost-only diagnostic: true ghost rows are [nlocal_, nall_real) where
+  // nall_real = nlocal_ + nghost (excludes the dummy pad row at the very end).
+  // instance() exposes nlocal(); the callback set nlocal_ and nall_(=nnodes).
   static int dbg_calls = 0;
   const bool dbg = (std::getenv("UMA_DD_DEBUG") != nullptr) && (dbg_calls < 8);
+  const int64_t nl = HaloContext::instance().nlocal();
+  const int64_t nall_real = nall - 1;                 // exclude dummy pad row
   std::vector<double> snap;
-  const int64_t r0 = static_cast<int64_t>(nall * 0.6);   // proxy ghost region start
-  if (dbg) {
+  if (dbg && nall_real > nl) {
     double* p = x2d.data_ptr<double>();
-    snap.assign(p + r0 * per_node, p + nall * per_node);
+    snap.assign(p + nl * per_node, p + nall_real * per_node);
   }
 
   fn(x2d.data_ptr<double>(), nall, per_node);
 
-  if (dbg) {
+  if (dbg && nall_real > nl) {
     double* p = x2d.data_ptr<double>();
     double dn = 0.0, bn = 0.0;
     for (int64_t idx = 0; idx < static_cast<int64_t>(snap.size()); ++idx) {
       const double b = snap[idx];
-      const double a = p[r0 * per_node + idx];
+      const double a = p[nl * per_node + idx];
       dn += (a - b) * (a - b);
       bn += b * b;
     }
     std::fprintf(stderr,
-                 "[halo dbg call %d] ghost-region ||delta||/||x|| = %.4e "
-                 "(||x||=%.3e)\n",
+                 "[halo dbg call %d] GHOST-ONLY ||delta||/||x|| = %.4e (||x||=%.3e nl=%lld)\n",
                  dbg_calls, (bn > 0 ? std::sqrt(dn / bn) : std::sqrt(dn)),
-                 std::sqrt(bn));
+                 std::sqrt(bn), (long long) nl);
     dbg_calls++;
   }
 

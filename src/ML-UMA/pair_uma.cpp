@@ -1146,6 +1146,28 @@ void PairUMA::install_halo_callbacks()
       fprintf(screen, "uma DD HALO_TEST forward: ghost!=owner_tag count = %d (0 = OK)\n",
               fwd_bad_all);
 
+    // Z-consistency test: does dd_z_[ghost] == Z delivered from owner? If NOT,
+    // ghost embeddings differ from owners (explains the 13.6% pre-block-0 delta).
+    // Fill owned rows with map[type], forward_comm, compare to local map[type[g]].
+    std::fill(buf.begin(), buf.end(), 0.0);
+    for (int i = 0; i < nlocal; i++)
+      for (int k = 0; k < pn; k++) buf[i * pn + k] = static_cast<double>(map[atom->type[i]]);
+    halo_buf_ = buf.data(); halo_per_node_ = pn;
+    comm->forward_comm(this);
+    halo_buf_ = nullptr;
+    int z_bad = 0;
+    for (int g = nlocal; g < na; g++) {
+      const double owner_z = buf[g * pn];                 // Z from owner
+      const double local_z = static_cast<double>(map[atom->type[g]]);  // my dd_z_[g]
+      if (owner_z != local_z) z_bad++;
+    }
+    int z_bad_all = 0;
+    MPI_Allreduce(&z_bad, &z_bad_all, 1, MPI_INT, MPI_SUM, world);
+    if (comm->me == 0 && screen)
+      fprintf(screen,
+              "uma DD HALO_TEST Z-consistency: ghost map[type] != owner Z count = %d "
+              "(0 = OK; nonzero => ghost embeddings differ from owners)\n", z_bad_all);
+
     // reverse test: owned=0, ghost=1; reverse_comm should accumulate onto owners
     // -> owned[a] == (# ghost copies of a across ALL ranks). Verify the global
     // sum of owned rows == total ghost count (each ghost delivers exactly 1).
