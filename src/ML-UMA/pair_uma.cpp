@@ -30,6 +30,7 @@
 
 #include "uma/predictor.h"
 #include "uma/mpi_peer_predictor.h"
+#include "uma/halo_context.h"
 
 #ifdef LMP_KOKKOS
 #include "kokkos.h"
@@ -94,6 +95,8 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   if (const char *e = std::getenv("UMA_DD"))
     dd_active_ = (e[0] == '1' && e[1] == '\0');
   dd_edge_count_ = 0;
+  halo_buf_ = nullptr;
+  halo_per_node_ = 0;
 }
 
 /* ---------------------------------------------------------------------- */
@@ -819,6 +822,11 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   // homogeneous approximation proves insufficient. See parity report.
   mole_composition_allreduce();
 
+  // Install the per-layer halo exchange callbacks (k=4). The traced k=4 artifact
+  // calls uma_halo::exchange before each block; the op routes to LAMMPS comm via
+  // these callbacks. Re-install every step: ghost layout changes on rebuild.
+  install_halo_callbacks();
+
   // Build the owned+ghost edge graph (row0=neighbor, row1=center; centers=owned).
   const int64_t E = build_dd_graph(nall);
 
@@ -970,6 +978,93 @@ void PairUMA::mole_composition_allreduce()
     long total = 0;
     for (long c : global_counts) total += c;
     fprintf(screen, "uma DD: global composition total atoms = %ld\n", total);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   Per-layer halo exchange (k=4). Install callbacks so the engine's
+   uma_halo::exchange op moves node features through LAMMPS' own owned<->ghost
+   comm. Each exchange:
+     forward: set comm_forward = per_node width, stage the [nall,per_node] buffer
+              in halo_buf_, run comm->forward_comm(this) -> pack owned rows into
+              the send buf, unpack into ghost rows on the receiving rank.
+     reverse: set comm_reverse width, run comm->reverse_comm(this, per_node) ->
+              pack ghost rows, unpack ACCUMULATES onto owner rows, then the op
+              zeros ghost rows (done in unpack via LAMMPS convention: reverse
+              adds to owned; we additionally zero ghosts engine-side).
+   halo_buf_ is a borrowed pointer to the engine's staging buffer for the
+   duration of one forward_comm/reverse_comm call (single-threaded here).
+------------------------------------------------------------------------- */
+void PairUMA::install_halo_callbacks()
+{
+  const int64_t nlocal = atom->nlocal;
+  const int64_t nall = atom->nlocal + atom->nghost;
+  PairUMA *self = this;
+  auto fwd = [self](double *buf, int64_t /*nall*/, int64_t per_node) {
+    self->halo_buf_ = buf;
+    self->halo_per_node_ = per_node;
+    self->comm_forward = static_cast<int>(per_node);
+    self->comm->forward_comm(self);
+    self->halo_buf_ = nullptr;
+  };
+  auto rev = [self](double *buf, int64_t nall_in, int64_t per_node) {
+    self->halo_buf_ = buf;
+    self->halo_per_node_ = per_node;
+    self->comm_reverse = static_cast<int>(per_node);
+    // reverse_comm ADDS ghost-row contributions onto owner rows (LAMMPS
+    // convention). Pass explicit size so it runs with newton pair off.
+    self->comm->reverse_comm(self, static_cast<int>(per_node));
+    // Zero ghost rows: their gradient has been delivered to owners; leaving
+    // them nonzero would double-count when the previous (upstream) op re-reads.
+    const int64_t nl = self->atom->nlocal;
+    for (int64_t g = nl; g < nall_in; g++)
+      for (int64_t k = 0; k < per_node; k++) buf[g * per_node + k] = 0.0;
+    self->halo_buf_ = nullptr;
+  };
+  uma::HaloContext::instance().set_callbacks(fwd, rev, nlocal, nall);
+}
+
+/* ---- LAMMPS comm hooks: operate on halo_buf_ [nall, halo_per_node_] --------- */
+int PairUMA::pack_forward_comm(int n, int *list, double *buf,
+                               int /*pbc_flag*/, int * /*pbc*/)
+{
+  const int64_t pn = halo_per_node_;
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    const int64_t j = list[i];
+    for (int64_t k = 0; k < pn; k++) buf[m++] = halo_buf_[j * pn + k];
+  }
+  return m;
+}
+
+void PairUMA::unpack_forward_comm(int n, int first, double *buf)
+{
+  const int64_t pn = halo_per_node_;
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    const int64_t j = first + i;
+    for (int64_t k = 0; k < pn; k++) halo_buf_[j * pn + k] = buf[m++];
+  }
+}
+
+int PairUMA::pack_reverse_comm(int n, int first, double *buf)
+{
+  const int64_t pn = halo_per_node_;
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    const int64_t j = first + i;
+    for (int64_t k = 0; k < pn; k++) buf[m++] = halo_buf_[j * pn + k];
+  }
+  return m;
+}
+
+void PairUMA::unpack_reverse_comm(int n, int *list, double *buf)
+{
+  const int64_t pn = halo_per_node_;
+  int m = 0;
+  for (int i = 0; i < n; i++) {
+    const int64_t j = list[i];
+    for (int64_t k = 0; k < pn; k++) halo_buf_[j * pn + k] += buf[m++];  // accumulate
   }
 }
 

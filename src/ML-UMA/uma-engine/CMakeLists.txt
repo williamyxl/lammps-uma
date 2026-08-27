@@ -37,6 +37,7 @@ if(UMA_ENGINE_USE_XPU)
     src/libtorch_mp_xpu_stub.cpp
     src/peer_context.cpp
     src/block_context.cpp
+    src/halo_context.cpp
     src/mpi_peer_predictor.cpp
   )
 else()
@@ -48,6 +49,7 @@ else()
     src/graph_parallel.cpp
     src/peer_context.cpp
     src/block_context.cpp
+    src/halo_context.cpp
     src/libtorch_mp.cpp
     src/mpi_peer_predictor.cpp
   )

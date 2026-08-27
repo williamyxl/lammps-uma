@@ -735,6 +735,12 @@ def make_ckpt_forward(backbone, submodules, edge_ac_chunk=None):
         atomic_numbers_full = data_dict["atomic_numbers_full"]
         for i in range(self.num_layers):
             with record_function(f"message passing {i}"):
+                # DD k=4 (UMA_DD_HALO=1 at export): refresh the 6 A ghost node
+                # features before each block via the spatial halo exchange, so a
+                # thin (one-layer) halo suffices instead of a deep 24 A halo.
+                # No-op at runtime when HaloContext is inactive (single-rank / GP).
+                if self.dd_halo:
+                    x_message = torch.ops.uma_halo.exchange(x_message)
                 x_message = torch.ops.uma_ckpt.block(
                     i,
                     x_message,
@@ -869,6 +875,10 @@ def main() -> int:
     # CheckpointModuleFn (no_grad fwd + recompute), each chunk (incl. its own
     # [Ec,25,25] wigner recompute) frees after use.
     edge_ac_chunk = int(os.environ.get("EDGE_AC_CHUNK", "16384"))
+    # DD k=4 halo: inject uma_halo::exchange before each block so a 6 A halo
+    # (one message-passing layer) suffices instead of a deep 24 A halo. The op is
+    # a runtime no-op unless the pair style installs a HaloContext (multi-node DD).
+    backbone.dd_halo = os.environ.get("UMA_DD_HALO", "0").strip() in ("1", "true", "yes")
     import types
     for i, blk in enumerate(backbone.blocks):
         # escn_md_block: edge_wise holds the chunk size (read by BlockSubModule).

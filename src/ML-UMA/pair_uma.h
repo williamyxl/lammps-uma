@@ -69,6 +69,7 @@ class PairUMA : public Pair {
   void run_compute_dd(int eflag, int vflag);
   int64_t build_dd_graph(int nall);        // edges among owned+ghost within cutoff
   void mole_composition_allreduce();        // owned-only per-Z counts, cross-rank
+  void install_halo_callbacks();            // bind HaloContext to LAMMPS comm
   bool dd_active_;                           // UMA_DD=1
   int64_t dd_edge_count_;
   std::vector<int64_t> dd_edge_index_;      // [2,E] row0=neighbor row1=center
@@ -76,6 +77,23 @@ class PairUMA : public Pair {
   std::vector<double> dd_pos_;              // [nall,3] owned+ghost, boxlo-shifted
   std::vector<int> dd_z_;                   // [nall] atomic numbers owned+ghost
   std::vector<double> dd_force_;            // [nall,3] forces for all graph nodes
+
+  // Per-layer halo exchange (k=4) scratch. The engine's uma_halo::exchange op
+  // calls back into this pair style; halo_buf_ holds [nall, halo_per_node] node
+  // features in owned+ghost order while comm->forward_comm/reverse_comm run the
+  // owned<->ghost movement through pack/unpack_{forward,reverse}_comm.
+  double *halo_buf_;                         // borrowed view during one exchange
+  int64_t halo_per_node_;                    // F*C (comm width) for current op
+
+ public:
+  // LAMMPS comm hooks for the halo feature exchange (DD k=4). comm_forward /
+  // comm_reverse are set to halo_per_node_ before each exchange.
+  int pack_forward_comm(int, int *, double *, int, int *) override;
+  void unpack_forward_comm(int, int, double *) override;
+  int pack_reverse_comm(int, int, double *) override;
+  void unpack_reverse_comm(int, int *, double *) override;
+
+ protected:
 
   std::string artifact_dir;
   int *map;    // map type -> atomic number (0 unused)
