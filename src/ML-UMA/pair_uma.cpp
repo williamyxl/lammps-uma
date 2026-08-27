@@ -861,9 +861,17 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   dd_pos_[3 * dummy + 2] = far;
   dd_z_[dummy] = dd_z_.empty() ? 1 : dd_z_[0];   // any valid Z; message is zeroed
 
+  const bool dd_dbg = (std::getenv("UMA_DD_DEBUG") != nullptr);
+  if (dd_dbg && screen)
+    fprintf(screen, "uma DD[%d]: nlocal=%d nghost=%d nall=%d nnodes=%d\n",
+            comm->me, nlocal, nghost, nall, nnodes);
+
   // Build the owned+ghost edge graph (row0=neighbor, row1=center; every node a
   // center for k=4). Then pad to edge_cap with dummy self-loops.
   int64_t E = build_dd_graph(nall);
+  if (dd_dbg && screen)
+    fprintf(screen, "uma DD[%d]: build_dd_graph E=%lld (cap=%lld)\n",
+            comm->me, (long long) E, (long long) edge_cap);
   if (edge_cap > 0) {
     if (E > edge_cap)
       error->one(FLERR,
@@ -887,6 +895,9 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
     E = edge_cap;
   }
 
+  if (dd_dbg && screen)
+    fprintf(screen, "uma DD[%d]: padded E=%lld; calling predict_host_extgraph_dd\n",
+            comm->me, (long long) E);
   dd_force_.assign(static_cast<size_t>(nnodes) * 3, 0.0);
   dd_energy_.assign(static_cast<size_t>(nnodes), 0.0);
   // DD path: per-atom energy + owned-only backprop. nlocal owned rows are the
@@ -965,17 +976,20 @@ int64_t PairUMA::build_dd_graph(int nall)
 
   for (int ii = 0; ii < ntot; ii++) {
     const int i = ilist[ii];              // owned OR ghost center
+    if (i >= nall) continue;              // center must be a real node (defensive)
     const int jnum = numneigh[i];
     const int *jlist = firstneigh[i];
     const double xi = x[i][0], yi = x[i][1], zi = x[i][2];
     for (int jj = 0; jj < jnum; jj++) {
       int j = jlist[jj] & NEIGHMASK;
+      // BOUNDS CHECK BEFORE x[j]: a REQ_GHOST full list can list neighbors that
+      // are outside [0,nall) (ghost-of-ghost / extended region). Those are NOT
+      // graph nodes we hold, so skip them. Reading x[j] first would segfault.
+      if (j < 0 || j >= nall) continue;
       const double dx = x[j][0] - xi;
       const double dy = x[j][1] - yi;
       const double dz = x[j][2] - zi;
       if (dx * dx + dy * dy + dz * dz > cut2) continue;
-      if (j >= nall)
-        error->one(FLERR, "Pair style uma: UMA_DD neighbor index exceeds nall");
       row_nbr.push_back(static_cast<int64_t>(j));   // neighbor
       row_ctr.push_back(static_cast<int64_t>(i));   // center
     }
