@@ -137,6 +137,24 @@ ArtifactMetadata load_artifact_metadata(const std::string& metadata_path) {
   } catch (const std::exception&) {
     meta.checkpoint_path.clear();
   }
+  // Optional (P2.1): edge-cap padding target + pad atom. Absent in legacy
+  // artifacts -> 0 (padding off).
+  try {
+    meta.edge_pad_cap = parse_json_int(json, "edge_pad_cap");
+  } catch (const std::exception&) {
+    meta.edge_pad_cap = 0;
+  }
+  try {
+    meta.edge_pad_atom = parse_json_int(json, "edge_pad_atom");
+  } catch (const std::exception&) {
+    meta.edge_pad_atom = 0;
+  }
+  // DD k=4: per-node halo comm width (doubles/atom). Absent -> 0 (not DD).
+  try {
+    meta.dd_halo_width = parse_json_int(json, "dd_halo_width");
+  } catch (const std::exception&) {
+    meta.dd_halo_width = 0;
+  }
   return meta;
 }
 

@@ -632,6 +632,22 @@ void PairUMA::init_style()
     // Ghosts are supplied to the receptive field by `comm_modify cutoff
     // (num_layers*cutoff)`, which the user sets in the input script.
     neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
+
+    // Size the LAMMPS forward/reverse comm buffer for the halo feature exchange.
+    // The per-layer halo moves dd_halo_width doubles/atom (sph_feature_size *
+    // sphere_channels, e.g. 9*128=1152). comm_forward/comm_reverse are read by
+    // Comm::init() (called AFTER init_style) to size buf_send/buf_recv, so they
+    // MUST be set here, not inside the op callback (setting them late leaves the
+    // buffer too small -> pack_forward_comm overruns -> segfault).
+    int w = predictor ? predictor->metadata().dd_halo_width : 0;
+    if (w <= 0)
+      error->all(FLERR,
+                 "Pair style uma: UMA_DD requires a k=4 DD artifact with "
+                 "dd_halo_width in metadata (export with UMA_DD_HALO=1)");
+    comm_forward = w;
+    comm_reverse = w;
+    if (comm->me == 0 && screen)
+      fprintf(screen, "uma DD: halo comm width = %d doubles/atom\n", w);
   } else {
     neighbor->add_request(this, NeighConst::REQ_FULL);
   }
@@ -1070,16 +1086,20 @@ void PairUMA::install_halo_callbacks()
   const int64_t nnodes = nall + 1;
   PairUMA *self = this;
   auto fwd = [self](double *buf, int64_t /*nnodes*/, int64_t per_node) {
+    // per_node MUST equal comm_forward set in init_style (buf_send sized for it).
+    if (static_cast<int>(per_node) > self->comm_forward)
+      self->error->one(FLERR, "Pair style uma: halo per_node exceeds comm_forward "
+                              "(dd_halo_width mismatch)");
     self->halo_buf_ = buf;
     self->halo_per_node_ = per_node;
-    self->comm_forward = static_cast<int>(per_node);
     self->comm->forward_comm(self);   // fills ghost rows [nlocal,nall) from owners
     self->halo_buf_ = nullptr;
   };
   auto rev = [self](double *buf, int64_t /*nnodes*/, int64_t per_node) {
+    if (static_cast<int>(per_node) > self->comm_reverse)
+      self->error->one(FLERR, "Pair style uma: halo per_node exceeds comm_reverse");
     self->halo_buf_ = buf;
     self->halo_per_node_ = per_node;
-    self->comm_reverse = static_cast<int>(per_node);
     // reverse_comm ADDS ghost-row contributions onto owner rows (LAMMPS
     // convention). Pass explicit size so it runs with newton pair off.
     self->comm->reverse_comm(self, static_cast<int>(per_node));

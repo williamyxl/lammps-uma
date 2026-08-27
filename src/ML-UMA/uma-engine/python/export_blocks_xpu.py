@@ -1096,33 +1096,77 @@ def main() -> int:
     # with dummy->dummy self-loops. example layout:
     #   [0]=pos[n,3] [1]=z[n] [2]=cell [3]=pbc [4]=edge_index[2,E] [5]=coff[E,3]
     #   [6]=charge [7]=spin
-    if dd_export:
-        cap = int(os.environ.get("UMA_DD_EDGE_CAP", "0"))
-        if cap <= 0:
-            raise SystemExit("UMA_DD_HALO=1 requires UMA_DD_EDGE_CAP > 0 "
-                             "(the fixed traced edge/chunk capacity)")
+    # --- P2.1 / W10 edge-cap padding of the trace example ---------------------
+    # Pad the trace example's edge_index up to a FIXED capacity that is a multiple
+    # of edge_ac_chunk, so torch.jit.trace bakes a constant chunk-loop count. The
+    # C++ runtime pads its (drifting) per-step edge count to the SAME cap via
+    # graph_shard::pad_edges_to_capacity, so the chunk count never mismatches ->
+    # fixes the N=24/N=16/N=36 NVT step-1 crash. Padded edges are self-loops on an
+    # appended dummy node placed far beyond the cutoff -> envelope=0 -> exactly
+    # zero energy/force contribution. Enabled by default (UMA_EDGE_PAD=1); the DD
+    # path (UMA_DD_HALO=1) uses its explicit UMA_DD_EDGE_CAP.
+    edge_pad_on = os.environ.get("UMA_EDGE_PAD", "1").strip() not in (
+        "0", "false", "no")
+    edge_pad_cap = 0
+    edge_pad_atom = 0
+    if dd_export or edge_pad_on:
         pos_e = example[0]; z_e = example[1]
         eidx = example[4]; coff = example[5]
         n_real = int(pos_e.shape[0])
         E_real = int(eidx.shape[1])
-        if E_real > cap:
-            raise SystemExit(f"trace edge count {E_real} exceeds UMA_DD_EDGE_CAP "
-                             f"{cap}; raise the cap or trace a smaller N")
-        dummy = n_real                          # appended dummy node index
-        far = 1.0e6
-        pos_pad = torch.full((1, 3), far, dtype=pos_e.dtype, device=pos_e.device)
-        example[0] = torch.cat([pos_e, pos_pad], dim=0).contiguous()
-        example[1] = torch.cat(
-            [z_e, z_e.new_full((1,), int(z_e[0]) if z_e.numel() else 1)],
-            dim=0).contiguous()
-        n_pad = cap - E_real
-        pad_e = torch.full((2, n_pad), dummy, dtype=eidx.dtype, device=eidx.device)
-        pad_c = torch.zeros((n_pad, 3), dtype=coff.dtype, device=coff.device)
-        example[4] = torch.cat([eidx, pad_e], dim=1).contiguous()
-        example[5] = torch.cat([coff, pad_c], dim=0).contiguous()
-        print(f"DD k=4: trace edges padded {E_real} -> {cap} "
-              f"(+dummy node {dummy}); chunk count baked at "
-              f"{-(-cap // edge_ac_chunk)}", flush=True)
+        if dd_export:
+            cap = int(os.environ.get("UMA_DD_EDGE_CAP", "0"))
+            if cap <= 0:
+                raise SystemExit("UMA_DD_HALO=1 requires UMA_DD_EDGE_CAP > 0 "
+                                 "(the fixed traced edge/chunk capacity)")
+            if E_real > cap:
+                raise SystemExit(f"trace edge count {E_real} exceeds "
+                                 f"UMA_DD_EDGE_CAP {cap}; raise the cap")
+            # DD path: appended dummy node (legacy behaviour).
+            dummy = n_real
+            far = 1.0e6
+            pos_pad = torch.full((1, 3), far, dtype=pos_e.dtype, device=pos_e.device)
+            example[0] = torch.cat([pos_e, pos_pad], dim=0).contiguous()
+            example[1] = torch.cat(
+                [z_e, z_e.new_full((1,), int(z_e[0]) if z_e.numel() else 1)],
+                dim=0).contiguous()
+            n_pad = cap - E_real
+            pad_e = torch.full((2, n_pad), dummy, dtype=eidx.dtype,
+                               device=eidx.device)
+            pad_c = torch.zeros((n_pad, 3), dtype=coff.dtype, device=coff.device)
+            example[4] = torch.cat([eidx, pad_e], dim=1).contiguous()
+            example[5] = torch.cat([coff, pad_c], dim=0).contiguous()
+            edge_pad_cap = int(cap)
+            edge_pad_atom = int(dummy)
+        else:
+            # NORMAL path (P2.1): NO dummy node — pad with self-loops with a large
+            # cell_offset (coff[:,0]=2.0 -> shift 2 lattice vectors -> |r| >> cutoff
+            # -> envelope 0 -> zero contribution). CRITICAL for GP: the pad edge's
+            # CENTER (row 1) is the scatter target into this rank's LOCAL node
+            # accumulator, so it MUST be a node this rank OWNS. Use node_offset
+            # (the rank's first owned global node); for W==1 that is 0. A global
+            # index the rank does not own (e.g. 0 on rank 1) scatters out of the
+            # local partition -> GPU segfault. Edge indices in the shard are GLOBAL
+            # (all_gather_nodes reconstructs the full set), so pad_atom is global
+            # node_offset. C++ must pad with the SAME per-rank node_offset.
+            # cap = (E // chunk + 1) * chunk: chunk multiple + one guard chunk.
+            cap = ((E_real // edge_ac_chunk) + 1) * edge_ac_chunk
+            n_pad = cap - E_real
+            pad_atom = int(node_offset)
+            pad_e = torch.full((2, n_pad), pad_atom, dtype=eidx.dtype,
+                               device=eidx.device)
+            pad_c = torch.zeros((n_pad, 3), dtype=coff.dtype, device=coff.device)
+            pad_c[:, 0] = 2.0
+            # C++ prepends pad edges (cat({pad, real})); match that ordering so the
+            # per-chunk split sees the same layout at trace and runtime.
+            example[4] = torch.cat([pad_e, eidx], dim=1).contiguous()
+            example[5] = torch.cat([pad_c, coff], dim=0).contiguous()
+            edge_pad_cap = int(cap)
+            edge_pad_atom = int(pad_atom)
+        print(f"P2.1 edge-cap: trace edges padded {E_real} -> {edge_pad_cap} "
+              f"(pad_atom={edge_pad_atom}); chunk count baked at "
+              f"{-(-edge_pad_cap // edge_ac_chunk)} (edge_ac_chunk={edge_ac_chunk})",
+              flush=True)
 
     report = {"n_trace": n_trace, "natoms": nat,
               "num_layers": int(backbone.num_layers),
@@ -1270,6 +1314,13 @@ def main() -> int:
         meta_d["num_edgedeg"] = 1
         meta_d["edgedeg_chunk_module"] = "model_edgedeg_chunk.pt"
         meta_d["edge_ac_chunk"] = edge_ac_chunk
+        # P2.1 edge-cap padding: the fixed traced edge capacity (a multiple of
+        # edge_ac_chunk) and the dummy pad atom index. The C++ engine pads its
+        # per-step edge_index up to edge_pad_cap on atom edge_pad_atom (self-loops
+        # beyond cutoff -> zero contribution) so the traced chunk count is
+        # invariant to per-step edge drift. 0 => padding off (legacy).
+        meta_d["edge_pad_cap"] = int(edge_pad_cap)
+        meta_d["edge_pad_atom"] = int(edge_pad_atom)
         # P4 AC+GP merge metadata (read by the C++ mpi_peer_predictor): world,
         # rank, gp_node_offset (this rank's node_partition start), total_atoms
         # (full system N, the all_gather_nodes buffer size). W==1 => world=1,
@@ -1286,6 +1337,12 @@ def main() -> int:
             meta_d["dd_halo_op"] = "uma_halo::exchange"
             meta_d["returns_node_energy"] = True           # top returns (node_e, total)
             meta_d["edge_ac_chunk"] = edge_ac_chunk
+            # Node-feature width for the halo comm buffer (LAMMPS must size its
+            # forward/reverse comm buffer to this many doubles/atom BEFORE the run).
+            meta_d["sph_feature_size"] = int(backbone.sph_feature_size)
+            meta_d["sphere_channels"] = int(backbone.sphere_channels)
+            meta_d["dd_halo_width"] = int(backbone.sph_feature_size) * \
+                int(backbone.sphere_channels)
             meta_d["export_notes"].append(
                 "DD k=4 spatial domain decomposition: top module returns "
                 "(node_energy[N], total_energy); uma_halo::exchange called before "
