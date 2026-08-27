@@ -412,11 +412,17 @@ void PairUMA::load_predictor()
   delete mpi_peer;
   mpi_peer = nullptr;
 
+  // Spatial DD: every rank runs the SINGLE-TILE predictor on its own subdomain
+  // (owned+ghost). Do NOT build the GP-over-MPI peer even though nprocs>1; DD is
+  // a different decomposition (spatial, not edge-sharded). Fall through to the
+  // single-tile predictor construction below.
+  if (dd_active_) {
+    // (single-tile predictor built below)
+  } else if (comm->nprocs > 1) {
   // ---- multi-node edge-parallel: one MpiPeerPredictor per MPI rank ---------
   // Triggered by nprocs > 1. Each rank owns one GPU and evaluates 1/world of
   // the graph; NCCL (bootstrapped over MPI) does the force all-reduce. Memory
   // is ~O(N/world) -> systems too big for one GPU run across nodes.
-  if (comm->nprocs > 1) {
     if (precision != PRECISION_DOUBLE)
       error->all(FLERR, "Pair style uma: multi-node requires precision double");
     try {
@@ -751,20 +757,25 @@ int64_t PairUMA::build_ext_graph(int nlocal)
 }
 
 /* ----------------------------------------------------------------------
-   Multi-node spatial domain decomposition (Phase A, deep halo k=1)
+   Multi-node spatial domain decomposition (Phase B, k=4 per-layer halo)
    ----------------------------------------------------------------------
-   Each MPI rank owns a LAMMPS subdomain. LAMMPS provides ghost atoms out to the
-   full model receptive field (num_layers * cutoff, e.g. 4*6 = 24 A), set by the
-   user via `comm_modify cutoff 24.0`. We build the engine graph over the rank's
-   OWNED + GHOST atoms as first-class nodes, evaluate the single-tile Predictor,
-   and keep forces for owned atoms only. Because a ghost within 24 A of an owned
-   atom carries the full 4-hop receptive field, every owned atom's energy and
-   force is EXACT -- k=1 needs no mid-network halo exchange and no reverse comm
-   (each rank computes its owned atoms' forces from its own complete halo).
+   Each MPI rank owns a LAMMPS subdomain. LAMMPS provides ghost atoms out to ONE
+   message-passing layer (cutoff + small skin ~ 6.5 A), set via `comm_modify
+   cutoff 6.5`. We build the engine graph over the rank's OWNED + GHOST atoms as
+   first-class nodes and evaluate the single-tile Predictor. The k=4 traced
+   artifact calls uma_halo::exchange BEFORE each of the 4 blocks to refresh the
+   6 A ghost features from their owners, so a thin one-layer halo is exact for
+   owned-atom outputs (vs the deep 24 A halo k=1 would need). Forces are kept for
+   owned atoms only; ghost force contributions are delivered to owners by the
+   halo exchange backward (reverse comm), so owned-atom forces are exact.
 
    Ghost coordinates are absolute and unwrapped, so edge_vec = x[j] - x[i]
    directly: no integer-image recovery, no cell offsets, and triclinic works
    without the orthorhombic restriction of build_ext_graph.
+
+   Edge padding (P2.1): each rank pads its edge list to a fixed UMA_DD_EDGE_CAP
+   (multiple of EDGE_AC_CHUNK the artifact was traced at) with dummy self-loops on
+   an appended far-away node, so the traced chunk count matches on every rank.
 ------------------------------------------------------------------------- */
 void PairUMA::run_compute_dd(int eflag, int vflag)
 {
@@ -827,17 +838,64 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   // these callbacks. Re-install every step: ghost layout changes on rebuild.
   install_halo_callbacks();
 
-  // Build the owned+ghost edge graph (row0=neighbor, row1=center; centers=owned).
-  const int64_t E = build_dd_graph(nall);
+  // --- edge padding (P2.1): fix the traced chunk count across ranks/steps -----
+  // The traced artifact bakes num_chunks = ceil(E / EDGE_AC_CHUNK) at export.
+  // Per-rank E varies (subdomain volume, atom drift), so each rank pads its edge
+  // list up to a FIXED capacity UMA_DD_EDGE_CAP (a multiple of EDGE_AC_CHUNK the
+  // artifact was traced with). One extra DUMMY node is appended far outside the
+  // cutoff; padded edges are dummy->dummy self-loops whose edge_distance >> cutoff
+  // -> radial envelope = 0 -> zero message, zero contribution to real nodes and
+  // zero force on real atoms. n_nodes passed to the engine is nall+1.
+  int64_t edge_cap = 0;
+  if (const char *e = std::getenv("UMA_DD_EDGE_CAP")) edge_cap = atoll(e);
 
-  dd_force_.assign(static_cast<size_t>(nall) * 3, 0.0);
+  const int nnodes = nall + 1;              // +1 dummy padding node
+  const int dummy = nall;                   // index of the dummy node
+  // Dummy node placed far from all real atoms so any edge to it has r >> cutoff.
+  // Use a large offset from box origin along +x (absolute coords, offsets zero).
+  dd_pos_.resize(static_cast<size_t>(nnodes) * 3);
+  dd_z_.resize(static_cast<size_t>(nnodes));
+  const double far = 1.0e6;
+  dd_pos_[3 * dummy + 0] = far;
+  dd_pos_[3 * dummy + 1] = far;
+  dd_pos_[3 * dummy + 2] = far;
+  dd_z_[dummy] = dd_z_.empty() ? 1 : dd_z_[0];   // any valid Z; message is zeroed
+
+  // Build the owned+ghost edge graph (row0=neighbor, row1=center; every node a
+  // center for k=4). Then pad to edge_cap with dummy self-loops.
+  int64_t E = build_dd_graph(nall);
+  if (edge_cap > 0) {
+    if (E > edge_cap)
+      error->one(FLERR,
+                 "Pair style uma: UMA_DD real edge count exceeds UMA_DD_EDGE_CAP "
+                 "(raise the cap and re-export the artifact traced at that cap)");
+    const int64_t old = E;
+    dd_edge_index_.resize(static_cast<size_t>(2) * edge_cap);
+    // dd_edge_index_ is stored row-major [2,E]: row0 at [0,E), row1 at [E,2E).
+    // Rebuild as [2,edge_cap] keeping real edges then dummy self-loops.
+    std::vector<int64_t> ei(static_cast<size_t>(2) * edge_cap);
+    for (int64_t k = 0; k < old; k++) {
+      ei[k] = dd_edge_index_[k];                       // row0 real
+      ei[edge_cap + k] = dd_edge_index_[old + k];      // row1 real
+    }
+    for (int64_t k = old; k < edge_cap; k++) {
+      ei[k] = dummy;                                   // row0 = dummy neighbor
+      ei[edge_cap + k] = dummy;                        // row1 = dummy center
+    }
+    dd_edge_index_.swap(ei);
+    dd_cell_offsets_.assign(static_cast<size_t>(edge_cap) * 3, 0.0);
+    E = edge_cap;
+  }
+
+  dd_force_.assign(static_cast<size_t>(nnodes) * 3, 0.0);
   uma::Prediction result = predictor->predict_host_extgraph(
-      nall, dd_pos_.data(), dd_z_.data(), cell_buf, pbc_buf, E,
+      nnodes, dd_pos_.data(), dd_z_.data(), cell_buf, pbc_buf, E,
       dd_edge_index_.data(), dd_cell_offsets_.data(), dd_force_.data());
 
-  // Keep forces for OWNED atoms only. Ghost forces belong to the rank that owns
-  // that atom, which computes them itself from its own halo (k=1, no reverse
-  // comm). Newton off: LAMMPS does not fold ghost forces back here.
+  // Keep forces for OWNED atoms only (rows [0,nlocal); ghosts [nlocal,nall) and
+  // the dummy node [nall] are discarded). Under k=4 the halo-exchange BACKWARD
+  // (reverse comm) already delivered each ghost's force contribution back to its
+  // owner during autograd, so an owned atom's force here is complete and exact.
   for (int i = 0; i < nlocal; i++) {
     f[i][0] += dd_force_[3 * i + 0];
     f[i][1] += dd_force_[3 * i + 1];
@@ -999,29 +1057,35 @@ void PairUMA::install_halo_callbacks()
 {
   const int64_t nlocal = atom->nlocal;
   const int64_t nall = atom->nlocal + atom->nghost;
+  // The engine tensor has nall+1 rows (last = dummy padding node). LAMMPS comm
+  // only knows about the real nall atoms, so pack/unpack operate on rows
+  // [0,nall); the dummy row (index nall) is local, never a ghost, so it is left
+  // untouched by both forward and reverse comm (its features/grads never move).
+  const int64_t nnodes = nall + 1;
   PairUMA *self = this;
-  auto fwd = [self](double *buf, int64_t /*nall*/, int64_t per_node) {
+  auto fwd = [self](double *buf, int64_t /*nnodes*/, int64_t per_node) {
     self->halo_buf_ = buf;
     self->halo_per_node_ = per_node;
     self->comm_forward = static_cast<int>(per_node);
-    self->comm->forward_comm(self);
+    self->comm->forward_comm(self);   // fills ghost rows [nlocal,nall) from owners
     self->halo_buf_ = nullptr;
   };
-  auto rev = [self](double *buf, int64_t nall_in, int64_t per_node) {
+  auto rev = [self](double *buf, int64_t /*nnodes*/, int64_t per_node) {
     self->halo_buf_ = buf;
     self->halo_per_node_ = per_node;
     self->comm_reverse = static_cast<int>(per_node);
     // reverse_comm ADDS ghost-row contributions onto owner rows (LAMMPS
     // convention). Pass explicit size so it runs with newton pair off.
     self->comm->reverse_comm(self, static_cast<int>(per_node));
-    // Zero ghost rows: their gradient has been delivered to owners; leaving
-    // them nonzero would double-count when the previous (upstream) op re-reads.
+    // Zero ghost rows [nlocal,nall): their gradient has been delivered to owners.
     const int64_t nl = self->atom->nlocal;
-    for (int64_t g = nl; g < nall_in; g++)
+    const int64_t na = self->atom->nlocal + self->atom->nghost;
+    for (int64_t g = nl; g < na; g++)
       for (int64_t k = 0; k < per_node; k++) buf[g * per_node + k] = 0.0;
     self->halo_buf_ = nullptr;
   };
-  uma::HaloContext::instance().set_callbacks(fwd, rev, nlocal, nall);
+  // HaloContext nall == nnodes so the op's row-count check matches the tensor.
+  uma::HaloContext::instance().set_callbacks(fwd, rev, nlocal, nnodes);
 }
 
 /* ---- LAMMPS comm hooks: operate on halo_buf_ [nall, halo_per_node_] --------- */

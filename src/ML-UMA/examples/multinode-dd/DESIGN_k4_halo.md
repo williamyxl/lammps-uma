@@ -90,6 +90,36 @@ tolerance. Exact fix (owned-only allreduce of per-Z counts fed into the mean) is
 mole_composition_allreduce() -> engine hook (Phase B+ if needed). Energy parity
 will tell us if the homogeneous approximation holds.
 
+## CRITICAL FINDING: per-atom energy (E1) is required for FORCES, not just energy
+
+Careful analysis of the DD backward (see chat 2026-08-27): if each rank
+backprops from its FULL subsystem energy E_r = sum over (owned+ghost) e_a, the
+force on an atom picks up spurious gradients from the ghost-energy terms e_g,
+which are also (correctly) counted on the ghost's owner. So naive
+grad(E_subsystem, pos) is WRONG for forces under DD.
+
+Correct DD forces: each rank must backprop from its OWNED-atom energy sum
+E_owned(r) = sum_{a in owned(r)} e_a. Then:
+  - the owner's own grad(E_owned, x_i) is the local part;
+  - cross-rank parts (atom i as a ghost on neighbor ranks) arrive via the
+    uma_halo::exchange BACKWARD (reverse comm ghost-grad -> owner).
+Sum = exact global F_i = -dE_global/dx_i.
+
+=> E1 (per-atom energy) is a HARD PREREQUISITE for the force gate too, because
+the backprop root must be the owned-only energy sum. The infrastructure already
+exists: `NodeEnergyExportWrapper` (export_wrapper.py:152) returns
+(node_energy[N], total) with per-atom energy INSIDE the autograd graph, built
+specifically for spatial DD. It must be:
+  1. traced through the checkpointed block/chunk forward (currently
+     export_blocks_xpu.py traces EnergyExportWrapper, which returns only the
+     scalar). Integrate NodeEnergyExportWrapper into the k=4 DD export.
+  2. consumed by a predict_body variant that receives node_energy[nnodes], forms
+     E_owned = node_energy[0:nlocal].sum(), and calls grad(E_owned, pos). Forces
+     for owned rows are then exact after the halo backward; energy for owned rows
+     sums across ranks (eng_vdwl) for the global energy gate.
+
+This unifies the force and energy paths: both come from the per-atom energy.
+
 ## Energy under DD (now testable)
 
 k=4 does NOT by itself give a global energy scalar. The model returns one energy
