@@ -44,5 +44,10 @@ class XcclPeer {
   virtual int world() const = 0;
 };
 
+// opt6-diag: read + reset per-call collective accumulators (UMA_PEER_PERF).
+// Returns via out params: all_gather ms/count/bytes, all_reduce ms/count.
+void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
+                          double& ar_ms, int& ar_n);
+
 }  // namespace kokkos_peer
 }  // namespace uma

@@ -13,6 +13,7 @@
 
 #include "uma/xccl_peer.h"
 
+#include <chrono>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -27,7 +28,18 @@
 namespace uma {
 namespace kokkos_peer {
 
+// opt6-diag: per-rank accumulators for collective cost (UMA_PEER_PERF=1). The
+// caller (mpi_peer_predictor) reads+resets these each force call to see how much
+// of fwd/bwd is all_gather vs all_reduce vs compute. Wall time incl. the .wait().
+double g_ag_ms = 0.0; int g_ag_n = 0; double g_ag_bytes = 0.0;
+double g_ar_ms = 0.0; int g_ar_n = 0;
+
 namespace {
+inline double now_ms() {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
 ccl::datatype ccl_dtype(c10::ScalarType t) {
   switch (t) {
     case torch::kFloat64: return ccl::datatype::float64;
@@ -87,10 +99,12 @@ class XcclPeerImpl final : public XcclPeer {
     work = work.contiguous();
     auto out = torch::empty_like(work);
     const size_t count = static_cast<size_t>(work.numel());
+    const double _t0 = now_ms();
     ccl::allreduce(work.data_ptr(), out.data_ptr(), count,
                    ccl::datatype::float64, ccl::reduction::sum, *comm_,
                    *stream_)
         .wait();
+    g_ar_ms += now_ms() - _t0; ++g_ar_n;
     if (cast) out = out.to(local.scalar_type());
     return out.contiguous();
   }
@@ -103,9 +117,12 @@ class XcclPeerImpl final : public XcclPeer {
     out_shape[0] = out_shape[0] * world_;
     auto out = torch::empty(out_shape, x.options());
     const size_t count = static_cast<size_t>(x.numel());  // per-rank element count
+    const double _t0 = now_ms();
     ccl::allgather(x.data_ptr(), out.data_ptr(), count, ccl_dtype(x.scalar_type()),
                    *comm_, *stream_)
         .wait();
+    g_ag_ms += now_ms() - _t0; ++g_ag_n;
+    g_ag_bytes += static_cast<double>(count) * x.element_size();
     return out.contiguous();
   }
 
@@ -129,6 +146,14 @@ class XcclPeerImpl final : public XcclPeer {
 std::shared_ptr<XcclPeer> XcclPeer::create(int rank, int world,
                                            int device_index) {
   return std::make_shared<XcclPeerImpl>(rank, world, device_index);
+}
+
+void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
+                          double& ar_ms, int& ar_n) {
+  ag_ms = g_ag_ms; ag_n = g_ag_n; ag_bytes = g_ag_bytes;
+  ar_ms = g_ar_ms; ar_n = g_ar_n;
+  g_ag_ms = 0.0; g_ag_n = 0; g_ag_bytes = 0.0;
+  g_ar_ms = 0.0; g_ar_n = 0;
 }
 
 }  // namespace kokkos_peer

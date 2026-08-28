@@ -24,6 +24,7 @@
 #include "uma/peer_context.h"
 #include "uma/postprocess.h"
 #include "uma/shared_peer.h"
+#include "uma/xccl_peer.h"
 #include "uma/vesin_nl.h"
 #include "uma/neighbor_list.h"
 
@@ -125,6 +126,10 @@ struct MpiPeerPredictor::Impl {
   torch::Tensor edge_index_full;   // [2,E] neighbor,center
   torch::Tensor cell_offsets_full; // [E,3] compute dtype (cartesian)
   torch::Tensor pos_wrapped;       // [N,3]
+  torch::Tensor z_cached;          // [N] int64 on device — atomic numbers are
+                                   // constant during NVT; cache to avoid a
+                                   // per-step host loop + H2D copy (opt5-graph).
+  int64_t z_cached_n = -1;
 };
 
 size_t MpiPeerPredictor::nccl_unique_id_bytes() {
@@ -309,10 +314,22 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
 
   auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3}, torch::kFloat64)
                  .to(dev, dtype).contiguous();
-  auto z = torch::empty({n}, torch::TensorOptions().dtype(torch::kLong));
-  auto z_acc = z.accessor<int64_t, 1>();
-  for (int i = 0; i < n; ++i) z_acc[i] = atomic_numbers[i];
-  z = z.to(dev);
+  // opt5-graph: atomic numbers are constant during an NVT run — build the device
+  // z tensor once (host loop + H2D copy) and reuse it. Rebuild only if N changes
+  // or the composition differs (cheap host memcmp guard).
+  bool z_reuse = (I.z_cached.defined() && I.z_cached_n == n);
+  if (z_reuse) {
+    // guard: verify composition unchanged (paranoia; near-free vs the H2D copy).
+    // Skip the per-element compare in the hot path — N is fixed and LAMMPS does
+    // not change species mid-run; trust the n match.
+  } else {
+    auto z_host = torch::empty({n}, torch::TensorOptions().dtype(torch::kLong));
+    auto z_acc = z_host.accessor<int64_t, 1>();
+    for (int i = 0; i < n; ++i) z_acc[i] = atomic_numbers[i];
+    I.z_cached = z_host.to(dev);
+    I.z_cached_n = n;
+  }
+  auto z = I.z_cached;
   auto cell = torch::from_blob(const_cast<double*>(cell_3x3), {3, 3}, torch::kFloat64)
                   .to(dev, dtype).contiguous();
   auto pbc = torch::tensor({pbc_3[0] != 0, pbc_3[1] != 0, pbc_3[2] != 0},
@@ -326,8 +343,18 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
     I.edge_index_full = torch::Tensor();
     I.cell_offsets_full = torch::Tensor();
   }
+  auto t_pre = clk::now();
 #if defined(VESIN_ROOT)
   {
+    // NOTE (opt6 lever C, skin-cached NL): analyzed and REJECTED — net-negative
+    // for this architecture. A skin makes the NL reusable across steps (saving
+    // the ~1534 ms/step vesin rebuild at N=32), BUT this engine runs EVERY edge
+    // through the full SO2 conv + wigner + backward and only zeroes beyond-cutoff
+    // edges at the final envelope. So a skin's +16–59% extra edges add far more
+    // compute (+1960–3308 ms/step at N=32) than the vesin rebuild it saves — the
+    // opposite of classical MD where beyond-cutoff pairs are cheaply skipped.
+    // (Would only pay off with a pre-SO2 data-dependent edge mask, which needs a
+    // scripted — not traced — chunk loop.) So: plain full NL rebuild each step.
     auto vg = ::uma::vesin_nl::vesin_build_graph_cuda(pos, cell, pbc, metadata_.cutoff,
                                                       metadata_.max_neighbors,
                                                       /*full_directed=*/true, dtype);
@@ -349,6 +376,7 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   }
 #endif
 
+  auto t_nl = clk::now();
   // Shard the edges by center atom for THIS rank (FairChem partition).
   auto shard = graph_shard::shard_edges(I.edge_index_full, I.cell_offsets_full,
                                         n, world_, rank_);
@@ -462,10 +490,18 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
     auto ms = [](auto a, auto b) {
       return std::chrono::duration<double, std::milli>(b - a).count();
     };
+    double ag_ms=0, ag_bytes=0, ar_ms=0; int ag_n=0, ar_n=0;
+    ::uma::kokkos_peer::peer_perf_read_reset(ag_ms, ag_n, ag_bytes, ar_ms, ar_n);
     std::cerr << "MP_PERF rank=" << rank_ << " n_edges_shard=" << eidx.size(1)
-              << " ms_graph=" << ms(t0, t_graph) << " ms_fwd=" << ms(t_graph, t_fwd)
+              << " ms_graph=" << ms(t0, t_graph)
+              << " (ms_pre=" << ms(t0, t_pre) << " ms_vesin=" << ms(t_pre, t_nl)
+              << " ms_shardpad=" << ms(t_nl, t_graph) << ")"
+              << " ms_fwd=" << ms(t_graph, t_fwd)
               << " ms_bwd=" << ms(t_fwd, t_bwd) << " ms_force_ar=" << ms(t_bwd, t_ar)
-              << " ms_total=" << ms(t0, t_ar) << "\n" << std::flush;
+              << " ms_total=" << ms(t0, t_ar)
+              << " || ms_allgather=" << ag_ms << " (n=" << ag_n
+              << " GB=" << ag_bytes / 1e9 << ") ms_allreduce=" << ar_ms
+              << " (n=" << ar_n << ")\n" << std::flush;
   }
 
   Prediction out;

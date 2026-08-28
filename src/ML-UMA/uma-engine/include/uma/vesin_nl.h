@@ -56,8 +56,10 @@ inline torch::Tensor wrap_positions_cuda(
 
   torch::Tensor pbc_mask;
   if (pbc_cuda.numel() == 1) {
-    const double v = pbc_cuda.item<bool>() ? 1.0 : 0.0;
-    pbc_mask = torch::full({1, 3}, v, pos.options());
+    // opt5-graph: build the mask on-device without .item() (which forces an
+    // XPU->host sync every step). Broadcast the scalar bool to [1,3] on device.
+    pbc_mask = pbc_cuda.to(float_dtype).view({1, 1}).expand({1, 3}).to(
+        pos.device());
   } else if (pbc_cuda.numel() == 3) {
     pbc_mask = pbc_cuda.to(float_dtype).view({1, 3}).to(pos.device());
   } else {
@@ -176,16 +178,26 @@ inline VesinGraphDevice vesin_build_graph_cuda_impl(torch::Tensor pos_cuda,
     // Re-index i/j after possible dim fix; use current edge_index rows.
     i = edge_index.index({0});
     j = edge_index.index({1});
-    // Tier0/W2: skip expensive CPU cap when every center already has ≤K edges
-    // (common for water/NaCl at 6Å). Bit-identical to running the no-op cap.
-    const int64_t n_atoms = wrapped_pos.size(0);
-    auto counts = torch::bincount(i, /*weights=*/{}, /*minlength=*/n_atoms);
-    const int64_t max_degree = counts.max().item<int64_t>();
-    if (max_degree > max_neighbors) {
-      auto pi = wrapped_pos.index_select(0, i);
-      auto pj = wrapped_pos.index_select(0, j) + shifts_cart;
-      auto dist = (pj - pi).norm(2, /*dim=*/1);
-      cap_edges_per_center(edge_index, shifts, shifts_cart, dist, max_neighbors);
+    // opt5-graph: the cap-check does `counts.max().item()` — a BLOCKING XPU->host
+    // sync EVERY MD step. For a fixed lattice (e.g. NaCl at 6Å) the max degree is
+    // constant and always <= max_neighbors, so the cap is a no-op; the sync is
+    // pure overhead that serializes the XPU queue each step. UMA_SKIP_MAXNBR_CAP=1
+    // skips the whole check (and its sync) — bit-identical when the cap wouldn't
+    // fire (which the caller asserts by setting the flag). Default: keep the check.
+    static const bool skip_cap = [] {
+      const char* e = std::getenv("UMA_SKIP_MAXNBR_CAP");
+      return e != nullptr && e[0] == '1' && e[1] == '\0';
+    }();
+    if (!skip_cap) {
+      const int64_t n_atoms = wrapped_pos.size(0);
+      auto counts = torch::bincount(i, /*weights=*/{}, /*minlength=*/n_atoms);
+      const int64_t max_degree = counts.max().item<int64_t>();
+      if (max_degree > max_neighbors) {
+        auto pi = wrapped_pos.index_select(0, i);
+        auto pj = wrapped_pos.index_select(0, j) + shifts_cart;
+        auto dist = (pj - pi).norm(2, /*dim=*/1);
+        cap_edges_per_center(edge_index, shifts, shifts_cart, dist, max_neighbors);
+      }
     }
   }
 

@@ -49,6 +49,42 @@ bool no_recompute_edeg() {
       env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_EDEG");
   return v;
 }
+
+// opt5 P-1: SELECTIVE per-chunk retain. Full UMA_NO_RECOMPUTE_CHUNK=1 OOMs
+// (retains every chunk's SO2 + [Ec,25,25] wigner at once). UMA_CHUNK_RETAIN_K=k
+// retains only the first k edge-chunks PER BLOCK under autograd (no backward
+// recompute) and checkpoints the rest -- a tunable memory/speed knob that claws
+// back part of the chunk-recompute cost within the HBM budget. k<=0 (default) =>
+// legacy (all chunks checkpointed, unless UMA_NO_RECOMPUTE_CHUNK forces all).
+// Numerically identical either way (retain vs recompute = same gradient).
+int chunk_retain_k() {
+  static const int v = [] {
+    const char* e = std::getenv("UMA_CHUNK_RETAIN_K");
+    if (e == nullptr) return 0;
+    try { return std::max(0, std::stoi(e)); } catch (...) { return 0; }
+  }();
+  return v;
+}
+
+// Per-(forward,block) chunk index counter. The traced top graph emits the block
+// loop in order (block 0 chunks 0..C, block 1 chunks 0..C, ...); we count chunk
+// calls per block_idx and reset a block's counter whenever it is (re)entered
+// after a different block, so the first k chunks of each block are retained.
+// thread_local: each rank's predict runs on one thread; backward reuses the
+// forward's retained graph so the counter only needs to gate the FORWARD.
+thread_local int g_last_block_idx = -1;
+thread_local int g_chunk_in_block = 0;
+bool retain_this_chunk(int block_idx) {
+  const int k = chunk_retain_k();
+  if (k <= 0) return false;
+  if (block_idx != g_last_block_idx) {
+    g_last_block_idx = block_idx;
+    g_chunk_in_block = 0;
+  }
+  const bool retain = g_chunk_in_block < k;
+  ++g_chunk_in_block;
+  return retain;
+}
 }  // namespace
 
 BlockContext& BlockContext::instance() {
@@ -214,11 +250,14 @@ torch::Tensor uma_ckpt_chunk_autograd(int64_t block_idx,
   // wigner/x_edge are NO LONGER passed: the chunk module recomputes them from
   // the per-chunk precursors (edge_distance_vec, edge_distance, atomic_numbers)
   // INTERNALLY, so no full-edge wigner transient ever crosses this boundary.
-  if (no_recompute_chunk()) {
-    // Retain-activations fast path (see no_recompute_chunk). WARNING: this
-    // retains EVERY chunk's SO2 intermediates + [Ec,25,25] wigner at once (the
-    // exact memory per-chunk AC was designed to avoid), so it is only safe when
-    // HBM has headroom (e.g. N<=32 on 12 tiles). Same math as the checkpoint.
+  // opt5 P-1: retain this chunk (run directly under autograd, no backward
+  // recompute) if either the global chunk-retain flag is set (all chunks) OR the
+  // selective budget UMA_CHUNK_RETAIN_K retains the first k chunks of this block.
+  if (no_recompute_chunk() || retain_this_chunk(static_cast<int>(block_idx))) {
+    // Retain-activations fast path. Retains this chunk's SO2 intermediates +
+    // [Ec,25,25] wigner (the memory per-chunk AC avoids), so only safe within the
+    // HBM budget -- UMA_CHUNK_RETAIN_K caps how many chunks/block are retained.
+    // Same math as the checkpoint (retain vs recompute = identical gradient).
     std::vector<torch::jit::IValue> args = {
         x_full,     edge_distance_vec, edge_distance, atomic_numbers,
         edge_index, node_offset,       mole_start};
