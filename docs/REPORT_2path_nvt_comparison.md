@@ -820,6 +820,29 @@ Jobs: LAMMPS 8788927/8788849/8788623/8787536; ASE real-NVT 8788329/8788499.
 | 16 | 12 | 32,768 | K=3 | **12.8 s** | 17.4 s | **1.36× faster** | **PASS** dE=1.4e-9 meV/at, max\|dF\|=5.05e-14, cos=1.0 |
 | 32 | 12 | 262,144 | C2 | **138.2 s** | 296.2 s | **2.14× faster** | **PASS** dE=1.28e-8 meV/at, max\|dF\|=1.05e-13, cos=1.0 |
 
+**Strong scaling — N=16 ladder (warm Loop / md).** Speedup and parallel efficiency
+vs the smallest fitting tile count (LAMMPS baseline W=1; ASE baseline W=2, since
+ASE OOMs at W=1). eff = (baseline / (W/W_base)) / time × 100%.
+
+| W | LAMMPS Loop | LAMMPS speedup | LAMMPS eff | ASE md | ASE speedup | ASE eff |
+|--:|--:|--:|--:|--:|--:|--:|
+| 1  | 165.5 s | 1.00× (base) | 100% | OOM | — | — |
+| 2  | 91.0 s | 1.82× | 91% | 92.4 s | 1.00× (base) | 100% |
+| 4  | 48.3 s | 3.43× | 86% | 47.4 s | 1.95× | 97% |
+| 6  | 31.4 s | 5.27× | 88% | 31.9 s | 2.90× | 97% |
+| 8  | 30.4 s | 5.44× | 68%† | 24.9 s | 3.71× | 93% |
+| 12 | 12.8 s | 12.93×\* | 108%\* | 17.4 s | 5.31× | 89% |
+
+\* LAMMPS W=12 is **super-linear** because the config is not fixed across the
+ladder: `retainK` rises with W (W=1→K=1, W=12→K=3), so W=12 does *less recompute
+per step* than the W=1 baseline — the 12.93×/108% mixes strong scaling with the
+opt5 chunk-retain speedup, and overstates pure parallel scaling. A **fixed-K**
+strong-scaling (all-W at C2/K=0, §5) shows the true tile scaling: ~4.7–4.9× on 6
+tiles (79–81% eff), with the W=8 dip. ASE's ladder uses one config (eager, no
+K), so its 89–97% efficiency is a clean strong-scaling curve. † W=8 LAMMPS at K=0
+(K≥1 didn't cleanly land) — its eff/speedup are the C2 floor, understated vs the
+retain-config trend.
+
 ### 13b. COLD — whole-wall NVT-10 (incl. model load + warmup)
 
 | N | W | LAMMPS cold wall | (load + Loop) | ASE cold wall | (load + warmup + md) | LAMMPS vs ASE |
@@ -831,6 +854,29 @@ Jobs: LAMMPS 8788927/8788849/8788623/8787536; ASE real-NVT 8788329/8788499.
 | 16 | 8  | ~44 s | 14 + 30.4 | 55 s | 24.3 + 5.6 + 24.9 | **1.24× faster** |
 | 16 | 12 | ~33 s | 21 + 12.8 | 47 s | 24.1 + 5.7 + 17.4 | **1.41× faster** |
 | 32 | 12 | **172 s** | 34 + 138.2 | **409 s** | 77.6 + 35.4 + 296.2 | **2.38× faster** |
+
+**Strong scaling — N=16 ladder (cold whole-wall).** Speedup + parallel efficiency
+vs the smallest fitting tile count (LAMMPS base W=1; ASE base W=2). eff =
+(baseline / (W/W_base)) / wall × 100%.
+
+| W | LAMMPS wall | LAMMPS speedup | LAMMPS eff | ASE wall | ASE speedup | ASE eff |
+|--:|--:|--:|--:|--:|--:|--:|
+| 1  | 206 s | 1.00× (base) | 100% | OOM | — | — |
+| 2  | 115 s | 1.79× | 90% | 189 s | 1.00× (base) | 100% |
+| 4  | 63 s | 3.27× | 82% | 98 s | 1.93× | 96% |
+| 6  | 44 s | 4.68× | 78% | 77 s | 2.45× | 82% |
+| 8  | ~44 s | 4.68× | 59%† | 55 s | 3.44× | 86% |
+| 12 | ~33 s | 6.24× | 52% | 47 s | 4.02× | 67% |
+
+**Cold scaling is sub-linear for both** (LAMMPS 52% / ASE 67% eff at W=12) because
+the per-W **model load does NOT scale with tiles** — it's fixed setup (LAMMPS
+13–40 s `torch.jit.load`; ASE 24–83 s Ray/XCCL bringup + warmup) that grows as a
+*fraction* of the shrinking wall as W rises. So cold efficiency degrades with W
+even though the compute scales well (§13a). LAMMPS's smaller, faster load keeps its
+cold wall below ASE's at every W (the LAMMPS-vs-ASE column above), but its cold
+*efficiency* falls faster than ASE's at high W only because its total wall is
+already so much smaller that the fixed load dominates sooner. The same K-adaptive
+caveat as §13a applies to the LAMMPS speedup (retainK rises with W). † W=8 at K=0.
 
 LAMMPS cold load ≈ 13–40 s (artifact `torch.jit.load`, ~2.2 GB/rank), a one-time
 setup amortized over a real trajectory. ASE cold load is larger (Ray/XCCL bringup
