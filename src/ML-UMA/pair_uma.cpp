@@ -21,8 +21,11 @@
 #include "comm.h"
 #include "domain.h"
 #include "error.h"
+#include "exceptions.h"
 #include "force.h"
 #include "memory.h"
+#include "modify.h"
+#include "fix.h"
 #include "neighbor.h"
 #include "neigh_request.h"
 #include "neigh_list.h"
@@ -71,6 +74,12 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   restartinfo = 0;
   one_coeff = 1;
   manybody_flag = 1;
+  // P0'.1: this pair style does not compute the virial. Setting this flag stops
+  // Pair::ev_setup from enabling fdotr and silently zeroing virial[] (which made
+  // `thermo` pressure report only the kinetic term with no warning). We then also
+  // refuse loudly in compute() if a global virial is actually requested, rather
+  // than reporting a fake (zero) stress.
+  no_virial_fdotr_compute = 1;
   map = nullptr;
   predictor = nullptr;
   mpi_peer = nullptr;
@@ -105,11 +114,34 @@ PairUMA::~PairUMA()
 {
   delete predictor;
   predictor = nullptr;
-  // Collective NCCL teardown: every rank must enter ncclCommDestroy together.
-  // The engine's shm barrier can't span processes on the MPI path, so sync here.
-  if (mpi_peer && comm->nprocs > 1) MPI_Barrier(world);
+  // Collective NCCL/XCCL teardown: every rank must enter the comm destroy
+  // together (~MpiPeerPredictor). The engine's shm barrier can't span processes
+  // on the MPI path, so the ranks must synchronize here.
+  //
+  // P0'.5: the old code did an UNCONDITIONAL `if (mpi_peer) MPI_Barrier(world)`.
+  // If any rank failed to construct its peer (so its `mpi_peer` is null) while
+  // others succeeded, the survivors block on that barrier forever -> a hang at
+  // teardown. Agree across ranks FIRST: only do the collective barrier+destroy if
+  // EVERY rank has a peer. If they disagree, skip the collective path (a mixed
+  // ncclCommDestroy would deadlock/crash anyway) and just delete locally.
+  if (comm->nprocs > 1) {
+    int have_local = (mpi_peer != nullptr) ? 1 : 0;
+    int have_min = have_local;
+    MPI_Allreduce(&have_local, &have_min, 1, MPI_INT, MPI_MIN, world);
+    if (have_min == 1) MPI_Barrier(world);  // all ranks have a peer -> safe
+  }
   delete mpi_peer;
   mpi_peer = nullptr;
+  // P0'.4: install_halo_callbacks() captured `this` into the process-wide
+  // HaloContext singleton via std::function. It outlives this PairUMA (a
+  // `pair_style` redefinition or a second `run` after redefine leaves a
+  // TorchScript custom op holding a freed `this`). Clear the callbacks here so
+  // the singleton never references a destroyed pair style. (~Predictor clears the
+  // BlockContext it populated; do it defensively here too in case predictor was
+  // already gone.)
+  uma::HaloContext::instance().clear();
+  halo_buf_ = nullptr;
+  halo_per_node_ = 0;
   if (allocated) {
     memory->destroy(setflag);
     memory->destroy(cutsq);
@@ -492,6 +524,12 @@ void PairUMA::load_predictor()
                      "cutoff={:.3f} precision=double\n",
                      mn_w, artifact_dir, cutoff);
       return;
+    } catch (const LAMMPSException &) {
+      // P0'.5: a LAMMPS error thrown inside this try (e.g. error->all above) is
+      // already the correct collective/abort path. Do NOT swallow it into
+      // error->one below (that would turn a clean collective abort into a ragged
+      // MPI_Abort with a misleading "Failed to init peer" message). Rethrow.
+      throw;
     } catch (const std::exception &e) {
       error->one(FLERR, "Failed to init UMA multi-node peer: {}", e.what());
     }
@@ -610,6 +648,8 @@ void PairUMA::load_predictor()
                    (precision == PRECISION_DOUBLE) ? "double" : "mixed", num_devices,
                    gp_label,
                    (precision == PRECISION_DOUBLE) ? "float64" : "float32");
+  } catch (const LAMMPSException &) {
+    throw;  // P0'.5: preserve LAMMPS's own collective error handling; don't rewrap
   } catch (const std::exception &e) {
     error->all(FLERR, "Failed to load UMA artifact '{}': {}", artifact_dir, e.what());
   }
@@ -621,6 +661,26 @@ void PairUMA::init_style()
 {
   if (force->newton_pair) error->all(FLERR, "Pair style uma requires newton pair off");
   if (atom->tag_enable == 0) error->all(FLERR, "Pair style uma requires atom IDs");
+
+  // P0'.1: the model does not produce a stress tensor. no_virial_fdotr_compute=1
+  // (set in the ctor) keeps virial[] zero rather than a bogus fdotr sum, so
+  // `thermo` pressure would report the kinetic term only. That is a benign, if
+  // incomplete, diagnostic for NVE/NVT. It is NOT acceptable to drive a barostat
+  // with a zero pair virial: the box dynamics would be silently wrong. Detect any
+  // active barostat (box-changing pressure fix: npt/nph/press-berendsen/nphug/...)
+  // at setup and refuse loudly instead of producing an invalid trajectory.
+  for (const auto &ifix : modify->get_fix_list()) {
+    const char *s = ifix->style;
+    const bool barostat =
+        utils::strmatch(s, "^npt") || utils::strmatch(s, "^nph") ||
+        utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
+        utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug");
+    if (barostat)
+      error->all(FLERR,
+                 "Pair style uma does not compute the virial; pressure control "
+                 "(fix {}) is not supported. Use NVE/NVT, or remove the barostat.",
+                 s);
+  }
 
   // Full neighbor list; we CONSUME it (convert to FairChem edges) instead of
   // letting the engine rebuild its own O(N^2) graph. The list is built to the

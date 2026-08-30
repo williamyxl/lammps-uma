@@ -127,7 +127,11 @@ class XcclPeerImpl final : public XcclPeer {
   }
 
   void barrier() override {
-    ccl::barrier(*comm_, *stream_);
+    // P0.1: must .wait() like the sibling collectives. Without it the enqueued
+    // barrier returns immediately and the pre-backward barrier
+    // (mpi_peer_predictor) is inert on XPU -> lockstep entry into the mid-backward
+    // collectives is not actually enforced.
+    ccl::barrier(*comm_, *stream_).wait();
   }
 
   int rank() const override { return rank_; }

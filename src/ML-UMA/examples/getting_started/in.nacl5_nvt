@@ -32,8 +32,10 @@ velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
 fix             1 all nvt temp 300.0 300.0 0.1
 timestep        0.001
 
+# NOTE: pair_style uma does not compute the virial (P0'.1), so requesting `press`
+# in thermo_style would abort. Report energy quantities only.
 thermo          1
-thermo_style    custom step temp pe ke etotal press
+thermo_style    custom step temp pe ke etotal
 thermo_modify   norm no
 
 run             10

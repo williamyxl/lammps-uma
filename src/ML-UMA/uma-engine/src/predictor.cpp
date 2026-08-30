@@ -77,9 +77,66 @@ Predictor::Predictor(std::unique_ptr<GraphParallelRuntime> gp, torch::Device dev
   }
 }
 
-Predictor::~Predictor() = default;
-Predictor::Predictor(Predictor&&) noexcept = default;
-Predictor& Predictor::operator=(Predictor&&) noexcept = default;
+Predictor::~Predictor() {
+  // P0'.4: the single-tile Predictor populates the process-wide BlockContext
+  // singleton (block/chunk/edge_degree modules) at construction but nothing
+  // cleared it, so a redefinition or a second predictor left stale module
+  // handles live. Clear on teardown. (~MpiPeerPredictor clears it for the GP
+  // path; this covers the single-tile path.) Only the live (not moved-from)
+  // object clears: from_artifact() loads the blocks then RETURNS BY VALUE, so the
+  // moved-from temporary must NOT wipe the blocks the returned object needs.
+  if (owns_block_context_) BlockContext::instance().clear();
+}
+
+Predictor::Predictor(Predictor&& other) noexcept
+    : module_(std::move(other.module_)),
+      has_traced_module_(other.has_traced_module_),
+      owns_block_context_(other.owns_block_context_),
+      gp_(std::move(other.gp_)),
+      device_(other.device_),
+      metadata_(std::move(other.metadata_)),
+      compute_dtype_(other.compute_dtype_),
+      num_devices_(other.num_devices_),
+      n_cached_(other.n_cached_),
+      pos_(std::move(other.pos_)),
+      atomic_numbers_(std::move(other.atomic_numbers_)),
+      cell_(std::move(other.cell_)),
+      pbc_(std::move(other.pbc_)),
+      edge_index_(std::move(other.edge_index_)),
+      cell_offsets_(std::move(other.cell_offsets_)),
+      charge_(std::move(other.charge_)),
+      spin_(std::move(other.spin_)),
+      batch_(std::move(other.batch_)),
+      element_refs_(std::move(other.element_refs_)) {
+  // Only this object now owns the BlockContext lifetime; the moved-from source
+  // must not clear it on destruction.
+  other.owns_block_context_ = false;
+}
+
+Predictor& Predictor::operator=(Predictor&& other) noexcept {
+  if (this == &other) return *this;
+  module_ = std::move(other.module_);
+  has_traced_module_ = other.has_traced_module_;
+  owns_block_context_ = other.owns_block_context_;
+  gp_ = std::move(other.gp_);
+  device_ = other.device_;
+  metadata_ = std::move(other.metadata_);
+  compute_dtype_ = other.compute_dtype_;
+  num_devices_ = other.num_devices_;
+  n_cached_ = other.n_cached_;
+  pos_ = std::move(other.pos_);
+  atomic_numbers_ = std::move(other.atomic_numbers_);
+  cell_ = std::move(other.cell_);
+  pbc_ = std::move(other.pbc_);
+  edge_index_ = std::move(other.edge_index_);
+  cell_offsets_ = std::move(other.cell_offsets_);
+  charge_ = std::move(other.charge_);
+  spin_ = std::move(other.spin_);
+  batch_ = std::move(other.batch_);
+  element_refs_ = std::move(other.element_refs_);
+  other.owns_block_context_ = false;
+  return *this;
+}
 
 Predictor Predictor::from_artifact(const std::string& artifact_dir,
                                    torch::Device device, int num_devices) {
@@ -357,9 +414,18 @@ Prediction Predictor::predict_body() {
     } else if (checkpoint_enabled()) {
       // Whole-module C++ activation checkpointing (no per-block modules):
       // recompute forward in backward instead of retaining activations.
+      // P0'.3: pass the P2.1-PADDED edge_index_run/cell_offsets_run (not the raw
+      // members) so a padded artifact taking this branch does not re-enter the
+      // chunk-count drift crash. When edge_pad_cap==0 these equal the members.
+      if (metadata_.edge_pad_cap > 0) {
+        TORCH_CHECK(edge_index_run.size(1) == metadata_.edge_pad_cap,
+                    "uma-engine P0'.3: padded edge count ",
+                    edge_index_run.size(1), " != edge_pad_cap ",
+                    metadata_.edge_pad_cap);
+      }
       normed_raw = CheckpointModuleFn::apply(&module_, pos_grad, atomic_numbers_,
-                                             cell_, pbc_, edge_index_,
-                                             cell_offsets_, charge_, spin_);
+                                             cell_, pbc_, edge_index_run,
+                                             cell_offsets_run, charge_, spin_);
     } else {
       normed_raw = module_.forward(args).toTensor();
     }

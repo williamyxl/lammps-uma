@@ -147,6 +147,11 @@ class Predictor {
 
   torch::jit::script::Module module_;
   bool has_traced_module_ = false;
+  // P0'.4: true only for the live object that should clear the process-wide
+  // BlockContext singleton on destruction. Reset to false when moved-from so the
+  // moved-out temporary (e.g. from_artifact's return value) does not wipe the
+  // blocks the live object still needs. See predictor.cpp move ops + ~Predictor.
+  bool owns_block_context_ = true;
   std::unique_ptr<GraphParallelRuntime> gp_;
   torch::Device device_;
   ArtifactMetadata metadata_;

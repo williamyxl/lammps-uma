@@ -26,7 +26,7 @@ neighbor        2.0 bin
 neigh_modify    delay 0 every 1 check yes
 
 thermo          1
-thermo_style    custom step temp pe etotal press fmax
+thermo_style    custom step temp pe etotal fmax
 thermo_modify   norm no format float %.16e
 
 # --- first frame: single point + per-atom force dump (for ASE parity) ---

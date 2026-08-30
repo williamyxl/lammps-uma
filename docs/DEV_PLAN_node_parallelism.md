@@ -495,7 +495,7 @@ Actionable follow-ups:
 | Reverse comm gradient accumulation subtly wrong | **High** | Exact-vs-`k=1` gate + 100-step energy drift; single-point parity will *not* catch it |
 | Host-staged halo dominates at scale | Medium | Phase C.3 GPU-aware transport |
 | Redundant compute worse than modeled (non-cubic domains, poor balance) | Medium | Task M5 measures real ghost counts; `fix balance` |
-| Traced-artifact chunk count is N-specific (`SESSION_RECOVERY:337`) — per-rank atom counts now vary and *drift* | **High** | **Blocked on `DEV_PLAN_code_quality.md` P2.1 (fixed-multiple edge padding).** Under DD every rank has a different, time-varying atom/edge count; the current N-specific artifact scheme cannot work. **Fix P2.1 first.** |
+| Traced-artifact chunk count is N-specific (`SESSION_RECOVERY:337`) — per-rank atom counts now vary and *drift* | **High** | **Blocked on `CODE_QUALITY.md` Part B P2.1 (fixed-multiple edge padding — **DONE**).** Under DD every rank has a different, time-varying atom/edge count; the current N-specific artifact scheme cannot work. **Fix P2.1 first.** |
 | Aurora inter-node collective performance unknown at these sizes | Medium | Task M3 |
 
 **Hard dependency:** P2.1 (edge padding) from the code-quality plan is a
@@ -520,7 +520,7 @@ precision reduction (§4) — a much better use of it than paying for the
 decomposition.
 
 **Immediate next actions:** M1, M2, M5 (Phase 0), and P2.1 from
-`DEV_PLAN_code_quality.md`. Do not start Phase A before M2 and P2.1.
+`CODE_QUALITY.md` (Part B). Do not start Phase A before M2 and P2.1.
 
 ---
 ---
@@ -749,3 +749,281 @@ dd_halo_width:1152, sph_feature_size:9, sphere_channels:128`.
   §II.7); confirming test identified and not yet run.
 - **Not yet addressed:** exact MoLE global-mean wiring (currently homogeneous
   approximation); optimization/timing (deferred until parity passes).
+
+---
+
+# PART III — Resumption plan (2026-08-29)
+
+**Written after:** `docs/CODE_QUALITY.md` Part A **rev 4** (full-tree review,
+C++ **and** Python) and the completion of the single-node performance campaign
+(`REPORT_2path_nvt_comparison.md` §8–§13). **Campaign context:**
+`docs/CODE_QUALITY.md` Part C, Phase 3.
+
+PART II left the DD path with every primitive individually proven correct and the
+composite failing the force gate. PART III says what to do about that, in what
+order, and what has to be true before scaling past 2 nodes.
+
+## III.1 What changed since PART II
+
+**In our favour:**
+
+- **P2.1 edge padding is DONE and validated in production** (report §7). This was
+  the hard prerequisite for multi-node — a rank-invariant traced chunk count is
+  what lets one artifact tolerate per-node atom-count variation. N=24/N=16/N=36
+  NVT now complete; the ASE parity gate stayed green across the change.
+- **The single-node engine is now faster than ASE at every tested size**
+  (N=16 1.36×, N=32 2.14–2.38× on MD compute; report §13). So the multi-node work
+  is extending a *winning* baseline, not chasing one.
+- **`REPORT §12` (opt6) establishes the single-node compute floor for this
+  design.** The three remaining parity-safe levers were evaluated and closed:
+  collective-algorithm tuning is a dead end (oneCCL's default small-message path
+  is already optimal; forcing alternatives was 2–3.5× slower), the 15 per-step
+  `all_reduce`s are model-structural (`balance_channels` charge/spin physics), and
+  skin-cached neighbor lists are **net-negative** here because every edge runs the
+  full SO2 conv + wigner + backward and is only zeroed at the final envelope. The
+  practical consequence for Phase 3: **do not expect intra-rank compute wins to
+  rescue a multi-node scaling problem** — the remaining headroom is in
+  decomposition and communication, which is exactly what DD addresses.
+- **`REPORT §12` also quantifies the collective cost profile** we will inherit
+  at scale: at N=16 W=12 the 15 tiny `all_reduce`s are already ~45% of the call
+  and are **latency-bound**, not bandwidth-bound. Inter-node latency is worse than
+  intra-node by roughly an order of magnitude, so this is the term that will hurt
+  first when DD spans nodes — and it is *per rank*, so it does not amortise.
+
+**Against us:**
+
+- **Rev 4 found three silent-wrong-physics defects, two of them DD-specific.**
+  See `CODE_QUALITY.md` Part B, Priority 0′:
+  - **P0′.1 — the virial is unconditionally zero.** `no_virial_fdotr_compute` is
+    never set and `virial_fdotr_compute()` is never called, so `virial[]` stays
+    at the zeros `ev_setup` wrote. The DD path makes it explicit with
+    `(void) vflag;` at `pair_uma.cpp:950`. Any NPT run is invalid. Not a DD bug,
+    but DD inherits it.
+  - **P0′.2 — the DD MoLE composition is a silent approximation, and
+    `mole_composition_allreduce()` computes the correct global value and throws
+    it away** (`pair_uma.cpp:1046-1068`), while doing an `MPI_Allreduce` of 119
+    longs *every timestep* for a `fprintf`. PART II §II.7 already lists this as a
+    secondary hypothesis for the force bug; rev 4 upgrades it to a defect in its
+    own right because there is no warning and no tolerance check.
+  - **P0′.3 — `edge_pad_cap` padding is bypassed** in the whole-module checkpoint
+    branch (`predictor.cpp:313-330` computes the padded tensors; `:360-362`
+    passes the unpadded members). Latent today, but DD is precisely the path that
+    changes AC configuration while debugging.
+- **P0′.4 — `HaloContext` retains `std::function`s capturing a freed
+  `PairUMA*`.** `HaloContext::clear()` (`halo_context.cpp:30`) has **zero
+  callers**; `~PairUMA` does not call it. This is DD-specific infrastructure and
+  it is UB across a `pair_style` redefinition. **Fix this before further DD
+  debugging** — a dangling callback is not a foundation to bisect a gradient bug on.
+- **P0′.6 — every DD precondition is prose.** The correctness argument at
+  `pair_uma.cpp:953-971` depends on the user typing `comm_modify cutoff`;
+  `comm->cutghostuser` is available and never read. `comm_style` is never checked
+  although `pack_reverse_comm` assumes the `CommBrick` layout. `UMA_DD_EDGE_CAP`
+  is parsed with a bare `atoll` and read from the **environment** even though the
+  exporter records `edge_pad_cap` in metadata and `metadata.cpp:143` parses it —
+  so an export/runtime cap divergence is undetectable.
+- **P5′.4 — there are now two incompatible edge-padding conventions**, in four
+  sites, with no shared code and no test: DD uses a dummy node at `(1e6,1e6,1e6)`
+  with `neighbor = atom 0` (`export_blocks_xpu.py:1125-1146` /
+  `pair_uma.cpp:895-916`); GP/normal uses a self-loop on `node_offset` with
+  `cell_offset[:,0] = 2.0` (`:1147-1171` / `graph_shard.h:67-94`).
+  `mpi_peer_predictor.cpp:405-412` already has to *override* the metadata
+  `edge_pad_atom` because the baked value is only rank 0's `node_offset` — i.e.
+  the contract is already known-broken for W>1 and is patched at the consumer.
+- **The collective-agreement cluster (P0.2/P0.3/P0.4 + P0′.5) is still open.**
+  Ranks still choose their backward-graph structure from per-rank `access()`
+  probes and env vars with no agreement collective; there is still not a single
+  `try` block in `mpi_peer_predictor.cpp`; empty shards still issue a *different*
+  collective. Every one of these is a hazard that multi-node widens.
+- **There is still no CI and there are still no unit tests.** Which is the
+  central point of III.2.
+
+## III.2 The methodological lesson from PART II
+
+PART II is a good piece of debugging: five real bugs found and fixed on hardware,
+each with a self-test, each documented. But look at what it cost and what it
+bought.
+
+**Every primitive is proven correct — by a self-test that must be run as a
+262,144-atom, 2-node, 24-rank queue job** (`UMA_DD_HALO_TEST=1`). Forward comm
+exact. Reverse comm exact. Ghost Z matches owner Z. And the composite still gives
+cos = 0.644. The one experiment that would discriminate between the remaining
+hypotheses — disabling activation checkpointing and re-measuring — is listed in
+§II.7 as "not yet run", because running it means another allocation, another
+export, and another 24-rank job.
+
+That is the whole argument for `CODE_QUALITY.md` Part C Phase 2. **A 2-rank,
+20-atom, CPU-only finite-difference check of the DD autograd chain would localise
+this bug in minutes**, and it needs no XPU, no 4.5 GB checkpoint, and no queue.
+It does not exist because there is nowhere to put it: no `pytest.ini`, no
+`conftest.py`, no `enable_testing()`, no `add_test()`, no `make test`.
+
+**Therefore the resumption order is: Phase 2 Tier 0–2 first, then Phase 3 3A
+inside it.** Not because the testing is more virtuous, but because §II.7's own
+recommended next step is a test, and there is no harness to run it in.
+
+## III.3 Resumption plan
+
+### III.3.0 Hygiene gate — before any further DD debugging (~0.5 day)
+
+Do not bisect a gradient bug on a foundation with known UB and unvalidated
+preconditions.
+
+1. **P0′.4** — call `HaloContext::instance().clear()` from `~PairUMA` (and
+   `BlockContext::instance().clear()` from `~Predictor`); RAII-guard `halo_buf_`
+   around `comm->forward_comm()` so it cannot dangle on a throw.
+2. **P0′.6** — in `init_style` when `dd_active_`: assert
+   `comm->cutghostuser >= num_layers × cutoff`, assert `comm->style == 0`
+   (brick), read the edge cap from `metadata_.edge_pad_cap` with
+   `UMA_DD_EDGE_CAP` demoted to an override that **errors on mismatch**, and
+   parse it with `strtoll` + range check.
+3. **P0′.2(b)** — one-time `error->warning` naming the MoLE approximation; move
+   the 119-long `MPI_Allreduce` off the per-step path.
+4. **P0′.1 step 1** — `no_virial_fdotr_compute = 1` + refuse `vflag_global`.
+   Ten lines; stops the DD path from reporting a fabricated pressure.
+5. **P0.1** — `ccl::barrier(*comm_, *stream_).wait();`. One line, and the
+   pre-backward barrier's whole purpose is lockstep entry into the mid-backward
+   collectives that DD's halo op now shares.
+
+### III.3.1 Build the harness (Phase 2 Tier 0–2, ~7 days)
+
+Per `CODE_QUALITY.md` Part C §C.3. The Phase-3-relevant subset, in priority order:
+
+- **Tier 1 (b) edge padding round-trip** — Python `_pad_edges` vs C++
+  `pad_edges_to_capacity` must produce bit-identical `edge_index` and
+  `cell_offsets`, including ordering, for **both** conventions; plus the two
+  documented regressions (never `dummy→dummy`; pad centers always in the rank's
+  owned partition). This is the test that makes **P5′.4** safe to unify.
+- **Tier 1 (c) node/edge partitioning** — `tensor_split` vs `node_partition`,
+  coverage and disjointness for all `W`, `N < W` included.
+- **Tier 1 (a) metadata contract** — golden files, Python↔C++ field-for-field
+  diff, and hard failure on a missing/unknown `metadata_version`, a missing
+  `edge_pad_cap`, or a `world`/`rank` mismatch against the running job. This kills
+  the "8 ranks against a `w4/` tree fails opaquely" class outright
+  (`mpi_peer_predictor.cpp:243-247`).
+- **Tier 1 (e) op-schema conformance** — including `uma_halo_ops.py:27` vs
+  `halo_context.cpp:185`. The DD halo op's schema is currently maintained in two
+  places with no check.
+- **Tier 2 CPU trace path + toy artifact** — requires relaxing
+  `export_blocks_xpu.py:889` (currently hard-requires a visible XPU tile, so no
+  artifact and no dry run is possible without an allocation).
+- **Tier 2 padding inertness** — `n_pad ∈ {0, 1, chunk}` gives identical
+  energy/forces to 1e-14. The entire padding scheme rests on
+  `envelope(d/cutoff) = 0`, and after the `r = 0` incident (PART II §II.3 bug 5)
+  this deserves an assertion rather than a convention.
+
+### III.3.2 Localise the DD force bug (3A)
+
+Ordered cheapest-first, and each one **written as a test, not a script**:
+
+1. **Tiny-DD finite-difference gradient check.** 2 ranks, ~10–20 atoms/rank, a
+   size that fits with AC off, FD on owned-atom forces through the full DD chain
+   (per-atom energy root → halo forward → 4 blocks → halo backward → reverse
+   comm). This is the exact test §II.7 step 3 asks for. Build it as a Tier 2/3
+   test so every future DD change re-runs it.
+2. **The AC A/B, inside that test.** `UMA_NO_RECOMPUTE=1` (+ `_BLOCK` /
+   `_CHUNK` / `_EDEG`) vs default. If forces converge to cos → 1.0 with AC off,
+   the halo × checkpoint composition is confirmed. Note the report's memory
+   ceilings (§2a, §8): AC-off at N=32 W=12 OOMs, so this must be run at a size
+   that fits — which the tiny test does by construction.
+3. **Instrument `uma_halo::exchange` with a call counter** and compare forward
+   vs backward invocation counts. §II.7 flags "check whether the recompute path
+   actually re-runs the op" as untested; a counter answers it in one run.
+4. **Quantify the MoLE delta** using the global counts
+   `mole_composition_allreduce()` already computes, so it can be excluded (or
+   promoted) as a contributor.
+5. **Isolate the residual-vs-exchange interaction under recompute** —
+   `x_out = edgewise(x_full) + x_res` where the exchange replaced `x_res`'s ghost
+   rows. The reverse self-test proves the value adjoint; the *composition* with
+   the block residual across a recompute is the untested surface, and it is the
+   most specific remaining hypothesis.
+
+**Prediction to record now, so it can be scored later:** if (2) shows cos → 1.0
+with AC off, the fix is to hoist the ghost refresh outside the checkpointed
+region (feed exchanged features as block inputs the recompute treats as
+constants) rather than to make the op checkpoint-aware — the latter re-enters the
+same double-custom-autograd composition that caused the problem.
+
+### III.3.3 Reach the gate (3B)
+
+- Land the fix from 3A.
+- Unify the two padding conventions (**P5′.4**) behind one spec, protected by the
+  Tier 1 round-trip test.
+- Land the collective-agreement cluster (**P0.2 / P0.3 / P0.4 / P0′.5**) — a
+  shared `MPI_Allreduce`-of-the-decision plus exception safety plus uniform
+  collectives. Multi-node makes each of these materially more likely, and P0.3
+  (one-rank OOM hangs all) is an *expected* operating condition at the capacity
+  boundary.
+- **Gate:** N=32, 2 nodes × 12 tiles, DD, vs the 12-tile ASE-GP oracle
+  (`hen/pbs/out/ase12_n32`, E = −885377.0600366206):
+  `|dE| ≤ 1e-3 meV/atom`, per-atom `max|dF| ≤ 1e-5 eV/Å` over all 262,144 atoms,
+  cos = 1.0. Then **add this as a third row to the mandatory per-round ASE parity
+  gate** in `CODE_QUALITY.md` Part C §C.1, so it can never silently regress.
+
+### III.3.4 Scale and optimise (3C)
+
+Only after 3B is green. In order:
+
+1. **4 / 8 / 16 nodes**, verifying the predicted redundancy
+   `R = ((L+2h)/L)³` from PART I §3 (1.29 / 1.38 / 1.49 for k=4) against
+   measurement. A large gap means the ghost-atom accounting is off, not that the
+   model is slow.
+2. **Move the halo exchange off the host round trip.** `halo_context.cpp:67-108`
+   does `x.reshape({nall,-1}).to(kCPU, kFloat64)` → LAMMPS comm →
+   `.to(orig_device)`, four times per forward and again in backward. At
+   `dd_halo_width = 1152` doubles/atom and ~18.8k atoms/rank that is roughly
+   480 MB round-tripped device↔host **8× per MD step**. PART I §3 budgeted ~40 ms
+   of communication per step against an ~18 s step; the host staging alone will
+   exceed that by a wide margin. Options, cheapest first: keep the tensor on
+   device and use a device-aware transport (XCCL point-to-point between the ranks
+   LAMMPS's comm plan identifies), or at minimum stage in FP32/BF16 for the
+   *value* exchange only where the parity budget allows (it does not — this
+   breaks the FP64 contract, so treat it as a last resort and a separate opt-in
+   path, cf. report §8 P-7).
+3. **Re-profile the collectives at scale** with `UMA_PEER_PERF`, given report
+   §12's finding that the 15 tiny per-step `all_reduce`s are latency-bound and
+   already ~45% of the call at N=16 W=12. If they dominate inter-node,
+   the `balance_channels` charge+spin fusion (8→4 forward all_reduces, listed in
+   §12 as "possible but needs model-graph surgery with parity risk, deferred")
+   moves from deferred to necessary — and by then there will be a parity harness
+   to do it safely in.
+4. **Strong- and weak-scaling curves** in the style of report §5/§13, against the
+   ASE-GP reference where it can run (ceiling N=32) and per-atom-energy
+   self-consistency beyond it.
+5. **Add a multi-node tier to the nightly CI.**
+
+### III.3.5 Explicitly deferred
+
+- **Exact global MoLE wiring** beyond the warn-and-document fix (PART I §5.4).
+- **Hybrid DD-across-nodes × GP-within-node** (PART I §6). This is the natural end
+  state — GP already beats the FairChem reference intra-node (report §9a) and DD
+  is the only thing that crosses nodes — but attempting it before flat DD passes
+  parity would compose two decompositions whose interaction is untested. Note the
+  exporter can already emit **both** op families and there is **no
+  mutual-exclusion check**: `UMA_DD_HALO=1` together with `EXPORT_WORLD>1`
+  produces an artifact with GP all-gathers *and* DD halos. Add the guard
+  (Tier 1 (g)) now, remove it deliberately later.
+- **The rank-generic artifact.** Today `node_offset`, `n_local`, `total_atoms`,
+  `charge`, and `spin` are baked constants, so `W` ranks require `W` separate full
+  XPU trace runs and any change in total atom count invalidates every one of them.
+  The op schema **already carries** `node_offset` / `mole_start`
+  (`uma_ckpt_ops.py:104`) and the adapters **already receive and discard them**
+  (`export_blocks_xpu.py:1023-1031, 1045-1053`) — the plumbing exists end to end
+  and is deliberately unused. Wiring it through would collapse the per-(N,W,R)
+  artifact matrix to one artifact and is the single most tractable structural
+  improvement available. It is a Phase-3 follow-on, not a prerequisite.
+
+## III.4 Definition of done for Phase 3
+
+- The N=32 2-node DD parity row is **green** and is part of the mandatory
+  per-round gate.
+- The tiny-DD finite-difference gradient check runs in CI (Tier 2/3) and fails on
+  the pre-fix code.
+- P0.2/P0.3/P0.4/P0′.5/P0′.6 are closed; a one-rank failure produces a
+  bounded-time collective abort with an actionable message, not a hang.
+- One edge-padding convention, one implementation per language, with a
+  bit-identity round-trip test.
+- Scaling measured to at least 8 nodes with the measured redundancy within ~10%
+  of the `R = ((L+2h)/L)³` prediction, and the halo exchange off the host round
+  trip.
+- The MoLE approximation is either fixed or warned about at runtime with its
+  magnitude quantified on a heterogeneous system.

@@ -368,7 +368,7 @@ memory ceiling that OOMs LAMMPS at 1-tile N=18 (§1 †): at N=16-18 a single
 
 All LAMMPS numbers in this report were regenerated on the opt5 build (2026-08-27
 19:42; opt4 + P2.1 + opt5 `UMA_CHUNK_RETAIN_K`, opt5 knobs default OFF). This is
-the current-build baseline; Phase-1 (`docs/CAMPAIGN_PLAN_quality.md`) will
+the current-build baseline; Phase-1 (`docs/CODE_QUALITY.md` Part C) will
 **re-run this identical suite after its fixes land** and any change beyond the
 tolerances below is a regression. The reference is the ASE oracle (no ASE
 rebuild); step-0 energy is the invariant.
@@ -914,3 +914,89 @@ W=2/4/6/8 generated in job 8789534; LAMMPS parity in 8789552.)
 - Jobs: N=16 timing 8788927 (W=1,2,4,6) / 8788849 (W=12 K=3) / 8788704 (W=8 C2);
   N=32 8787536; parity 8788864/8787863/8788927; ASE real-NVT 8788329/8788499;
   W=2/4/6/8 force oracles 8789534.
+
+---
+
+## 14. Per-sprint regression record — CODE_QUALITY campaign (G4)
+
+Each sprint of the `docs/CODE_QUALITY.md` hardening campaign closes with a full
+parity + performance re-run on that sprint's exact binary (goal **G4**), so any
+physics regression is caught immediately. Matrix: **N=16 W=1,2,4,6,8,12** and
+**N=32 W=12** — step-0 energy, per-atom force parity vs the ASE/ASE-GP oracle, and
+autograd-vs-finite-difference (AG=FD). Oracles are the fixed §13 references
+(`ase_n16_parity`, `ase_n16_forces_ladder`, `ase12_n32`), never regenerated.
+
+### 14.0 Sprint 0 — silent-physics + UB fixes (2026-08-29)
+
+Binary: `build-lmp-xccl/lmp` rebuilt from the Sprint-0 working tree (job 8791177),
+which contains P0.1 (`ccl::barrier().wait()`), P0′.1 (virial refusal — barostat
+guard at `init_style`), P0′.3 (padded tensors into the whole-module checkpoint
+branch), P0′.4 (HaloContext/BlockContext callback teardown + Predictor
+move-ownership). Config = the §13 "fast" stack: N=16 `EDGE_AC_CHUNK=32768` + C2 +
+adaptive `UMA_CHUNK_RETAIN_K` + `UMA_SKIP_MAXNBR_CAP=1`; N=32 C2 chunk=65536, K=0.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8791275:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 164.5 | 210 | 5.08e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 89.9  | 114 | 5.04e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 47.7  | 63  | 5.08e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.4  | 44  | 5.06e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.3  | 48  | 5.06e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.83 | 27  | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 137.6 | 173 | 1.06e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD (single tile, FP64), job 8791223:** N=1–10 all PASS — max|AG−FD| ≤ 3.9e-7
+(N=1 7.7e-9 → N=10 3.9e-7), traced-vs-eager dF at the ~1e-16 FP64 floor. (tol 1e-5.)
+
+**Mandatory ASE parity tripwire, job 8791194:** N=16 W=1 + N=32 W=12 **PASS**
+(dE 1.41e-9 / 1.28e-8 meV/atom, max|dF| 5.05e-14 / 1.05e-13, cos = 1.0).
+
+**Regression verdict vs the §13 baseline:** every step-0 PE is **bit-identical**
+(N=16 all-W −110673.829050 = §13; N=32 −885377.060040 = §13), per-atom forces at
+the same FP64 floor, cos = 1.0, AG=FD unchanged. **G3 met — Sprint 0 changed no
+physics.** Loop times reproduce §13a within run variance (e.g. W=12 12.83 s vs §13
+12.8 s; N=32 137.6 s vs §13 138.2 s; W=8 K=0 30.3 s vs §13 30.4 s).
+
+**P0′.1 behavior change (intended):** `fix npt`/`nph`/`press/*` now aborts at
+`init_style` with "Pair style uma does not compute the virial; pressure control
+… is not supported" (verified job 8791197: single-point exit 0, `fix npt` exit 1);
+NVE/NVT and single-point (incl. thermo without `press`) are unaffected.
+Jobs: rebuild 8791177; tripwire 8791194; virial-refuse test 8791197; full suite
+8791275; AG=FD 8791223.
+
+### 14.1 Sprint 1 — teardown / error-handling fixes (2026-08-29)
+
+Binary rebuilt from the Sprint-1 tree (job 8791387) adding P0′.5: (1) a
+`catch (const LAMMPSException&) { throw; }` before both `catch (std::exception&)`
+init handlers so a LAMMPS `error->all` thrown during construction keeps its own
+collective/abort path instead of being rewrapped into a ragged `error->one`; (2)
+`~PairUMA` gates its teardown `MPI_Barrier` behind an `MPI_Allreduce(MIN)` have-peer
+agreement so a rank that failed to build its peer can't hang the survivors. These
+are teardown/error-path changes and touch no compute path.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8791406:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 164.5 | 220 | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 92.4  | 120 | 5.04e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.9  | 68  | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.8  | 45  | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.6  | 49  | 5.06e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.93 | 39  | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.7 | 174 | 1.05e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD (single tile, FP64), job 8791409:** N=1–9 all PASS — max|AG−FD| ≤ 2.6e-7
+(N=1 7.7e-9 → N=9 2.6e-7), traced-vs-eager dF at the ~1e-16 FP64 floor. (N=10 in
+progress at job stop; N=1–9 conclusive, identical to §14.0.)
+
+**Mandatory ASE parity tripwire, job 8791405:** N=16 W=1 + N=32 W=12 **PASS**
+(dE 1.41e-9 / 1.28e-8 meV/atom, max|dF| 5.05e-14 / 1.05e-13, cos = 1.0).
+
+**Regression verdict vs §14.0 (Sprint 0) and §13:** every step-0 PE **bit-identical**
+(N=16 all-W −110673.829050; N=32 −885377.060040), per-atom forces at the same FP64
+floor, cos = 1.0, AG=FD unchanged, Loop times within run variance. **G3 met —
+Sprint 1 changed no physics.**
+Jobs: rebuild 8791387; tripwire 8791405; full suite 8791406; AG=FD 8791409.
