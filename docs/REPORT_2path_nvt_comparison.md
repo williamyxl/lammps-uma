@@ -1163,3 +1163,118 @@ variance. The real JSON parser reads the same values as the substring scanner on
 well-formed metadata; **no physics change**. The least-defended interface in the
 system (metadata.json) now has a real parser, a version gate, and read-back checks.
 Jobs: rebuild 8791871; tripwire 8791888; full suite 8791889; AG=FD 8791634.
+
+### 14.6 Sprint 6 (round 1) — hygiene + config + docs + real virial (2026-08-30)
+
+Round 1 of the REQUIRED Sprint 6: `Install.sh` KOKKOS fix (`uma/kk` now installs),
+the **single-tile real virial** (P0'.1 step 2), the config surface (`uma_env_bool` +
+one-time config echo + `docs/ENV_VARS.md`), `transport_name` XCCL fix, and
+`docs/TESTING.md`. The virial is **opt-in** (`UMA_COMPUTE_VIRIAL=1`) so the default
+energy/force path is byte-identical — verified below.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8792115:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 166.7 | 207 | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 92.3  | 117 | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.9  | 65  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.8  | 44  | 7.97e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.7  | 47  | 7.92e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.94 | 95  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.8 | 173 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD:** N=1–4 PASS (job 8792184) identical to prior sprints (confirms the
+gated-off strain code did not perturb autograd forces; the strain path only runs
+under `UMA_COMPUTE_VIRIAL=1`).
+**Tripwire (job 8792176):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.5/…/§13,
+cos = 1.0, forces at the FP64 floor. **No physics change** — the virial is opt-in.
+
+**Real virial (P0'.1 step 2) status — HONEST:** the strain-autograd virial
+(`W = -dE/dε` at ε=0) is implemented in the single-tile path, opt-in via
+`UMA_COMPUTE_VIRIAL=1`, and published to LAMMPS `virial[]`; single-tile NPT is
+unblocked in principle and the barostat refusal now points to the flag. **However**
+it is **incompatible with activation-checkpointed artifacts** (the per-chunk/block
+`uma_ckpt` custom autograd Functions only register `pos` as differentiable, so the
+strain gradient does not propagate — this SEGFAULTED on XPU during validation, jobs
+8792089/8792138). It is now **guarded** (a loud `TORCH_CHECK` refuses the virial on
+AC artifacts instead of crashing). Numerical FD-stress validation therefore requires
+a **plain (non-AC) traced artifact**, which does not currently exist — so the virial
+is **implemented + safe but not yet numerically validated**. Producing a non-AC
+artifact and running `scripts/virial_fd_test.pbs` (diagonal σxx/σyy/σzz vs box-strain
+FD) is the carried-forward validation. The default (no-virial) path is fully
+validated above.
+Jobs: rebuild 8792100/8792159; tripwire 8792176; full suite 8792115; AG=FD 8792184;
+virial FD (blocked by AC artifact) 8792089/8792138.
+
+**Virial validation — final outcome (BLOCKED on XPU).** Exported a PLAIN non-AC
+artifact (`w15_export_traced_fast`, 64-atom NaCl) and ran the full FD-stress check
+(`virial_export_and_validate.pbs`, job 8792362) with `UMA_CKPT=0` +
+`UMA_ENGINE_BUILD_GRAPH=1` so the strain path uses a non-checkpointed shape-flexible
+graph. It **still SIGSEGV'd** in the traced module's strain second-derivative on the
+Intel XPU backend (no torch exception) — the same failure mode as the AC artifact.
+Conclusion: the strain-autograd virial is **not supported on the Aurora XPU stack**;
+it is now guarded to **refuse loudly on XPU** (`#if UMA_ENGINE_USE_XPU
+TORCH_CHECK(false)`) and the barostat is refused on XPU (effective P0'.1 step-1
+behavior). NPT/pressure is unavailable on XPU. The virial code + FD tooling remain
+for a future CUDA / fixed-XPU retry. Final guarded binary re-verified bit-identical:
+tripwire job 8792388 (N=16 W=1 −110673.829050, N=32 W=12 −885377.060040, cos=1.0).
+
+### 14.7 Sprint 6 (round 2) — portability + fail-loud export (2026-08-30)
+
+Round-2 correctness-hygiene: P5'.5 (exporter now **raises** on a failed
+correctness-critical monkeypatch instead of `WARN`+continue) and P3.3/P5'.7 (removed
+machine-specific hardcoded checkpoint defaults from ALL compiled library source —
+`graph_parallel.cpp`, `checkpoints.py`, `export_*.py`, `parity_nacl.py` — so no
+runtime path silently points at a non-existent Delta/WSL file; Tier-0 now HARD-checks
+library source is foreign-path-free). The only compiled change is the
+`graph_parallel.cpp` default removal (inert — the removed fallback was never the
+resolved path).
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8792412:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 165.6 | 204 | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.6  | 114 | 7.97e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 47.9  | 64  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.6  | 44  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.5  | 48  | 7.92e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.88 | 27  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.2 | 173 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8792411):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.6/…/§13,
+cos = 1.0, forces at the FP64 floor. **No physics change.**
+Jobs: rebuild 8792398; tripwire 8792411; full suite 8792412.
+
+### 14.8 Sprint 6 (round 2b) — hygiene, attic, STRICT CI (2026-08-30)
+
+Final Sprint-6 round: P3.2 (`_pbs_common.sh` + `set -euo pipefail` on all 106 .pbs
++ build/out `.gitignore`), P5'.6 (Delta-era demos/.slurm/spike/old-tests → `attic/`;
+stale `build-xpu*` trees deleted; live READMEs genericized), P3.3 (NCCL find via env
+hints, no hardcoded HPC-SDK path), P3.1 (dead `graph_parallel_xpu_stub.cpp` →
+`attic/`). **Tier-0 STRICT flipped on** — all cleanup-debt REPORT checks now hard
+(0 foreign paths, 0 .pbs without preamble, 0 spike imports); `ci/ci_local.sh`
+defaults `UMA_TIER0_STRICT=1`. The only compiled change is the CUDA-only NCCL CMake
+search (inert on XPU) + moving a never-built file.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8792485:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 166.5 | 210 | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 92.3  | 116 | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.8  | 65  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.8  | 44  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.7  | 57  | 7.92e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.91 | 28  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.8 | 173 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8792484):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.7/…/§13,
+cos = 1.0, forces at the FP64 floor. **No physics change.** Local CI green under
+Tier-0 STRICT (30 Tier-1 tests + all guards).
+Jobs: rebuild 8792466; tripwire 8792484; full suite 8792485.

@@ -134,6 +134,7 @@ class PairUMA : public Pair {
   std::vector<int64_t> ext_edge_index_;   // [2,E] row0=neighbor(jr) row1=center(i)
   std::vector<double> ext_cell_offsets_;   // [E,3] integer image triples (as double)
   bool engine_build_graph_;                // UMA_ENGINE_BUILD_GRAPH=1 -> old path
+  bool want_virial_flag_;                   // UMA_COMPUTE_VIRIAL=1 -> single-tile stress (P0'.1 step 2)
 };
 
 }    // namespace LAMMPS_NS

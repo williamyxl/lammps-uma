@@ -35,7 +35,7 @@ See [`multi_gpu_nacl6/README.md`](multi_gpu_nacl6/README.md).
 ## Local smoke (after `build-uma/lmp`)
 
 ```bash
-ROOT=/work/nvme/bfzx/xyan11/workdir/lammps-uma
+ROOT=$ROOT
 ENG=$ROOT/src/ML-UMA/uma-engine
 LMP=$ROOT/build-uma/lmp
 VESIN=$ENG/third_party/vesin/lib

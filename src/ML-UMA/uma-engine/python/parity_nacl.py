@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -46,7 +47,8 @@ def main() -> int:
         default=None,
         help="Artifact dir (default: uma-engine/artifacts/uma-s-1p2-omat[-f64])",
     )
-    parser.add_argument("--checkpoint", default="/mnt/d/workdir/uma-cache/uma-s-1p2.pt")
+    parser.add_argument("--checkpoint", default=os.environ.get("UMA_CHECKPOINT"),
+                        help="UMA checkpoint (.pt); defaults to $UMA_CHECKPOINT")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--npz", type=Path, default=None)
     parser.add_argument(

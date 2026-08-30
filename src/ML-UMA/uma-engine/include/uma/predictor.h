@@ -18,6 +18,12 @@ struct Prediction {
   double energy = 0.0;   // physical energy (FP32 or FP64 model → host double)
   /// Forces [N,3] float64; typically on the engine device (traced) or CPU (GP).
   torch::Tensor forces;
+  /// P0'.1 step 2: global virial tensor W = -dE/dstrain in LAMMPS Voigt order
+  /// {xx, yy, zz, xy, xz, yz} (eV). Computed only when requested (see
+  /// Predictor::predict_body's want_virial). has_virial=false leaves it unset and
+  /// the energy/force path byte-identical to the no-virial case.
+  bool has_virial = false;
+  double virial[6] = {0, 0, 0, 0, 0, 0};
 };
 
 /// GPU-persistent UMA inference: energy + forces via autograd on energy.
@@ -41,6 +47,11 @@ class Predictor {
   Predictor& operator=(Predictor&&) noexcept;
   Predictor(const Predictor&) = delete;
   Predictor& operator=(const Predictor&) = delete;
+
+  /// P0'.1 step 2: request the global virial (stress) via strain autograd on the
+  /// next predict(). Off by default so the energy/force path is byte-identical.
+  void set_want_virial(bool on) { want_virial_ = on; }
+  bool want_virial() const { return want_virial_; }
 
   Prediction predict(const torch::Tensor& pos,             // [N,3]
                      const torch::Tensor& atomic_numbers,  // [N] int64
@@ -147,6 +158,7 @@ class Predictor {
 
   torch::jit::script::Module module_;
   bool has_traced_module_ = false;
+  bool want_virial_ = false;  // P0'.1 step 2
   // P0'.4: true only for the live object that should clear the process-wide
   // BlockContext singleton on destruction. Reset to false when moved-from so the
   // moved-out temporary (e.g. from_artifact's return value) does not wipe the

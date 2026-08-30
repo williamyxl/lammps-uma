@@ -139,22 +139,21 @@ endif()
 if(UMA_ENGINE_USE_CUDA)
   target_compile_definitions(uma_engine PUBLIC UMA_ENGINE_USE_CUDA)
   # Opt-in UMA_PEER_TRANSPORT=nccl (raw libnccl behind uma_peer collectives).
+  # P3.3: NCCL is located via env hints (NCCL_ROOT / CUDA_HOME) + standard system
+  # locations. Do NOT hardcode a machine/version-specific HPC-SDK path (goes stale;
+  # portability landmine). On an HPC-SDK host, point NCCL_ROOT at the nccl dir.
   find_path(NCCL_INCLUDE_DIR nccl.h
     HINTS
       ENV NCCL_ROOT
       ENV CUDA_HOME
-      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl-2.25/include
-      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl/include
-      /usr/local/cuda/include
+      /usr/local/cuda
     PATH_SUFFIXES include
   )
   find_library(NCCL_LIBRARY nccl
     HINTS
       ENV NCCL_ROOT
       ENV CUDA_HOME
-      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl-2.25/lib
-      /opt/nvidia/hpc_sdk/Linux_x86_64/25.3/comm_libs/12.8/nccl/lib
-      /usr/local/cuda/lib64
+      /usr/local/cuda
     PATH_SUFFIXES lib lib64
   )
   if(NCCL_INCLUDE_DIR AND NCCL_LIBRARY)

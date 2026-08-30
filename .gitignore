@@ -126,3 +126,21 @@ core.[0-9]*
 src/ML-UMA/examples/polaris_m3/libmanaged_alloc.so
 # UMA paper PDF (large binary reference, not source)
 src/ML-UMA/*.pdf
+
+# P3.2: PBS job outputs / scratch — never commit run artifacts.
+scripts/out/
+scripts/*.o[0-9]*
+scripts/*.e[0-9]*
+*.o[0-9]*
+# PBS -k doe stdout files land in the submit dir with the job name
+par_gate.o[0-9]*
+final_pp.o[0-9]*
+rebuild.o[0-9]*
+p1_agfd.o[0-9]*
+virial*.o[0-9]*
+# ld-compat shims created by gate jobs
+scripts/**/compat/
+
+# P3.2: stale standalone engine build trees (regenerate via CMake)
+src/ML-UMA/uma-engine/build-xpu/
+src/ML-UMA/uma-engine/build-xpu-*/

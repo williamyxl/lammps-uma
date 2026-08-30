@@ -4,7 +4,7 @@ Export a UMA task head as a TorchScript energy artifact (forces via C++ autograd
 
 Usage:
   PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_artifact.py \\
-      --checkpoint /work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt \\
+      --checkpoint $UMA_CHECKPOINT \\
       --dtype float64 --task omat \\
       --output $ENG/artifacts/uma-s-1p2-omat-f64
 
@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 import traceback
 from pathlib import Path
@@ -287,7 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--checkpoint",
-        default="/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt",
+        default=os.environ.get("UMA_CHECKPOINT"),
+        help="UMA checkpoint (.pt); defaults to $UMA_CHECKPOINT",
     )
     parser.add_argument("--device", default=DEFAULT_DEVICE, choices=["cpu", "cuda"])
     parser.add_argument(

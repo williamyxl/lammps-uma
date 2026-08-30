@@ -28,10 +28,10 @@ task head at a time (`omat`, `odac`, `omol`, `oc20`, …).
 Script: [`python/export_artifact.py`](python/export_artifact.py)
 
 ```bash
-source /u/xyan11/miniforge3-x86_64/etc/profile.d/conda.sh && conda activate uma312
-ROOT=/work/nvme/bfzx/xyan11/workdir/lammps-uma
+source $CONDA_SETUP && conda activate uma312
+ROOT=$ROOT
 ENG=$ROOT/src/ML-UMA/uma-engine
-CKPT=/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt
+CKPT=$UMA_CHECKPOINT
 
 # Single task (omat) FP64 — default for LAMMPS getting_started
 PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_artifact.py \
@@ -55,8 +55,8 @@ Each artifact directory contains `model_traced.pt` + `metadata.json`.
 Usually built as part of LAMMPS (`scripts/build_lammps_uma.sh`). Standalone:
 
 ```bash
-source /u/xyan11/miniforge3-x86_64/etc/profile.d/conda.sh && conda activate uma312
-ENG=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine
+source $CONDA_SETUP && conda activate uma312
+ENG=$ROOT/src/ML-UMA/uma-engine
 TORCH_CMAKE=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
 cmake -S $ENG -B $ENG/build \
   -DCMAKE_PREFIX_PATH="$TORCH_CMAKE" \
@@ -68,7 +68,7 @@ cmake --build $ENG/build -j$(nproc)
 ## Parity (omat FP64)
 
 ```bash
-ENG=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine
+ENG=$ROOT/src/ML-UMA/uma-engine
 PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/parity_nacl.py \
   --dtype float64 --artifact $ENG/artifacts/uma-s-1p2-omat-f64
 ./$ENG/build/uma_parity_cli $ENG/artifacts/uma-s-1p2-omat-f64

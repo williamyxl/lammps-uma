@@ -8,7 +8,7 @@ Writes into an artifact directory (alongside model_traced.pt when present):
 
 Usage:
   PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_eager_weights.py \\
-      --checkpoint /work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt \\
+      --checkpoint $UMA_CHECKPOINT \\
       --dtype float64 --task omat \\
       --output $ENG/artifacts/uma-s-1p2-omat-f64
 """

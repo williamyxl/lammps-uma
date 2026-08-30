@@ -111,6 +111,9 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   // A/B switch: UMA_ENGINE_BUILD_GRAPH=1 forces the old path where the engine
   // rebuilds its own graph (known-good reference). Default consumes the LAMMPS NL.
   engine_build_graph_ = uma_env_bool("UMA_ENGINE_BUILD_GRAPH", false, error);
+  // P0'.1 step 2: opt-in single-tile virial/stress (strain autograd). Off by
+  // default so ordinary NVE/NVT runs keep the byte-identical energy/force path.
+  want_virial_flag_ = uma_env_bool("UMA_COMPUTE_VIRIAL", false, error);
   // Multi-node spatial domain decomposition (Phase A, deep halo k=1). Separate
   // from the mn_active GP-over-MPI path. Each rank owns a LAMMPS subdomain and
   // uses the single-tile Predictor on its owned+ghost atoms.
@@ -257,6 +260,13 @@ void PairUMA::compute(int eflag, int vflag)
 
   uma::Prediction result;
   if (!mn_active) {
+    // P0'.1 step 2: request the virial (strain autograd), single-tile only. Gated
+    // by BOTH an explicit opt-in (want_virial_flag_, from UMA_COMPUTE_VIRIAL=1 or a
+    // pair_style keyword) AND LAMMPS actually needing a global virial this step.
+    // NOT triggered by vflag_global alone: LAMMPS sets that on step 0 for the
+    // default thermo pressure compute even in NVE/NVT, so keying off it would run
+    // the (heavier, second-derivative) strain path on every ordinary run.
+    predictor->set_want_virial(want_virial_flag_ && vflag_global && !dd_active_);
     // Single rank. Default: CONSUME the LAMMPS neighbor list (convert to
     // FairChem edges, engine skips its own O(N^2) rebuild). A/B fallback:
     // UMA_ENGINE_BUILD_GRAPH=1 keeps the old path where the engine rebuilds.
@@ -288,6 +298,10 @@ void PairUMA::compute(int eflag, int vflag)
       f[i][2] += force_buf[3 * i + 2];
     }
     if (eflag_global) eng_vdwl += result.energy;
+    // P0'.1 step 2: publish the global virial (W = -dE/dstrain) into LAMMPS.
+    if (vflag_global && result.has_virial) {
+      for (int k = 0; k < 6; k++) virial[k] += result.virial[k];
+    }
   } else {
     // ---- multi-node graph-parallel -------------------------------------
     // Gather the global atom set TAG-ORDERED so every rank builds a bitwise
@@ -689,24 +703,34 @@ void PairUMA::init_style()
                    ckpt ? ckpt : "(unset)");
   }
 
-  // P0'.1: the model does not produce a stress tensor. no_virial_fdotr_compute=1
-  // (set in the ctor) keeps virial[] zero rather than a bogus fdotr sum, so
-  // `thermo` pressure would report the kinetic term only. That is a benign, if
-  // incomplete, diagnostic for NVE/NVT. It is NOT acceptable to drive a barostat
-  // with a zero pair virial: the box dynamics would be silently wrong. Detect any
-  // active barostat (box-changing pressure fix: npt/nph/press-berendsen/nphug/...)
-  // at setup and refuse loudly instead of producing an invalid trajectory.
-  for (const auto &ifix : modify->get_fix_list()) {
-    const char *s = ifix->style;
-    const bool barostat =
-        utils::strmatch(s, "^npt") || utils::strmatch(s, "^nph") ||
-        utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
-        utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug");
-    if (barostat)
-      error->all(FLERR,
-                 "Pair style uma does not compute the virial; pressure control "
-                 "(fix {}) is not supported. Use NVE/NVT, or remove the barostat.",
-                 s);
+  // P0'.1: the single-tile path now computes a REAL virial via strain autograd
+  // (step 2), so pressure/NPT is supported there. The multi-node GP and DD paths
+  // do NOT yet compute a virial, so a barostat on those paths would silently drive
+  // the box with a zero stress -> refuse loudly. no_virial_fdotr_compute=1 (ctor)
+  // still prevents a bogus fdotr virial on the paths that don't fill virial[].
+  // P0'.1: the strain-autograd virial (step 2) is implemented but SEGFAULTS on the
+  // Intel XPU backend (see predictor.cpp), so on XPU no path computes a usable
+  // virial and any barostat is refused. On a non-XPU build the single-tile virial
+  // is available under UMA_COMPUTE_VIRIAL=1.
+#if defined(UMA_ENGINE_USE_XPU)
+  const bool virial_supported = false;
+#else
+  const bool virial_supported = !mn_active && !dd_active_ && want_virial_flag_;
+#endif
+  if (!virial_supported) {
+    for (const auto &ifix : modify->get_fix_list()) {
+      const char *s = ifix->style;
+      const bool barostat =
+          utils::strmatch(s, "^npt") || utils::strmatch(s, "^nph") ||
+          utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
+          utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug");
+      if (barostat)
+        error->all(FLERR,
+                   "Pair style uma does not compute a usable virial on this build "
+                   "(strain-autograd stress segfaults on Intel XPU; GP/DD paths have "
+                   "no virial). Pressure control (fix {}) is not supported; use "
+                   "NVE/NVT.", s);
+    }
   }
 
   // Full neighbor list; we CONSUME it (convert to FairChem edges) instead of

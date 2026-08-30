@@ -9,7 +9,7 @@ Writes into an artifact dir (e.g. artifacts/uma-s-1p2-omat-f64/):
 
 Usage:
   PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_mp_artifact.py \\
-      --checkpoint /work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt \\
+      --checkpoint $UMA_CHECKPOINT \\
       --output $ENG/artifacts/uma-s-1p2-omat-f64 \\
       --world 2 --dtype float64 --task omat --device cuda
 """

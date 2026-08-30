@@ -9,7 +9,7 @@ from pathlib import Path
 
 from fairchem.core.calculate.pretrained_mlip import pretrained_checkpoint_path_from_name
 
-# Basenames in uma-cache/ (see /mnt/d/workdir/uma-cache/).
+# Basenames in the uma-cache/ directory.
 UMA_CACHE_CHECKPOINTS: dict[str, str] = {
     "uma-s-1p2": "uma-s-1p2.pt",
     "uma-m-1p1": "uma-m-1p1.pt",
@@ -18,11 +18,23 @@ UMA_CACHE_CHECKPOINTS: dict[str, str] = {
 
 
 def uma_cache_dir() -> Path:
-    """Directory containing flat *.pt checkpoints."""
+    """Directory containing flat *.pt checkpoints.
+
+    P3.3/P5'.7: resolution order (no machine-specific hardcoded default):
+      1. UMA_CACHE_DIR
+      2. the directory of UMA_CHECKPOINT (if it points at a file)
+      3. a `uma-cache/` sibling of the repo root
+    """
     if env := os.environ.get("UMA_CACHE_DIR"):
         return Path(env).expanduser().resolve()
-    # default: /mnt/d/workdir/uma-cache
-    return Path("/mnt/d/workdir/uma-cache")
+    ckpt = os.environ.get("UMA_CHECKPOINT")
+    if ckpt:
+        p = Path(ckpt).expanduser()
+        if p.is_file():
+            return p.resolve().parent
+    # repo root = .../src/ML-UMA/uma-engine/python/checkpoints.py -> up 5 = repo
+    repo = Path(__file__).resolve().parents[4]
+    return repo.parent / "uma-cache"
 
 
 def checkpoint_path_for_model(model_name: str) -> Path:

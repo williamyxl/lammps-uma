@@ -90,12 +90,12 @@ std::string resolve_gp_checkpoint(const std::string& /*artifact_dir*/,
   if (const char* e = std::getenv("UMA_CHECKPOINT")) {
     if (*e && file_exists(e)) return e;
   }
-  static const char* kDefault =
-      "/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt";
-  if (file_exists(kDefault)) return kDefault;
+  // P3.3/P5'.7: removed a hardcoded machine-specific default that did not exist on
+  // other machines and would silently point at the wrong file. The checkpoint must
+  // come from metadata.checkpoint_path or UMA_CHECKPOINT.
   throw std::runtime_error(
       "GraphParallelRuntime: no UMA checkpoint found (set metadata "
-      "checkpoint_path or UMA_CHECKPOINT)");
+      "checkpoint_path or UMA_CHECKPOINT to an existing file)");
 }
 
 bool prefer_python_gp_worker() {

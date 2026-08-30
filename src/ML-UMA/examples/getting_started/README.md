@@ -22,7 +22,7 @@ Export tool: `../../uma-engine/python/export_artifact.py`
 1. You are on a **GPU** node (or about to submit a GPU job).
 2. Conda env **`uma312`** is available (PyTorch + CUDA).
 3. The UMA checkpoint exists (default on this machine):
-   `/work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt`
+   `$UMA_CHECKPOINT`
 
 No extra data file is required: the input builds the crystal with
 LAMMPS `lattice` / `create_atoms`.
@@ -34,7 +34,7 @@ LAMMPS `lattice` / `create_atoms`.
 From anywhere:
 
 ```bash
-sbatch /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/getting_started/build_uma.slurm
+sbatch $ROOT/src/ML-UMA/examples/getting_started/build_uma.slurm
 ```
 
 The job will:
@@ -57,15 +57,15 @@ The multihead checkpoint has several energy tasks (`omat`, `odac`, `omol`,
 `oc20`, `oc22`, `oc25`, `omc`). Each needs its own TorchScript artifact:
 
 ```bash
-sbatch /work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/examples/getting_started/export_all_tasks_fp64.slurm
+sbatch $ROOT/src/ML-UMA/examples/getting_started/export_all_tasks_fp64.slurm
 ```
 
 Equivalent manual command:
 
 ```bash
-ENG=/work/nvme/bfzx/xyan11/workdir/lammps-uma/src/ML-UMA/uma-engine
+ENG=$ROOT/src/ML-UMA/uma-engine
 PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_artifact.py \
-  --checkpoint /work/nvme/bfzx/xyan11/workdir/uma-cache/uma-s-1p2.pt \
+  --checkpoint $UMA_CHECKPOINT \
   --dtype float64 --all-tasks --skip-existing \
   --artifacts-root $ENG/artifacts
 ```
@@ -89,9 +89,9 @@ pair_coeff * * .../artifacts/uma-s-1p2-omat-f64 Na Cl
 On a GPU allocation (interactive or batch), with the same modules/env:
 
 ```bash
-cd /work/nvme/bfzx/xyan11/workdir/lammps-uma
+cd $ROOT
 
-source /u/xyan11/miniforge3-x86_64/etc/profile.d/conda.sh
+source $CONDA_SETUP
 conda activate uma312
 module unload cudatoolkit 2>/dev/null || true
 module load cuda/12.8

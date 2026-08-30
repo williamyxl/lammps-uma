@@ -119,6 +119,7 @@ class SharedPeerGatherSlot {
   static const char* transport_name(int transport) {
     if (transport == kTransportCudaIpc) return "cuda_ipc";
     if (transport == kTransportNccl) return "nccl";
+    if (transport == kTransportXccl) return "xccl";  // P3.1: was misreported as "shm"
     return "shm";
   }
 
