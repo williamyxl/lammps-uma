@@ -19,6 +19,52 @@ import torch.nn.functional as F
 
 from fairchem.core.models.uma.nn.mole import MOLE
 
+# P5'.1: this exporter monkey-patches ~25 fairchem/torch globals and HAND-REIMPLEMENTS
+# several fairchem forward bodies. An upstream rename fails loudly, but an upstream
+# semantic reorder produces a plausible WRONG energy silently. The cheap 80% guard is
+# to pin the fairchem version the exporter was written against and refuse to run on a
+# different one. Escape hatch: UMA_ALLOW_FAIRCHEM_MISMATCH=1 (logged).
+_REQUIRED_FAIRCHEM = "2.21.0"
+_REQUIRED_TORCH = "2.13.0"  # +xpu build; compared on the leading version only
+
+
+def _assert_fairchem_version() -> None:
+    import os
+    import warnings
+
+    allow = os.environ.get("UMA_ALLOW_FAIRCHEM_MISMATCH", "0") == "1"
+    try:
+        import fairchem.core as _fc
+        fc_ver = getattr(_fc, "__version__", None)
+        if fc_ver is None:
+            from importlib.metadata import version as _v
+            fc_ver = _v("fairchem-core")
+    except Exception as exc:  # noqa: BLE001
+        fc_ver = f"<unknown: {exc}>"
+    try:
+        tor_ver = torch.__version__
+    except Exception as exc:  # noqa: BLE001
+        tor_ver = f"<unknown: {exc}>"
+
+    fc_ok = isinstance(fc_ver, str) and fc_ver.split("+")[0] == _REQUIRED_FAIRCHEM
+    tor_ok = isinstance(tor_ver, str) and tor_ver.split("+")[0] == _REQUIRED_TORCH
+    if fc_ok and tor_ok:
+        return
+    msg = (
+        "UMA exporter version mismatch: the trace patches + hand-reimplemented "
+        "fairchem forwards were written against fairchem-core=="
+        f"{_REQUIRED_FAIRCHEM}, torch=={_REQUIRED_TORCH}. Found fairchem-core="
+        f"{fc_ver}, torch={tor_ver}. A silent semantic drift here yields a WRONG "
+        "artifact. Pin the environment (see repo requirements.txt) or set "
+        "UMA_ALLOW_FAIRCHEM_MISMATCH=1 to override at your own risk."
+    )
+    if allow:
+        warnings.warn(msg + " [OVERRIDDEN by UMA_ALLOW_FAIRCHEM_MISMATCH=1]",
+                      RuntimeWarning, stacklevel=2)
+        return
+    raise RuntimeError(msg)
+
+
 _ORIGINAL_MOLE_FORWARD = MOLE.forward
 
 # Bound originals for restore (imported names on escn_md must be rebound too).
@@ -229,6 +275,9 @@ def _restore_checkpoint_passthrough() -> None:
 def apply_trace_patches(shape_generic: bool = False,
                         checkpoint_passthrough: bool = False) -> None:
     global _ORIG_AXIS_ANGLE, _ORIG_EULER, _ORIG_EULER_CG
+
+    # P5'.1: refuse to patch a fairchem/torch the exporter was not written for.
+    _assert_fairchem_version()
 
     MOLE.forward = mole_forward_traceable
 

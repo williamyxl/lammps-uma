@@ -140,15 +140,48 @@ Vec3 lattice_image_shift(int ix,
 std::array<int, 3> image_repeats(const std::array<std::array<double, 3>, 3>& cell,
                                  const std::array<bool, 3>& pbc,
                                  double cutoff) {
+  // P0.5: the number of periodic images to search along axis d must be based on
+  // the INTERPLANAR SPACING (perpendicular distance between the lattice planes
+  // normal to that axis), NOT the lattice-vector length |cell[d]|. For a skewed
+  // (triclinic) cell |cell[d]| overestimates the spacing, so cutoff/|cell[d]|
+  // under-counts the images and edges within the cutoff get silently dropped.
+  //
+  // Interplanar spacing along axis d = V / |A_d|, where V = |a . (b x c)| is the
+  // cell volume and A_d = (the cross product of the OTHER two lattice vectors) is
+  // the area vector of the plane spanned by them. For an orthorhombic cell this
+  // reduces to |cell[d]|, so the orthorhombic path is unchanged.
+  auto cross = [](const std::array<double, 3>& u,
+                  const std::array<double, 3>& v) -> std::array<double, 3> {
+    return {u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2],
+            u[0] * v[1] - u[1] * v[0]};
+  };
+  auto dot = [](const std::array<double, 3>& u, const std::array<double, 3>& v) {
+    return u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  };
+  auto vnorm = [&](const std::array<double, 3>& u) { return std::sqrt(dot(u, u)); };
+
+  const std::array<double, 3> a = {cell[0][0], cell[0][1], cell[0][2]};
+  const std::array<double, 3> b = {cell[1][0], cell[1][1], cell[1][2]};
+  const std::array<double, 3> c = {cell[2][0], cell[2][1], cell[2][2]};
+  const double volume = std::abs(dot(a, cross(b, c)));
+
   std::array<int, 3> rep = {0, 0, 0};
   for (int d = 0; d < 3; ++d) {
     if (!pbc[d]) {
       rep[d] = 0;
       continue;
     }
-    const double len = std::sqrt(cell[d][0] * cell[d][0] + cell[d][1] * cell[d][1] +
-                                 cell[d][2] * cell[d][2]);
-    rep[d] = static_cast<int>(std::ceil(cutoff / std::max(len, 1e-12)));
+    // Area vector of the plane spanned by the other two lattice vectors.
+    std::array<double, 3> area_vec;
+    if (d == 0)
+      area_vec = cross(b, c);
+    else if (d == 1)
+      area_vec = cross(c, a);
+    else
+      area_vec = cross(a, b);
+    const double area = vnorm(area_vec);
+    const double spacing = (area > 1e-12) ? (volume / area) : 1e-12;
+    rep[d] = static_cast<int>(std::ceil(cutoff / std::max(spacing, 1e-12)));
   }
   return rep;
 }

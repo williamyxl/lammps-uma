@@ -55,6 +55,13 @@ class MpiPeerPredictor {
   struct Impl;
   MpiPeerPredictor();
 
+  // P0.3: the actual predict body. predict_host() wraps this in try/catch and a
+  // cross-rank error-flag all_reduce so a failure on one rank becomes a clean
+  // collective abort instead of a hang.
+  Prediction predict_host_body(int n, const double* pos_xyz,
+                               const int* atomic_numbers, const double* cell_3x3,
+                               const int* pbc_3, double* forces_out_optional);
+
   int world_ = 1;
   int rank_ = 0;
   int device_index_ = 0;

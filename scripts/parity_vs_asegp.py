@@ -19,6 +19,9 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uma_gates  # P1.5: single source of truth for tolerances
+
 
 def read_lmp_forces(dump_path):
     lines = Path(dump_path).read_text().splitlines()
@@ -54,12 +57,10 @@ def read_lmp_energy(log_path):
 def main():
     lmp_dir = Path(os.environ["LMP_DIR"])
     ase_dir = Path(os.environ["ASE_DIR"])
-    min_sample = int(os.environ.get("MIN_SAMPLE", "100"))
-    # Energy gate is PER-ATOM (physically meaningful for large N): a fixed total
-    # tolerance is unfair at 260k atoms where FP64 accumulation of ~1e-8 meV/atom
-    # sums to ~1e-6 eV total. Default 1e-6 meV/atom (== 1e-9 eV/atom).
-    e_tol_per_atom = float(os.environ.get("E_TOL_PER_ATOM_MEV", "1e-3"))  # meV/atom
-    f_tol = float(os.environ.get("F_TOL", "1e-5"))
+    # P1.5: tolerances come from the shared uma_gates table (env-overridable there).
+    min_sample = uma_gates.min_sample()
+    e_tol_per_atom = uma_gates.e_tol_per_atom_mev()  # meV/atom
+    f_tol = uma_gates.f_tol()
 
     f_lmp = read_lmp_forces(lmp_dir / "forces_step0.dump")
     e_lmp = read_lmp_energy(lmp_dir / "log.lammps")
@@ -68,12 +69,14 @@ def main():
     summ = json.loads((ase_dir / "summary_w12.json").read_text())
     e_ase = float(summ["energy_eV"])
 
-    n = min(len(f_lmp), len(f_ase))
+    # P1.5: an atom-count mismatch is a HARD FAIL, not a truncate-and-warn.
+    # Comparing the first min(N) atoms of two differently-sized systems can hide a
+    # real disagreement (wrong system, dropped atoms, oracle/LAMMPS drift).
     if len(f_lmp) != len(f_ase):
-        print(f"WARN natoms mismatch: lmp={len(f_lmp)} ase={len(f_ase)}; "
-              f"comparing first {n}")
-    f_lmp = f_lmp[:n]
-    f_ase = f_ase[:n]
+        print(f"PARITY FAIL: natoms mismatch lmp={len(f_lmp)} ase={len(f_ase)} "
+              f"(refusing to truncate-and-compare)")
+        return 2
+    n = len(f_lmp)
 
     dE = abs(e_lmp - e_ase)
     dE_per_atom_meV = dE / n * 1e3

@@ -294,6 +294,32 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
               << (mn_checkpoint_enabled() ? " ON)" : " OFF)") << "\n";
   }
 
+  // P0.2: the backward-graph path in predict_host() is selected per-rank from
+  // I.ac_active (file presence) + mn_checkpoint_enabled() (env). If ranks disagree
+  // they enter DIFFERENT sequences of mid-graph uma_peer collectives -> guaranteed
+  // deadlock (a hang, not an error). Agree the mode across ranks FIRST via a peer
+  // all_reduce and throw a clear error on disagreement instead of hanging.
+  {
+    const int local_mode = (self->impl_->ac_active ? 1 : 0) |
+                           (mn_checkpoint_enabled() ? 2 : 0);
+    auto mode_t = torch::tensor({static_cast<double>(local_mode)},
+                                torch::TensorOptions().dtype(torch::kFloat64)
+                                    .device(self->impl_->device));
+    // all_reduce is SUM; compare against world*local_mode to detect any mismatch.
+    auto sum_t = self->impl_->slot->all_reduce(rank, mode_t);
+    const double sum = sum_t.to(torch::kCPU).item<double>();
+    const double expect = static_cast<double>(world) * static_cast<double>(local_mode);
+    if (std::abs(sum - expect) > 0.5) {
+      throw std::runtime_error(
+          "MpiPeerPredictor: ranks disagree on the backward-graph mode "
+          "(ac_active/checkpoint) — some ranks are missing per-rank AC artifacts "
+          "(w" + std::to_string(world) + "/r*/model_block_0.pt) or have a "
+          "different UMA_MN_CKPT. All ranks must load the same artifact set. "
+          "rank=" + std::to_string(rank) + " local_mode=" +
+          std::to_string(local_mode));
+    }
+  }
+
   if (metadata.element_references.defined()) {
     self->impl_->element_refs =
         metadata.element_references.to(self->impl_->device, compute_dtype).contiguous();
@@ -302,6 +328,23 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
 }
 
 Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
+                                          const int* atomic_numbers,
+                                          const double* cell_3x3, const int* pbc_3,
+                                          double* forces_out_optional) {
+  // P0.3 (revised): exception safety is handled by agreeing on the DETERMINISTIC,
+  // pre-collective failure conditions BEFORE any rank enters the model's mid-graph
+  // collectives (see the shard/pad-cap agreement inside predict_host_body). A
+  // whole-body try/catch + post-hoc error all_reduce was tried and REMOVED: it
+  // converted a rank-asymmetric OOM *inside* the forward (one rank throws, peers
+  // are already mid-collective) from a fast MPI_Abort into a DEADLOCK (the throwing
+  // rank enters the error all_reduce while peers wait in the forward collective).
+  // For mid-collective failures a clean collective abort is impossible; letting the
+  // exception propagate to LAMMPS -> MPI_Abort is the correct (fast) behavior.
+  return predict_host_body(n, pos_xyz, atomic_numbers, cell_3x3, pbc_3,
+                           forces_out_optional);
+}
+
+Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
                                           const int* atomic_numbers,
                                           const double* cell_3x3, const int* pbc_3,
                                           double* forces_out_optional) {
@@ -369,10 +412,19 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
     NeighborListConfig config;
     config.cutoff = metadata_.cutoff;
     config.max_neighbors = metadata_.max_neighbors;
-    auto graph = build_neighbor_graph(pos.to(torch::kCPU), cell.to(torch::kCPU),
-                                      pbc.to(torch::kCPU), config);
+    auto cell_cpu = cell.to(torch::kCPU);
+    auto pbc_cpu = pbc.to(torch::kCPU);
+    auto pos_cpu = pos.to(torch::kCPU);
+    auto graph = build_neighbor_graph(pos_cpu, cell_cpu, pbc_cpu, config);
     I.edge_index_full = graph.edge_index.to(dev);
     I.cell_offsets_full = graph.cell_offsets.to(dev, dtype);
+    // P0.6: build_neighbor_graph() wraps positions into the cell internally and
+    // computes cell_offsets against that WRAPPED frame. The vesin branch above
+    // re-publishes pos = vg.wrapped_pos for exactly this reason; the CPU branch
+    // did not, so downstream pos_grad kept the UNWRAPPED frame and
+    // edge_distance_vec = pos[j] + offset@cell - pos[i] used inconsistent frames
+    // whenever an input atom sat outside the box. Publish the same wrapped frame.
+    pos = wrap_positions_to_cell(pos_cpu, cell_cpu, pbc_cpu).to(dev, dtype).contiguous();
   }
 #endif
 
@@ -392,13 +444,27 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   // legacy artifact, no padding.
   if (metadata_.edge_pad_cap > 0) {
     const int64_t e_now = eidx.defined() ? eidx.size(1) : 0;
-    if (e_now > metadata_.edge_pad_cap) {
-      throw std::runtime_error(
-          "uma-engine: runtime shard edge count " + std::to_string(e_now) +
-          " exceeds traced edge_pad_cap " +
-          std::to_string(metadata_.edge_pad_cap) +
-          " (edge drift beyond the guard chunk; re-export with a larger N or "
-          "chunk). rank=" + std::to_string(rank_));
+    // P0.3: the pad-cap overflow is the dominant deterministic per-step failure and
+    // it is RANK-LOCAL (one rank's shard can drift over cap while others are fine).
+    // Agree across ranks BEFORE entering the model's mid-graph collectives: if ANY
+    // rank overflows, EVERY rank throws here (a clean pre-collective abort) instead
+    // of the overflowing rank throwing while peers block forever in the forward.
+    {
+      const int over_local = (e_now > metadata_.edge_pad_cap) ? 1 : 0;
+      auto over_t = torch::tensor({static_cast<double>(over_local)},
+                                  torch::TensorOptions().dtype(torch::kFloat64)
+                                      .device(dev));
+      const double any_over =
+          I.slot->all_reduce(rank_, over_t).to(torch::kCPU).item<double>();
+      if (any_over > 0.5) {
+        throw std::runtime_error(
+            "uma-engine: runtime shard edge count exceeds traced edge_pad_cap " +
+            std::to_string(metadata_.edge_pad_cap) +
+            " on >=1 rank (edge drift beyond the guard chunk; re-export with a "
+            "larger N or chunk). this rank=" + std::to_string(rank_) +
+            " e_now=" + std::to_string(e_now) + " over=" +
+            std::to_string(over_local));
+      }
     }
     // The pad edge CENTER (scatter target) must be a node THIS rank owns, else
     // the scatter writes outside the local node accumulator -> GPU segfault. Use

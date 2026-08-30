@@ -1000,3 +1000,128 @@ progress at job stop; N=1–9 conclusive, identical to §14.0.)
 floor, cos = 1.0, AG=FD unchanged, Loop times within run variance. **G3 met —
 Sprint 1 changed no physics.**
 Jobs: rebuild 8791387; tripwire 8791405; full suite 8791406; AG=FD 8791409.
+
+### 14.2 Sprint 2 — collective-agreement cluster + neighbor-list fixes (2026-08-30)
+
+Binary rebuilt from the Sprint-2 tree (job 8791580) adding P0.2–P0.6:
+- **P0.2** cross-rank backward-graph mode agreement (peer all_reduce in `create()`);
+- **P0.3** collective **pad-cap overflow** check before the forward (a whole-body
+  try/catch wrapper was tried first but DEADLOCKED at W=4 on an asymmetric K=3 OOM,
+  job 8791554 — removed; see D.2/§D.3);
+- **P0.4** empty-shard matched collectives (NCCL path);
+- **P0.5** neighbor-list image bound now uses the **interplanar spacing** `V/|area|`
+  (was `|cell[d]|`) so skewed cells don't drop edges;
+- **P0.6** both CPU-NL branches (GP `mpi_peer_predictor.cpp`, `libtorch_mp.cpp`) now
+  publish the **wrapped** position frame that `cell_offsets` were computed against.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8791608:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 166.3 | 216 | 5.09e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 91.5  | 117 | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.4  | 66  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 32.0  | 45  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.7  | 49  | 7.94e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.97 | 27  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 139.7 | 181 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD (single tile, FP64), job 8791634:** N=1–7 all PASS — max|AG−FD| ≤ 8.1e-8,
+traced-vs-eager dF at the ~1e-16 FP64 floor. (N=8 also PASS on the identical-predictor
+prior build 8791542.)
+
+**Mandatory ASE parity tripwire, job 8791607:** N=16 W=1 + N=32 W=12 **PASS**
+(dE 1.42e-9 / 1.28e-8 meV/atom, max|dF| 5.07e-14 / 1.61e-13, cos = 1.0).
+
+**Regression verdict (G3):** every **step-0 PE is bit-identical** to §14.1/§14.0/§13
+(N=16 all-W −110673.829050; N=32 −885377.060040), cos = 1.0, forces at the FP64
+floor, AG=FD unchanged, Loop times within run variance. **No physics regression.**
+
+**Two intended trajectory/force effects (not regressions):**
+- **P0.6 corrected the GP MD trajectory.** All W≥2 (GP) step-10 PE now equals the
+  single-tile W=1 value (−110602.976229; N=32 −884817.238827), whereas before
+  Sprint 2 the GP step-10 differed (e.g. §14.1 N=16 W≥2 −109317.384). The pre-fix
+  GP path left positions **unwrapped** while `cell_offsets` were wrapped-frame, so
+  mid-trajectory `edge_distance_vec` was subtly inconsistent once atoms drifted
+  outside the box; step-0 (atoms in-box) was always correct, which is why parity
+  (a step-0 metric) always passed. Post-fix the GP trajectory reproduces the
+  single-tile reference — a correctness improvement, step-0 invariant preserved.
+- **N=32 per-atom max|dF| ≈ 1.6e-13** (vs 1.05e-13 pre-Sprint-2) — stable across
+  two independent Sprint-2 builds; a reduction-order effect of the added control
+  collectives (P0.2 agreement + P0.3 pad-cap all_reduce + the Sprint-0 barrier
+  `.wait()`). It is 8 orders of magnitude under the 1e-5 force gate, cos = 1.0, and
+  step-0 energy is unchanged — physically negligible.
+Jobs: rebuild 8791580; tripwire 8791607; full suite 8791608; AG=FD 8791634.
+(An earlier Sprint-2 build 8791542 exposed the W=4 P0.3 deadlock via job 8791554.)
+
+### 14.3 Sprint 3 — fail-closed harness + env pin (2026-08-30)
+
+Sprint 3 changed only the **Python/scripts harness** (fail-closed gates, single
+tolerance source `scripts/uma_gates.py`, `parity_vs_asegp.py` atom-count hard-fail,
+exporter exit-code enforcement, `requirements.txt` + fairchem/torch version assert).
+**No C++ engine change → the Sprint-2 binary (build 8791580) is reused unchanged.**
+This regression run therefore both (a) confirms G3 and (b) validates that the
+modified gate scripts still run correctly (the tripwire + parity table are produced
+by the edited `parity_vs_asegp.py`, now importing `uma_gates`).
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8791684:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 160.4 | 216 | 5.10e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.3  | 118 | 7.97e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 47.8  | 68  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.1  | 50  | 7.94e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.0  | 48  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.78 | 27  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 137.2 | 173 | 1.62e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD (single tile, FP64):** N=1–10 all PASS (max|AG−FD| ≤ 3.2e-7), job 8791634 —
+the Sprint-2/3 predictor is byte-identical (Sprint 3 changed no C++), so this is the
+current AG=FD record. The AG=FD **gate script itself** (`phase6_agfd.py`) is now
+fail-closed (P1.1): 0 samples / < MIN_SAMPLE / any failed FD run → FAIL.
+
+**Mandatory ASE parity tripwire (via the edited `parity_vs_asegp.py`), job 8791683:**
+N=16 W=1 + N=32 W=12 **PASS** (dE 1.41e-9 / 1.28e-8 meV/atom, max|dF| 5.04e-14 /
+1.61e-13, cos = 1.0). Tolerances sourced from `uma_gates.py`.
+
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.2/§14.1/§13,
+cos = 1.0, forces at the FP64 floor, AG=FD unchanged, Loop times within run
+variance. **No physics change** — as expected for a harness-only sprint. The
+harness is now fail-closed (a crashed/zero-sample/oracle-missing gate can no longer
+report PASS) and all gate tolerances come from one file.
+Jobs: tripwire 8791683; full suite 8791684; AG=FD 8791634 (Sprint-2/3 binary reused).
+
+### 14.4 Sprint 4 — Phase-2 CI pyramid (Tier 0/1) (2026-08-30)
+
+Sprint 4 stood up the local CI (Tier 0 static guards + Tier 1 hermetic unit tests,
+`ci/ci_local.sh`, ~45 s on a login node, no allocation) and registered the C++
+CTest (`enable_testing`/`add_test` in `uma-engine/CMakeLists.txt`;
+`graph_shard_smoke` now builds on every backend). The **only compiled change** is
+CMake test wiring (the engine smoke target is `EXCLUDE_FROM_ALL` in the LAMMPS
+build), so the binary is functionally identical to §14.2/§14.3. Rebuild 8791793
+verified the CMake change configures + builds cleanly (`LMP BUILD OK`).
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8791812:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 164.9 | 219 | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.5  | 115 | 7.97e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.1  | 64  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.6  | 44  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.5  | 117 | 7.92e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.88 | 26  | 7.94e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.0 | 175 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD:** N=1–10 PASS (job 8791634; predictor byte-identical since Sprint 2).
+**Tripwire (job 8791811):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+
+**Local CI (`ci/ci_local.sh`, login node, no allocation, 45 s):** Tier 0 guards
+PASS; Tier 1 = 29 pure tests PASS (metadata contract, edge-pad/partition, neighbor
+`image_repeats`/P0.5, gate arithmetic).
+
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.3/§14.2/§13,
+cos = 1.0, forces at the FP64 floor, AG=FD unchanged. **No physics change** —
+Sprint 4 is CI/tooling only.
+Jobs: rebuild 8791793; tripwire 8791811; full suite 8791812; AG=FD 8791634.

@@ -1464,8 +1464,34 @@ def main() -> int:
         restore_gp()
 
     (out / "block_export_report.json").write_text(json.dumps(report, indent=2))
-    print(f"\nDONE -> {out}", flush=True)
-    return 0 if ok else 2
+
+    # P1.4: fold the correctness checks into the EXIT CODE. Previously the exporter
+    # returned 0 whenever the trace/save (`ok`) succeeded, even if the reconstruct
+    # (traced == monolithic on the same input) or the GP graph-structure check
+    # FAILED — i.e. a numerically wrong artifact exited 0. Now any failed check
+    # fails the export. RECONSTRUCT=0 is an explicit, logged opt-out (it does not
+    # magically make the artifact validated — it just skips the check by request).
+    fail = not ok
+    if do_reconstruct:
+        if report.get("reconstruct_ok") is not True:
+            print("EXPORT FAIL: reconstruct check did not PASS "
+                  f"(reconstruct_ok={report.get('reconstruct_ok')})", flush=True)
+            fail = True
+    else:
+        print("WARNING: RECONSTRUCT=0 — reconstruct validation SKIPPED by request; "
+              "artifact numerical equivalence is NOT verified.", flush=True)
+    gc = report.get("graph_check", {})
+    if "gp_structure_ok" in gc and gc.get("gp_structure_ok") is not True:
+        print("EXPORT FAIL: GP graph-structure check did not PASS "
+              f"(gp_structure_ok={gc.get('gp_structure_ok')})", flush=True)
+        fail = True
+    if "single_tile_no_gather_ok" in gc and gc.get("single_tile_no_gather_ok") is not True:
+        print("EXPORT FAIL: single-tile artifact unexpectedly contains all_gather "
+              "collectives (single_tile_no_gather_ok=False)", flush=True)
+        fail = True
+
+    print(f"\nDONE -> {out}  [{'FAIL' if fail else 'OK'}]", flush=True)
+    return 2 if fail else 0
 
 
 def _capture_block_examples(backbone, submodules, chunk_cores, edgedeg_core,

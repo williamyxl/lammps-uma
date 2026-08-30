@@ -681,49 +681,47 @@ class SharedPeerGatherSlot {
       if (gpu.dim() == 0) return gpu;
       return gpu.narrow(0, 0, sizes[0]).contiguous();
     }
-    if (gpu.numel() == 0) {
-      barrier(rank);
-      auto opts = torch::TensorOptions().dtype(gpu.scalar_type()).device(gpu.device());
-      return torch::empty({0}, opts);
-    }
-    const int64_t n_local0 = gpu.dim() == 0 ? 1 : gpu.size(0);
-    std::vector<int64_t> out_sizes = gpu.sizes().vec();
+    // Scalar (dim 0) allgather: one value per rank.
     if (gpu.dim() == 0) {
-      out_sizes = {static_cast<int64_t>(world)};
-    } else {
-      out_sizes[0] = n_local0 * world;
+      auto gathered = torch::empty({static_cast<int64_t>(world)}, gpu.options());
+      nccl_precede_from_default_();
+      ncclResult_t nr =
+          ncclAllGather(gpu.data_ptr(), gathered.data_ptr(), 1,
+                        nccl_dtype_(gpu.scalar_type()), comm_, nccl_cuda_stream_());
+      if (nr != ncclSuccess)
+        throw std::runtime_error(std::string("ncclAllGather(scalar): ") +
+                                 ncclGetErrorString(nr));
+      nccl_join_default_stream_();
+      return gathered;
     }
-    auto gathered = torch::empty(out_sizes, gpu.options());
-    const size_t sendcount = static_cast<size_t>(gpu.numel());
+    // P0.4: ncclAllGather requires EVERY rank to send the SAME count. Shards can
+    // be unequal (and one may be EMPTY when world > n_atoms). The old code either
+    // returned early with a bare barrier() on an empty shard (a MISMATCHED
+    // collective vs the peers' ncclAllGather -> hang/corruption) or sent
+    // rank-specific counts. Fix: pad every rank's shard to the fixed
+    // padded_local_size, allgather that identical count on all ranks (empty rank
+    // sends an all-zero pad, not a barrier), then unpad per-rank via size_list.
+    const int64_t pad = padded_local_size(n_atoms, world);
+    auto padded = pad_nodes(gpu.contiguous(), pad);   // [pad, ...] on every rank
+    std::vector<int64_t> out_sizes = padded.sizes().vec();
+    out_sizes[0] = pad * world;
+    auto gathered = torch::empty(out_sizes, padded.options());
+    const size_t sendcount = static_cast<size_t>(padded.numel());
     nccl_precede_from_default_();
     ncclResult_t nr =
-        ncclAllGather(gpu.data_ptr(), gathered.data_ptr(), sendcount,
-                      nccl_dtype_(gpu.scalar_type()), comm_, nccl_cuda_stream_());
+        ncclAllGather(padded.data_ptr(), gathered.data_ptr(), sendcount,
+                      nccl_dtype_(padded.scalar_type()), comm_, nccl_cuda_stream_());
     if (nr != ncclSuccess) {
       throw std::runtime_error(std::string("ncclAllGather: ") +
                                ncclGetErrorString(nr));
     }
     nccl_join_default_stream_();
-    if (gpu.dim() == 0) {
-      return gathered;
-    }
     auto sizes = size_list(n_atoms, world);
-    bool equal = true;
-    for (int r = 1; r < world; ++r) {
-      if (sizes[static_cast<size_t>(r)] != sizes[0]) {
-        equal = false;
-        break;
-      }
-    }
-    if (equal && sizes[0] == n_local0) {
-      return gathered;
-    }
     std::vector<torch::Tensor> parts;
     parts.reserve(static_cast<size_t>(world));
     for (int r = 0; r < world; ++r) {
       const auto want = sizes[static_cast<size_t>(r)];
-      parts.push_back(
-          gathered.narrow(0, r * n_local0, want).contiguous());
+      parts.push_back(gathered.narrow(0, r * pad, want).contiguous());
     }
     return torch::cat(parts, /*dim=*/0).contiguous();
   }
@@ -735,19 +733,20 @@ class SharedPeerGatherSlot {
           "SharedPeerGatherSlot: nccl not initialized (call init_nccl)");
     }
     auto gpu = ensure_cuda_(local);
+    // P0.4: ncclAllReduce requires the SAME element count on every rank. The old
+    // empty-shard branch issued a 1-element dummy ncclAllReduce while non-empty
+    // peers reduced N elements -> a mismatched collective (hang/corruption). In
+    // this engine all_reduce is only used for the FULL-SYSTEM [n,3] force sum,
+    // which is identically sized on every rank (never empty), so the correct
+    // behavior is to just issue the one matched collective below. A genuinely
+    // empty-but-mismatched all_reduce is unsupported by NCCL semantics; guard it
+    // with a clear error rather than a silent wrong-count reduce.
     if (gpu.numel() == 0) {
-      auto t = torch::zeros({1}, torch::dtype(torch::kFloat64).device(gpu.device()));
-      auto out = torch::empty_like(t);
-      nccl_precede_from_default_();
-      ncclResult_t nr =
-          ncclAllReduce(t.data_ptr(), out.data_ptr(), 1, ncclDouble, ncclSum,
-                        comm_, nccl_cuda_stream_());
-      if (nr != ncclSuccess) {
-        throw std::runtime_error(std::string("ncclAllReduce(empty sync): ") +
-                                 ncclGetErrorString(nr));
-      }
-      nccl_join_default_stream_();
-      return gpu;
+      throw std::runtime_error(
+          "SharedPeerGatherSlot::all_reduce: empty local tensor. all_reduce "
+          "requires an identical element count on every rank (it is used only for "
+          "the full-system force sum); an empty shard here indicates a caller "
+          "bug.");
     }
     auto out = torch::empty_like(gpu);
     nccl_precede_from_default_();

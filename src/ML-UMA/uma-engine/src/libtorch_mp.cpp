@@ -436,10 +436,18 @@ void LibtorchMpRuntime::rebuild_neighbors_full(torch::Device build_dev) {
   NeighborListConfig config;
   config.cutoff = metadata_.cutoff;
   config.max_neighbors = metadata_.max_neighbors;
-  auto graph = build_neighbor_graph(pos0_.to(torch::kCPU), cell0_.to(torch::kCPU),
-                                    pbc0_.to(torch::kCPU), config);
+  auto pos_cpu = pos0_.to(torch::kCPU);
+  auto cell_cpu = cell0_.to(torch::kCPU);
+  auto pbc_cpu = pbc0_.to(torch::kCPU);
+  auto graph = build_neighbor_graph(pos_cpu, cell_cpu, pbc_cpu, config);
   edge_index_ = graph.edge_index.to(build_dev);
   cell_offsets_ = graph.cell_offsets.to(build_dev, compute_dtype_);
+  // P0.6: publish the SAME wrapped frame the graph's cell_offsets were computed
+  // against (the vesin branch above does this via vg.wrapped_pos). Without it the
+  // CPU path leaves pos0_ unwrapped while offsets are wrapped-frame -> wrong
+  // edge_distance_vec when atoms start outside the box.
+  pos0_ = wrap_positions_to_cell(pos_cpu, cell_cpu, pbc_cpu)
+              .to(build_dev, compute_dtype_).contiguous();
 }
 
 Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,

@@ -191,11 +191,14 @@ endif()
 add_executable(uma_parity_cli tests/parity_cli.cpp)
 target_link_libraries(uma_parity_cli PRIVATE uma_engine)
 
-# Multi-node / GP smoke tests + worker are CUDA/NCCL-only (Phase 4 on XPU).
-if(NOT UMA_ENGINE_USE_XPU)
+# P1.6 / Sprint 4: graph_shard_smoke is pure graph_shard.h arithmetic (no CUDA/
+# NCCL/XCCL) and returns 0/1, so it builds AND runs on every backend (incl. XPU) as
+# a CTest. Kept OUT of the NOT-XPU block below on purpose.
 add_executable(graph_shard_smoke tests/graph_shard_smoke.cpp)
 target_link_libraries(graph_shard_smoke PRIVATE uma_engine)
 
+# Multi-node / GP smoke tests + worker are CUDA/NCCL-only (Phase 4 on XPU).
+if(NOT UMA_ENGINE_USE_XPU)
 add_executable(kokkos_peer_smoke tests/kokkos_peer_smoke.cpp)
 target_link_libraries(kokkos_peer_smoke PRIVATE uma_engine)
 
@@ -219,9 +222,9 @@ if(UMA_ENGINE_HAS_NCCL)
   message(STATUS "uma-engine: worker explicitly linked to NCCL (${NCCL_LIBRARY})")
 endif()
 
-set(UMA_ENGINE_INSTALL_TARGETS uma_engine uma_parity_cli)
+set(UMA_ENGINE_INSTALL_TARGETS uma_engine uma_parity_cli graph_shard_smoke)
 if(NOT UMA_ENGINE_USE_XPU)
-  list(APPEND UMA_ENGINE_INSTALL_TARGETS graph_shard_smoke kokkos_peer_smoke
+  list(APPEND UMA_ENGINE_INSTALL_TARGETS kokkos_peer_smoke
        kokkos_peer_device_smoke uma_libtorch_mp_worker)
 endif()
 install(TARGETS ${UMA_ENGINE_INSTALL_TARGETS}
@@ -229,4 +232,15 @@ install(TARGETS ${UMA_ENGINE_INSTALL_TARGETS}
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
 )
+
+# ---------------------------------------------------------------------------
+# P1.6 / Sprint 4: CTest registration. `ctest` in the build dir runs the C++
+# hermetic self-tests. graph_shard_smoke runs on every backend; the NCCL smoke
+# tests register only where they are built (non-XPU).
+# ---------------------------------------------------------------------------
+enable_testing()
+add_test(NAME graph_shard_smoke COMMAND graph_shard_smoke)
+if(NOT UMA_ENGINE_USE_XPU)
+  add_test(NAME kokkos_peer_smoke COMMAND kokkos_peer_smoke)
+endif()
 install(DIRECTORY include/ DESTINATION include)
