@@ -10,6 +10,8 @@
 #include <torch/script.h>
 #include <torch/torch.h>
 
+#include <nlohmann/json.hpp>  // P4'.2: real JSON parser (replaces substring scan)
+
 namespace uma {
 
 namespace {
@@ -300,18 +302,24 @@ bool file_exists(const std::string& path) {
   return in.good();
 }
 
-// Minimal JSON int lookup (mirrors metadata.cpp parse_json_int) without adding
-// a dependency; returns -1 when the key is absent or unparseable.
-int parse_optional_json_int(const std::string& json, const std::string& key) {
-  const auto pos = json.find("\"" + key + "\":");
-  if (pos == std::string::npos) return -1;
-  auto start = json.find_first_of("0123456789-", pos + key.size() + 3);
-  if (start == std::string::npos) return -1;
+// P4'.2: real JSON int lookup (replaces the old substring scanner). Returns -1
+// when the file is unreadable/unparseable or the key is absent/not-an-int, so the
+// callers fall back to counting *.pt files exactly as before.
+int read_optional_metadata_int(const std::string& artifact_dir,
+                               const std::string& key) {
+  const std::string metadata_path = artifact_dir + "/metadata.json";
+  std::ifstream in(metadata_path);
+  if (!in.good()) return -1;
+  std::string text((std::istreambuf_iterator<char>(in)),
+                   std::istreambuf_iterator<char>());
   try {
-    return static_cast<int>(std::stol(json.substr(start)));
+    auto j = nlohmann::json::parse(text);
+    auto it = j.find(key);
+    if (it != j.end() && it->is_number_integer()) return it->get<int>();
   } catch (const std::exception&) {
-    return -1;
+    // fall through to file-count fallback
   }
+  return -1;
 }
 
 int count_block_files(const std::string& artifact_dir) {
@@ -333,28 +341,16 @@ int count_chunk_files(const std::string& artifact_dir) {
 }
 
 int read_num_blocks(const std::string& artifact_dir) {
-  const std::string metadata_path = artifact_dir + "/metadata.json";
-  std::ifstream in(metadata_path);
-  if (in.good()) {
-    std::string json((std::istreambuf_iterator<char>(in)),
-                     std::istreambuf_iterator<char>());
-    const int meta_n = parse_optional_json_int(json, "num_blocks");
-    if (meta_n > 0) return meta_n;
-  }
+  const int meta_n = read_optional_metadata_int(artifact_dir, "num_blocks");
+  if (meta_n > 0) return meta_n;
   return count_block_files(artifact_dir);
 }
 
 // Option (j): one chunk module per block, so the count is num_blocks. Prefer
 // metadata num_blocks, else scan model_chunk_*.pt.
 int read_num_chunks(const std::string& artifact_dir) {
-  const std::string metadata_path = artifact_dir + "/metadata.json";
-  std::ifstream in(metadata_path);
-  if (in.good()) {
-    std::string json((std::istreambuf_iterator<char>(in)),
-                     std::istreambuf_iterator<char>());
-    const int meta_n = parse_optional_json_int(json, "num_blocks");
-    if (meta_n > 0) return meta_n;
-  }
+  const int meta_n = read_optional_metadata_int(artifact_dir, "num_blocks");
+  if (meta_n > 0) return meta_n;
   return count_chunk_files(artifact_dir);
 }
 

@@ -1125,3 +1125,41 @@ PASS; Tier 1 = 29 pure tests PASS (metadata contract, edge-pad/partition, neighb
 cos = 1.0, forces at the FP64 floor, AG=FD unchanged. **No physics change** —
 Sprint 4 is CI/tooling only.
 Jobs: rebuild 8791793; tripwire 8791811; full suite 8791812; AG=FD 8791634.
+
+### 14.5 Sprint 5 — artifact / metadata contract (2026-08-30)
+
+Binary rebuilt from the Sprint-5 tree (job 8791871). P4′.1–3 replaced the two
+hand-rolled substring "JSON parsers" (`metadata.cpp`, `block_context.cpp`) with a
+vendored real **nlohmann/json 3.12.0** parser, added a `metadata_version >= 2`
+gate + provenance fields, made `parse_compute_dtype` **throw** on missing/unknown
+dtype (was a silent `float32` fallback), and added read-back validation
+(`edge_pad_cap % edge_ac_chunk`, coherent `world/rank`). The exporter now stamps
+`metadata_version=2` + fairchem/torch/git/checkpoint-sha provenance. The 950 KB JSON
+header compiled cleanly through icpx.
+
+**Compat:** the existing (pre-v2) artifacts have no `metadata_version`, so the gate
+scripts pass `UMA_ALLOW_LEGACY_METADATA=1`; this run therefore also proves the new
+parser reads the legacy metadata to the **same values** as the old substring scanner.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8791889:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 163.5 | 208 | 5.06e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.5  | 114 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.0  | 64  | 7.94e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.5  | 44  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.4  | 51  | 7.92e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.82 | 26  | 7.94e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 137.9 | 172 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**AG=FD:** N=1–10 PASS (job 8791634; `predictor.cpp` unchanged this sprint).
+**Tripwire (job 8791888):** N=16 W=1 + N=32 W=12 PASS, bit-identical — legacy
+artifacts load through the new parser correctly.
+
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.4/…/§13,
+cos = 1.0, forces at the FP64 floor, AG=FD unchanged, Loop times within run
+variance. The real JSON parser reads the same values as the substring scanner on
+well-formed metadata; **no physics change**. The least-defended interface in the
+system (metadata.json) now has a real parser, a version gate, and read-back checks.
+Jobs: rebuild 8791871; tripwire 8791888; full suite 8791889; AG=FD 8791634.

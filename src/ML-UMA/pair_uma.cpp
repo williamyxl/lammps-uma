@@ -49,6 +49,22 @@
 
 using namespace LAMMPS_NS;
 
+// P4.1: one validated bool-env parse (replaces the ad-hoc `e[0]=='1'&&e[1]=='\0'`
+// idiom scattered across the file). Accepts exactly "0"/"1"; any other value is a
+// config error (warned, treated as the default) rather than silently ignored.
+// See docs/ENV_VARS.md for the full catalog of UMA_* variables.
+static bool uma_env_bool(const char *name, bool dflt, Error *error = nullptr)
+{
+  const char *e = std::getenv(name);
+  if (e == nullptr || e[0] == '\0') return dflt;
+  if (e[0] == '1' && e[1] == '\0') return true;
+  if (e[0] == '0' && e[1] == '\0') return false;
+  if (error)
+    error->warning(FLERR, "Ignoring non-boolean value '{}' for {} (expected 0 or 1)",
+                   e, name);
+  return dflt;
+}
+
 static const char *const elements_uma[] = {
     "X",  "H",  "He", "Li", "Be", "B",  "C",  "N",  "O",  "F",  "Ne", "Na", "Mg", "Al", "Si",
     "P",  "S",  "Cl", "Ar", "K",  "Ca", "Sc", "Ti", "V",  "Cr", "Mn", "Fe", "Co", "Ni", "Cu",
@@ -94,15 +110,11 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   list = nullptr;
   // A/B switch: UMA_ENGINE_BUILD_GRAPH=1 forces the old path where the engine
   // rebuilds its own graph (known-good reference). Default consumes the LAMMPS NL.
-  engine_build_graph_ = false;
-  if (const char *e = std::getenv("UMA_ENGINE_BUILD_GRAPH"))
-    engine_build_graph_ = (e[0] == '1' && e[1] == '\0');
+  engine_build_graph_ = uma_env_bool("UMA_ENGINE_BUILD_GRAPH", false, error);
   // Multi-node spatial domain decomposition (Phase A, deep halo k=1). Separate
   // from the mn_active GP-over-MPI path. Each rank owns a LAMMPS subdomain and
   // uses the single-tile Predictor on its owned+ghost atoms.
-  dd_active_ = false;
-  if (const char *e = std::getenv("UMA_DD"))
-    dd_active_ = (e[0] == '1' && e[1] == '\0');
+  dd_active_ = uma_env_bool("UMA_DD", false, error);
   dd_edge_count_ = 0;
   halo_buf_ = nullptr;
   halo_per_node_ = 0;
@@ -661,6 +673,21 @@ void PairUMA::init_style()
 {
   if (force->newton_pair) error->all(FLERR, "Pair style uma requires newton pair off");
   if (atom->tag_enable == 0) error->all(FLERR, "Pair style uma requires atom IDs");
+
+  // P4.1: echo the resolved runtime config once, so a run's log records exactly
+  // which UMA_* flags were active (no more silent config). Full catalog: docs/ENV_VARS.md.
+  if (comm->me == 0) {
+    const char *ckpt = std::getenv("UMA_CHECKPOINT");
+    utils::logmesg(lmp,
+                   "Pair uma config: precision={} engine_build_graph={} dd={} "
+                   "ckpt={} mn_ckpt={} allow_legacy_metadata={} checkpoint={}\n",
+                   (precision == PRECISION_DOUBLE) ? "double" : "mixed",
+                   engine_build_graph_ ? 1 : 0, dd_active_ ? 1 : 0,
+                   uma_env_bool("UMA_CKPT", false) ? 1 : 0,
+                   uma_env_bool("UMA_MN_CKPT", false) ? 1 : 0,
+                   uma_env_bool("UMA_ALLOW_LEGACY_METADATA", false) ? 1 : 0,
+                   ckpt ? ckpt : "(unset)");
+  }
 
   // P0'.1: the model does not produce a stress tensor. no_virial_fdotr_compute=1
   // (set in the ctor) keeps virial[] zero rather than a bogus fdotr sum, so

@@ -1312,6 +1312,13 @@ def main() -> int:
                 "balance_channels folded into block sub-module; charge/spin "
                 "bound as constants (fixed charge/spin runs)",
             ])
+        # P4'.1: stamp schema version + provenance (fairchem/torch/git/ckpt sha)
+        # so the C++ loader can require metadata_version >= 2 and record what built
+        # the artifact. Best-effort; never fails the export.
+        try:
+            meta.fill_provenance(os.environ.get("UMA_CHECKPOINT"))
+        except Exception as _prov_exc:  # noqa: BLE001
+            print(f"WARN: metadata provenance fill failed: {_prov_exc}", flush=True)
         meta_d = meta.to_dict()
         # C++ BlockContext prefers metadata num_blocks (else counts files).
         meta_d["num_blocks"] = int(backbone.num_layers)

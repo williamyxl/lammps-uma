@@ -60,6 +60,11 @@ target_include_directories(uma_engine
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
+  PRIVATE
+    # P4'.2: vendored nlohmann/json (single header, 3.12.0) for a real JSON parser
+    # in metadata.cpp / block_context.cpp (replaces the hand-rolled substring scan).
+    # Include the third_party ROOT so `#include <nlohmann/json.hpp>` resolves.
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 target_link_libraries(uma_engine PUBLIC ${TORCH_LIBRARIES})
 # Locate uma_gp_worker.py for devices>1 FairChem eager GP backend.

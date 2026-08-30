@@ -27,12 +27,8 @@ action() {
 action pair_uma.cpp
 action pair_uma.h
 
-# also install Kokkos styles when KOKKOS package is present
-
-if (test -e ../../KOKKOS) then
-  if (test $mode = 1) then
-    if (test ! -e ../../pair_uma_kokkos.cpp) then
-      :
-    fi
-  fi
-fi
+# P3.6: the KOKKOS variant (pair_uma_kokkos.{cpp,h}, the `uma/kk` style) is
+# installed by src/KOKKOS/Install.sh (guarded on pair_uma.cpp), matching how every
+# other KOKKOS-accelerated pair style is handled. The previous no-op (`:`) block
+# here NEVER installed the Kokkos files, so `uma/kk` was silently unavailable via
+# the standard `make yes-kokkos yes-ml-uma` path. Do NOT re-add a copy here.

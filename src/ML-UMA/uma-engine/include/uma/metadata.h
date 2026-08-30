@@ -8,6 +8,18 @@
 namespace uma {
 
 struct ArtifactMetadata {
+  /// P4'.1 schema version. metadata_version >= 2 carries the version/provenance
+  /// fields below. A version-1 (or absent-version) artifact is REJECTED at load
+  /// unless UMA_ALLOW_LEGACY_METADATA=1 (which keeps the pre-P4'.1 lenient
+  /// behavior for old artifacts). 0 => field absent in the file.
+  int metadata_version = 0;
+  std::string fairchem_version;
+  std::string torch_version;
+  std::string exporter_git_sha;
+  std::string checkpoint_sha256;
+  /// P4'.3: the edge-chunk size the artifact was traced with. edge_pad_cap must be
+  /// a multiple of this (validated at load). 0 => absent.
+  int edge_ac_chunk = 0;
   std::string model_name;
   std::string task_name;
   std::string export_format;

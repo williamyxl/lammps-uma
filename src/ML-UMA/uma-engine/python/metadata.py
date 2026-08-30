@@ -63,6 +63,49 @@ class ExportMetadata:
     checkpoint_path: str | None = None
     checkpoint_revision: str | None = None
     export_notes: list[str] = field(default_factory=list)
+    # P4'.1 schema version + provenance. The C++ loader requires
+    # metadata_version >= 2 (else UMA_ALLOW_LEGACY_METADATA=1). Provenance is
+    # filled by fill_provenance() at export time.
+    metadata_version: int = 2
+    fairchem_version: str | None = None
+    torch_version: str | None = None
+    exporter_git_sha: str | None = None
+    checkpoint_sha256: str | None = None
+
+    def fill_provenance(self, checkpoint_file: str | None = None) -> None:
+        """Populate fairchem/torch versions, exporter git sha, and (optionally) the
+        checkpoint sha256. Best-effort: never fails the export on a lookup error."""
+        import hashlib
+        import subprocess
+        try:
+            import torch as _t
+            self.torch_version = str(_t.__version__)
+        except Exception:
+            pass
+        try:
+            import fairchem.core as _fc
+            self.fairchem_version = getattr(_fc, "__version__", None)
+            if self.fairchem_version is None:
+                from importlib.metadata import version as _v
+                self.fairchem_version = _v("fairchem-core")
+        except Exception:
+            pass
+        try:
+            here = Path(__file__).resolve().parent
+            self.exporter_git_sha = subprocess.check_output(
+                ["git", "-C", str(here), "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL, text=True).strip()
+        except Exception:
+            pass
+        if checkpoint_file:
+            try:
+                h = hashlib.sha256()
+                with open(checkpoint_file, "rb") as fh:
+                    for chunk in iter(lambda: fh.read(1 << 20), b""):
+                        h.update(chunk)
+                self.checkpoint_sha256 = h.hexdigest()
+            except Exception:
+                pass
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
