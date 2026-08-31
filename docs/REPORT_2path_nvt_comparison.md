@@ -1353,3 +1353,34 @@ cos = 1.0, forces at the FP64 floor. Local CI green under Tier-0 STRICT (now wit
 the E1 guard + the env-completeness guard). **No physics change; E1 silent-wrong-
 physics eliminated and test-guarded.**
 Jobs: rebuild 8793004; tripwire 8793021; full suite 8793026; E1 test 8793037.
+
+### 14.11 Re-audit §E.7 follow-up — CheckpointModuleFn de-duplication (2026-08-31)
+
+The rev-6 re-audit (§E.7, B→B+) confirmed all four earlier fixes and named one top
+open item: **`CheckpointModuleFn` was duplicated** — the shared
+`checkpoint_module.h` version plus a byte-identical private copy in
+`mpi_peer_predictor.cpp` — the exact divergence class that produced the P0'.3
+silent-physics bug. De-duplicated: `mpi_peer_predictor.cpp` now includes the shared
+header and uses the single `uma::CheckpointModuleFn`; the private copy is deleted;
+a new Tier-0 HARD guard asserts exactly one definition exists. The GP checkpoint
+path (W≥2, `UMA_MN_CKPT`) now runs the shared Function, so this run is the parity
+proof that the de-dup is behavior-preserving.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8793107:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 168.0 | 209 | 5.04e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 92.3  | 116 | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.8  | 65  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.7  | 44  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.6  | 51  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.92 | 95  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.9 | 174 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8793106):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.10/…/§13, cos =
+1.0, forces at the FP64 floor. Local CI green under Tier-0 STRICT (now 7 HARD guards
+incl. "single CheckpointModuleFn definition"). **No physics change; the duplication
+that caused P0'.3 is removed and guarded.**
+Jobs: rebuild 8793084; tripwire 8793106; full suite 8793107.
