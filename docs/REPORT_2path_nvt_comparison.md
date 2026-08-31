@@ -1315,3 +1315,41 @@ Finished the three Sprint-6 residuals:
 1.0, forces at the FP64 floor. The virial is opt-in, so the default path is
 unchanged. **No physics change; NPT now unblocked.**
 Jobs: rebuild 8792571; tripwire 8792590; full suite 8792591; virial 8792561/8792593.
+
+### 14.10 Audit response — E1–E3 + Rec4 (2026-08-31)
+
+Fixes for PART E (independent audit rev 5). **E1** was a real regression I
+introduced: the Sprint-6 barostat guard read `mn_active` in `init_style()`, which
+still holds its ctor value `false` there (it is set in `compute()`), so under
+`mpirun -n>1` + `UMA_COMPUTE_VIRIAL=1` NPT ran on the GP path with a **zero pair
+virial** — the exact P0'.1 silent-wrong-physics. Fixed to key on `comm->nprocs>1`
+(valid at `init_style`); added a Tier-0 HARD regression guard and a runtime test.
+Also: E2 (gated 4 per-step I/O sites), E3 (corrected ENV_VARS.md + implemented the
+promised Tier-0 env-completeness guard + documented all vars), Rec4 (`xccl_peer.o`
+`IMPLICIT_DEPENDS`). Only the E1 fix is a compute-path-adjacent change; virial is
+opt-in, so the default path is unchanged.
+
+**E1 regression test (`scripts/npt_refuse_multinode.pbs`, job 8793037):** 2-tile GP
+`fix npt` with `UMA_COMPUTE_VIRIAL=1` now **aborts** at `pair_uma.cpp:726` — "does
+not compute the virial on the multi-node (GP/DD) path; pressure control (fix npt) is
+not supported there" → **NPT_REFUSE_MN PASS**. (Before the fix this ran silently
+with zero stress.)
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8793026 (post-audit binary):**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 164.5 | 206 | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 93.3  | 117 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 49.2  | 64  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 32.0  | 45  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.8  | 52  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 13.01 | 40  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 140.1 | 176 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8793021):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.9/…/§13,
+cos = 1.0, forces at the FP64 floor. Local CI green under Tier-0 STRICT (now with
+the E1 guard + the env-completeness guard). **No physics change; E1 silent-wrong-
+physics eliminated and test-guarded.**
+Jobs: rebuild 8793004; tripwire 8793021; full suite 8793026; E1 test 8793037.

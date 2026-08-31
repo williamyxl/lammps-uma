@@ -703,15 +703,17 @@ void PairUMA::init_style()
                    ckpt ? ckpt : "(unset)");
   }
 
-  // P0'.1: the single-tile path now computes a REAL virial via strain autograd
-  // (step 2), so pressure/NPT is supported there. The multi-node GP and DD paths
-  // do NOT yet compute a virial, so a barostat on those paths would silently drive
-  // the box with a zero stress -> refuse loudly. no_virial_fdotr_compute=1 (ctor)
-  // still prevents a bogus fdotr virial on the paths that don't fill virial[].
   // P0'.1: the single-tile virial (pos+cell gradient, step 2) is available under
   // UMA_COMPUTE_VIRIAL=1 (works on XPU via the cell-gradient path). The GP/DD paths
   // still have no virial, so a barostat there is refused.
-  const bool virial_supported = !mn_active && !dd_active_ && want_virial_flag_;
+  //
+  // E1 FIX (audit 2026-08-31): the multi-node indicator MUST be `comm->nprocs > 1`,
+  // NOT `mn_active`. init_style() runs BEFORE compute(), where mn_active is set, so
+  // reading mn_active here always sees the ctor value `false` -> under mpirun -n>1
+  // with UMA_COMPUTE_VIRIAL=1 the guard was skipped and NPT ran on the GP path with
+  // a ZERO pair virial (the exact P0'.1 silent-wrong-physics this guard prevents).
+  const bool multinode = (comm->nprocs > 1);
+  const bool virial_supported = !multinode && !dd_active_ && want_virial_flag_;
   if (!virial_supported) {
     for (const auto &ifix : modify->get_fix_list()) {
       const char *s = ifix->style;
@@ -720,7 +722,7 @@ void PairUMA::init_style()
           utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
           utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug");
       if (barostat) {
-        if (mn_active || dd_active_)
+        if (multinode || dd_active_)
           error->all(FLERR,
                      "Pair style uma does not compute the virial on the multi-node "
                      "(GP/DD) path; pressure control (fix {}) is not supported "
@@ -1169,10 +1171,13 @@ void PairUMA::mole_composition_allreduce()
   std::vector<long> global_counts(maxz + 1, 0);
   MPI_Allreduce(local_counts.data(), global_counts.data(), maxz + 1,
                 MPI_LONG, MPI_SUM, world);
-  // Diagnostic: report the global composition once. The exact-fix hook (feeding
-  // this into the traced MoLE mean) is a Phase-B TODO; Phase A relies on the
+  // Diagnostic: report the global composition. The exact-fix hook (feeding this into
+  // the traced MoLE mean) is a Phase-B TODO; Phase A relies on the
   // homogeneous-composition approximation (see run_compute_dd note).
-  if (screen && comm->me == 0) {
+  // E2 (audit 2026-08-31): this is on the per-step DD path, so gate the print behind
+  // UMA_DD_DEBUG (read once) instead of printing every step.
+  static const bool dd_debug = (std::getenv("UMA_DD_DEBUG") != nullptr);
+  if (dd_debug && screen && comm->me == 0) {
     long total = 0;
     for (long c : global_counts) total += c;
     fprintf(screen, "uma DD: global composition total atoms = %ld\n", total);
@@ -1236,7 +1241,11 @@ void PairUMA::install_halo_callbacks()
   // copies), forward_comm, then check EVERY ghost row == tag[its owner]. Then
   // set owned=1, ghost=1, reverse_comm, and check owned row == 1 + (#ghost copies
   // of that atom). Pinpoints pack/unpack/index bugs without the model.
-  if (std::getenv("UMA_DD_HALO_TEST")) {
+  // E2 (audit 2026-08-31): install_halo_callbacks() is re-run every DD step; read
+  // the debug flag ONCE (static) so the common (unset) case is a cheap branch, not
+  // a per-step getenv. The self-test aborts (error->all) after one run when set.
+  static const bool run_halo_test = (std::getenv("UMA_DD_HALO_TEST") != nullptr);
+  if (run_halo_test) {
     const int na = atom->nlocal + atom->nghost;
     const int pn = static_cast<int>(comm_forward);
     const tagint *tag = atom->tag;

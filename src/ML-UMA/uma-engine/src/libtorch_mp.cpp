@@ -42,6 +42,16 @@
 namespace uma {
 namespace {
 
+// E2 (audit 2026-08-31): per-step PERF_PARENT logging must be gated. Read the flag
+// once (env is process-constant). Was an UNGATED std::cerr on the hot path.
+bool mp_perf_enabled() {
+  static const bool on = [] {
+    const char* e = std::getenv("UMA_MP_PERF");
+    return e && e[0] == '1';
+  }();
+  return on;
+}
+
 bool file_exists(const std::string& path) {
   std::ifstream in(path);
   return static_cast<bool>(in);
@@ -631,7 +641,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
       std::chrono::duration<double, std::milli>(t_wait - t_pub).count();
   const double ms_tot =
       std::chrono::duration<double, std::milli>(clock::now() - t0).count();
-  {
+  if (mp_perf_enabled()) {
     char line[520];
     std::snprintf(
         line, sizeof(line),

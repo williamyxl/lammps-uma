@@ -106,6 +106,14 @@ if(UMA_ENGINE_USE_XPU)
               -c ${CMAKE_CURRENT_SOURCE_DIR}/src/xccl_peer.cpp -o ${_xccl_obj}
       DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/xccl_peer.cpp
               ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/xccl_peer.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/peer_context.h
+              ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/shared_peer.h
+      # Rec 4 (audit 2026-08-31): this hand-rolled command does NOT get CMake's
+      # automatic header-dependency scanning. IMPLICIT_DEPENDS makes CMake parse the
+      # #include graph so a change to ANY transitively-included header (e.g. the
+      # P0.4 rewrite in shared_peer.h) rebuilds xccl_peer.o instead of silently
+      # linking a stale object on the production XPU path.
+      IMPLICIT_DEPENDS CXX ${CMAKE_CURRENT_SOURCE_DIR}/src/xccl_peer.cpp
       COMMENT "Compiling xccl_peer.cpp with icpx (SYCL+oneCCL)")
     add_custom_target(uma_xccl_obj DEPENDS ${_xccl_obj})
     add_dependencies(uma_engine uma_xccl_obj)

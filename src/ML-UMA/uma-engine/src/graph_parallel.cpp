@@ -21,6 +21,16 @@
 namespace uma {
 namespace {
 
+// E2 (audit 2026-08-31): per-step predict tracing on the Python-worker path must be
+// gated. Read UMA_MP_VERBOSE once (env is process-constant).
+bool gp_verbose() {
+  static const bool on = [] {
+    const char* e = std::getenv("UMA_MP_VERBOSE");
+    return e && e[0] == '1';
+  }();
+  return on;
+}
+
 bool file_exists(const std::string& path) {
   std::ifstream in(path);
   return static_cast<bool>(in);
@@ -423,7 +433,8 @@ Prediction GraphParallelRuntime::predict_host(int n, const double* pos_xyz,
   std::ostringstream cmd;
   cmd << "{\"cmd\":\"predict\",\"n\":" << n << ",\"charge\":0,\"spin\":0}";
   write_line(cmd.str());
-  std::cerr << "uma GraphParallelRuntime: predict n=" << n << " sent\n" << std::flush;
+  if (gp_verbose())
+    std::cerr << "uma GraphParallelRuntime: predict n=" << n << " sent\n" << std::flush;
 
   // pos f64
   write_exact(pos_xyz, static_cast<size_t>(n) * 3 * sizeof(double));
@@ -436,13 +447,15 @@ Prediction GraphParallelRuntime::predict_host(int n, const double* pos_xyz,
   // pbc i32
   int32_t pbc32[3] = {pbc_3[0] ? 1 : 0, pbc_3[1] ? 1 : 0, pbc_3[2] ? 1 : 0};
   write_exact(pbc32, 3 * sizeof(int32_t));
-  std::cerr << "uma GraphParallelRuntime: predict payload written, waiting...\n"
-            << std::flush;
+  if (gp_verbose())
+    std::cerr << "uma GraphParallelRuntime: predict payload written, waiting...\n"
+              << std::flush;
 
   const std::string resp = read_line();
-  std::cerr << "uma GraphParallelRuntime: predict response bytes=" << resp.size()
-            << "\n"
-            << std::flush;
+  if (gp_verbose())
+    std::cerr << "uma GraphParallelRuntime: predict response bytes=" << resp.size()
+              << "\n"
+              << std::flush;
   if (!json_get_bool(resp, "ok", false)) {
     throw std::runtime_error("GP predict failed: " + resp);
   }
