@@ -202,8 +202,8 @@ void PairUMA::compute(int eflag, int vflag)
 
   const int nlocal = atom->nlocal;
   double **x = atom->x;
-  double **f = atom->f;
   int *type = atom->type;
+  // (f = atom->f is re-fetched inside each run_compute_* handler.)
 
   // ---- multi-node: assemble the GLOBAL atom set on every rank -------------
   // The model is graph-parallel, not spatially decomposed: it needs the whole
@@ -258,138 +258,167 @@ void PairUMA::compute(int eflag, int vflag)
   pbc_buf[1] = domain->yperiodic;
   pbc_buf[2] = domain->zperiodic;
 
+  // E.8.3 #3: dispatch to the per-model handler. compute() is now a thin
+  // dispatcher over the three execution models (single-tile / GP-over-MPI / DD);
+  // each model's body lives in its own method so the file is no longer a monolith
+  // and adding a fourth path does not grow compute() further. The shared input
+  // staging above (pos/z/cell/pbc member buffers) is common to single-tile + GP.
+  if (!mn_active)
+    run_compute_single_tile(eflag, vflag, nlocal, use_f64);
+  else
+    run_compute_gp(eflag, vflag, nlocal, use_f64);
+}
+
+/* ----------------------------------------------------------------------
+   Single-tile path: one rank, one device. Consumes the LAMMPS neighbor list
+   (extgraph) by default; UMA_ENGINE_BUILD_GRAPH=1 lets the engine rebuild its
+   own graph. Uses the shared pos/z/cell/pbc member buffers staged in compute().
+------------------------------------------------------------------------- */
+void PairUMA::run_compute_single_tile(int /*eflag*/, int /*vflag*/, int nlocal,
+                                      bool use_f64)
+{
+  double **f = atom->f;
   uma::Prediction result;
-  if (!mn_active) {
-    // P0'.1 step 2: request the virial (strain autograd), single-tile only. Gated
-    // by BOTH an explicit opt-in (want_virial_flag_, from UMA_COMPUTE_VIRIAL=1 or a
-    // pair_style keyword) AND LAMMPS actually needing a global virial this step.
-    // NOT triggered by vflag_global alone: LAMMPS sets that on step 0 for the
-    // default thermo pressure compute even in NVE/NVT, so keying off it would run
-    // the (heavier, second-derivative) strain path on every ordinary run.
-    predictor->set_want_virial(want_virial_flag_ && vflag_global && !dd_active_);
-    // Single rank. Default: CONSUME the LAMMPS neighbor list (convert to
-    // FairChem edges, engine skips its own O(N^2) rebuild). A/B fallback:
-    // UMA_ENGINE_BUILD_GRAPH=1 keeps the old path where the engine rebuilds.
-    const bool use_ext = !engine_build_graph_ && (list != nullptr);
-    if (use_ext) {
-      // Positions are passed exactly as-is (x - boxlo); the engine's extgraph
-      // path must NOT re-wrap them, so that
-      //   edge_vec = pos[jr] + offset@cell - pos[i] == x[j] - x[i]
-      // matches the LAMMPS minimum-image displacement (== vesin geometry).
-      const int64_t E = build_ext_graph(nlocal);
-      if (use_f64)
-        result = predictor->predict_host_extgraph(
-            nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf, E,
-            ext_edge_index_.data(), ext_cell_offsets_.data(), force_buf.data());
-      else
-        error->all(FLERR,
-                   "Pair style uma: LAMMPS-neighbor-list path requires precision "
-                   "double; set UMA_ENGINE_BUILD_GRAPH=1 for the mixed path");
-    } else if (use_f64) {
-      result = predictor->predict_host(nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf,
-                                       force_buf.data());
-    } else {
-      result = predictor->predict_host(nlocal, pos_buf.data(), z_buf.data(), cell_buf, pbc_buf,
-                                       force_buf.data());
-    }
-    for (int i = 0; i < nlocal; i++) {
-      f[i][0] += force_buf[3 * i + 0];
-      f[i][1] += force_buf[3 * i + 1];
-      f[i][2] += force_buf[3 * i + 2];
-    }
-    if (eflag_global) eng_vdwl += result.energy;
-    // P0'.1 step 2: publish the global virial (W = -dE/dstrain) into LAMMPS.
-    if (vflag_global && result.has_virial) {
-      for (int k = 0; k < 6; k++) virial[k] += result.virial[k];
-    }
+  // P0'.1 step 2: request the virial (strain autograd), single-tile only. Gated
+  // by BOTH an explicit opt-in (want_virial_flag_, from UMA_COMPUTE_VIRIAL=1 or a
+  // pair_style keyword) AND LAMMPS actually needing a global virial this step.
+  // NOT triggered by vflag_global alone: LAMMPS sets that on step 0 for the
+  // default thermo pressure compute even in NVE/NVT, so keying off it would run
+  // the (heavier, second-derivative) strain path on every ordinary run.
+  predictor->set_want_virial(want_virial_flag_ && vflag_global && !dd_active_);
+  // Single rank. Default: CONSUME the LAMMPS neighbor list (convert to
+  // FairChem edges, engine skips its own O(N^2) rebuild). A/B fallback:
+  // UMA_ENGINE_BUILD_GRAPH=1 keeps the old path where the engine rebuilds.
+  const bool use_ext = !engine_build_graph_ && (list != nullptr);
+  if (use_ext) {
+    // Positions are passed exactly as-is (x - boxlo); the engine's extgraph
+    // path must NOT re-wrap them, so that
+    //   edge_vec = pos[jr] + offset@cell - pos[i] == x[j] - x[i]
+    // matches the LAMMPS minimum-image displacement (== vesin geometry).
+    const int64_t E = build_ext_graph(nlocal);
+    if (use_f64)
+      result = predictor->predict_host_extgraph(
+          nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf, E,
+          ext_edge_index_.data(), ext_cell_offsets_.data(), force_buf.data());
+    else
+      error->all(FLERR,
+                 "Pair style uma: LAMMPS-neighbor-list path requires precision "
+                 "double; set UMA_ENGINE_BUILD_GRAPH=1 for the mixed path");
+  } else if (use_f64) {
+    result = predictor->predict_host(nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf,
+                                     force_buf.data());
   } else {
-    // ---- multi-node graph-parallel -------------------------------------
-    // Gather the global atom set TAG-ORDERED so every rank builds a bitwise
-    // identical graph (vesin output depends on atom order, and a differing
-    // order across ranks would silently desynchronise the edge shards).
-    if (!use_f64)
-      error->all(FLERR, "Pair style uma: multi-node requires precision double");
-
-    const int natoms_global = static_cast<int>(atom->natoms);
-    if (natoms_global <= 0)
-      error->all(FLERR, "Pair style uma: bad global atom count");
-
-    mn_tag.resize(static_cast<size_t>(nlocal));
-    for (int i = 0; i < nlocal; i++) mn_tag[i] = static_cast<int>(atom->tag[i]);
-
-    // counts/displacements for the variable-sized per-rank contributions
-    mn_counts.assign(static_cast<size_t>(mn_world), 0);
-    int nlocal_send = nlocal;
-    MPI_Allgather(&nlocal_send, 1, MPI_INT, mn_counts.data(), 1, MPI_INT, world);
-    mn_displs.assign(static_cast<size_t>(mn_world), 0);
-    int running = 0;
-    for (int r = 0; r < mn_world; r++) {
-      mn_displs[r] = running;
-      running += mn_counts[r];
-    }
-    if (running != natoms_global)
-      error->all(FLERR, "Pair style uma: gathered atom count != natoms");
-
-    mn_tag_all.assign(static_cast<size_t>(natoms_global), 0);
-    MPI_Allgatherv(mn_tag.data(), nlocal, MPI_INT, mn_tag_all.data(),
-                   mn_counts.data(), mn_displs.data(), MPI_INT, world);
-
-    std::vector<int> counts3(mn_counts), displs3(mn_displs);
-    for (int r = 0; r < mn_world; r++) { counts3[r] *= 3; displs3[r] *= 3; }
-    mn_pos_all.assign(static_cast<size_t>(natoms_global) * 3, 0.0);
-    MPI_Allgatherv(pos_buf_d.data(), nlocal * 3, MPI_DOUBLE, mn_pos_all.data(),
-                   counts3.data(), displs3.data(), MPI_DOUBLE, world);
-    mn_z_all.assign(static_cast<size_t>(natoms_global), 0);
-    MPI_Allgatherv(z_buf.data(), nlocal, MPI_INT, mn_z_all.data(),
-                   mn_counts.data(), mn_displs.data(), MPI_INT, world);
-
-    // Sort into tag order: identical on every rank regardless of who owns what.
-    mn_order.resize(static_cast<size_t>(natoms_global));
-    for (int i = 0; i < natoms_global; i++) mn_order[i] = i;
-    // stable_sort: tags are unique so ordering is deterministic either way,
-    // but this makes the "identical order on every rank" invariant explicit.
-    std::stable_sort(mn_order.begin(), mn_order.end(),
-              [&](int a, int b) { return mn_tag_all[a] < mn_tag_all[b]; });
-
-    mn_pos_sorted.resize(static_cast<size_t>(natoms_global) * 3);
-    mn_z_sorted.resize(static_cast<size_t>(natoms_global));
-    for (int k = 0; k < natoms_global; k++) {
-      const int src = mn_order[k];
-      mn_pos_sorted[3 * k + 0] = mn_pos_all[3 * src + 0];
-      mn_pos_sorted[3 * k + 1] = mn_pos_all[3 * src + 1];
-      mn_pos_sorted[3 * k + 2] = mn_pos_all[3 * src + 2];
-      mn_z_sorted[k] = mn_z_all[src];
-    }
-
-    mn_force_sorted.assign(static_cast<size_t>(natoms_global) * 3, 0.0);
-    // Edge-parallel, memory-sharded: each rank evaluates its 1/world edge shard
-    // of the FULL tag-ordered system and the NCCL all_reduce inside the peer sums
-    // force contributions across all GPUs. Memory is ~O(N/world), so systems that
-    // do not fit one GPU (e.g. NaCl 8x8x8 = 4096) run across nodes.
-    if (!mpi_peer)
-      error->all(FLERR, "Pair style uma: multi-node peer predictor not initialized");
-    result = mpi_peer->predict_host(natoms_global, mn_pos_sorted.data(),
-                                    mn_z_sorted.data(), cell_buf, pbc_buf,
-                                    mn_force_sorted.data());
-
-    // Scatter forces back to owners. all_reduce returns the fully reduced global
-    // force array on every rank, so each rank simply picks out the atoms it owns
-    // -- no extra MPI reduction of forces is needed.
-    for (int k = 0; k < natoms_global; k++) {
-      const int gathered_idx = mn_order[k];
-      if (gathered_idx < mn_displs[mn_rank] ||
-          gathered_idx >= mn_displs[mn_rank] + nlocal)
-        continue;
-      const int local_i = gathered_idx - mn_displs[mn_rank];
-      f[local_i][0] += mn_force_sorted[3 * k + 0];
-      f[local_i][1] += mn_force_sorted[3 * k + 1];
-      f[local_i][2] += mn_force_sorted[3 * k + 2];
-    }
-
-    // Energy is global and identical on every rank; LAMMPS sums eng_vdwl over
-    // ranks, so only one rank may contribute it.
-    if (eflag_global && mn_rank == 0) eng_vdwl += result.energy;
+    result = predictor->predict_host(nlocal, pos_buf.data(), z_buf.data(), cell_buf, pbc_buf,
+                                     force_buf.data());
   }
+  for (int i = 0; i < nlocal; i++) {
+    f[i][0] += force_buf[3 * i + 0];
+    f[i][1] += force_buf[3 * i + 1];
+    f[i][2] += force_buf[3 * i + 2];
+  }
+  if (eflag_global) eng_vdwl += result.energy;
+  // P0'.1 step 2: publish the global virial (W = -dE/dstrain) into LAMMPS.
+  if (vflag_global && result.has_virial) {
+    for (int k = 0; k < 6; k++) virial[k] += result.virial[k];
+  }
+}
+
+/* ----------------------------------------------------------------------
+   Multi-node graph-parallel path: one MPI rank per GPU. Gathers the global atom
+   set tag-ordered so every rank builds a bitwise-identical periodic graph, then
+   each rank evaluates its 1/world edge shard (mpi_peer) and the peer's all_reduce
+   sums forces. PBC is never spatially decomposed. Shared cell/pbc member buffers
+   are staged in compute().
+------------------------------------------------------------------------- */
+void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_f64)
+{
+  double **f = atom->f;
+  uma::Prediction result;
+  // Gather the global atom set TAG-ORDERED so every rank builds a bitwise
+  // identical graph (vesin output depends on atom order, and a differing
+  // order across ranks would silently desynchronise the edge shards).
+  if (!use_f64)
+    error->all(FLERR, "Pair style uma: multi-node requires precision double");
+
+  const int natoms_global = static_cast<int>(atom->natoms);
+  if (natoms_global <= 0)
+    error->all(FLERR, "Pair style uma: bad global atom count");
+
+  mn_tag.resize(static_cast<size_t>(nlocal));
+  for (int i = 0; i < nlocal; i++) mn_tag[i] = static_cast<int>(atom->tag[i]);
+
+  // counts/displacements for the variable-sized per-rank contributions
+  mn_counts.assign(static_cast<size_t>(mn_world), 0);
+  int nlocal_send = nlocal;
+  MPI_Allgather(&nlocal_send, 1, MPI_INT, mn_counts.data(), 1, MPI_INT, world);
+  mn_displs.assign(static_cast<size_t>(mn_world), 0);
+  int running = 0;
+  for (int r = 0; r < mn_world; r++) {
+    mn_displs[r] = running;
+    running += mn_counts[r];
+  }
+  if (running != natoms_global)
+    error->all(FLERR, "Pair style uma: gathered atom count != natoms");
+
+  mn_tag_all.assign(static_cast<size_t>(natoms_global), 0);
+  MPI_Allgatherv(mn_tag.data(), nlocal, MPI_INT, mn_tag_all.data(),
+                 mn_counts.data(), mn_displs.data(), MPI_INT, world);
+
+  std::vector<int> counts3(mn_counts), displs3(mn_displs);
+  for (int r = 0; r < mn_world; r++) { counts3[r] *= 3; displs3[r] *= 3; }
+  mn_pos_all.assign(static_cast<size_t>(natoms_global) * 3, 0.0);
+  MPI_Allgatherv(pos_buf_d.data(), nlocal * 3, MPI_DOUBLE, mn_pos_all.data(),
+                 counts3.data(), displs3.data(), MPI_DOUBLE, world);
+  mn_z_all.assign(static_cast<size_t>(natoms_global), 0);
+  MPI_Allgatherv(z_buf.data(), nlocal, MPI_INT, mn_z_all.data(),
+                 mn_counts.data(), mn_displs.data(), MPI_INT, world);
+
+  // Sort into tag order: identical on every rank regardless of who owns what.
+  mn_order.resize(static_cast<size_t>(natoms_global));
+  for (int i = 0; i < natoms_global; i++) mn_order[i] = i;
+  // stable_sort: tags are unique so ordering is deterministic either way,
+  // but this makes the "identical order on every rank" invariant explicit.
+  std::stable_sort(mn_order.begin(), mn_order.end(),
+            [&](int a, int b) { return mn_tag_all[a] < mn_tag_all[b]; });
+
+  mn_pos_sorted.resize(static_cast<size_t>(natoms_global) * 3);
+  mn_z_sorted.resize(static_cast<size_t>(natoms_global));
+  for (int k = 0; k < natoms_global; k++) {
+    const int src = mn_order[k];
+    mn_pos_sorted[3 * k + 0] = mn_pos_all[3 * src + 0];
+    mn_pos_sorted[3 * k + 1] = mn_pos_all[3 * src + 1];
+    mn_pos_sorted[3 * k + 2] = mn_pos_all[3 * src + 2];
+    mn_z_sorted[k] = mn_z_all[src];
+  }
+
+  mn_force_sorted.assign(static_cast<size_t>(natoms_global) * 3, 0.0);
+  // Edge-parallel, memory-sharded: each rank evaluates its 1/world edge shard
+  // of the FULL tag-ordered system and the NCCL all_reduce inside the peer sums
+  // force contributions across all GPUs. Memory is ~O(N/world), so systems that
+  // do not fit one GPU (e.g. NaCl 8x8x8 = 4096) run across nodes.
+  if (!mpi_peer)
+    error->all(FLERR, "Pair style uma: multi-node peer predictor not initialized");
+  result = mpi_peer->predict_host(natoms_global, mn_pos_sorted.data(),
+                                  mn_z_sorted.data(), cell_buf, pbc_buf,
+                                  mn_force_sorted.data());
+
+  // Scatter forces back to owners. all_reduce returns the fully reduced global
+  // force array on every rank, so each rank simply picks out the atoms it owns
+  // -- no extra MPI reduction of forces is needed.
+  for (int k = 0; k < natoms_global; k++) {
+    const int gathered_idx = mn_order[k];
+    if (gathered_idx < mn_displs[mn_rank] ||
+        gathered_idx >= mn_displs[mn_rank] + nlocal)
+      continue;
+    const int local_i = gathered_idx - mn_displs[mn_rank];
+    f[local_i][0] += mn_force_sorted[3 * k + 0];
+    f[local_i][1] += mn_force_sorted[3 * k + 1];
+    f[local_i][2] += mn_force_sorted[3 * k + 2];
+  }
+
+  // Energy is global and identical on every rank; LAMMPS sums eng_vdwl over
+  // ranks, so only one rank may contribute it.
+  if (eflag_global && mn_rank == 0) eng_vdwl += result.energy;
 }
 
 /* ---------------------------------------------------------------------- */

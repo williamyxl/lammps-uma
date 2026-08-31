@@ -58,6 +58,13 @@ class PairUMA : public Pair {
   // ext_cell_offsets_ and returns E.
   int64_t build_ext_graph(int nlocal);
 
+  // Per-model compute handlers (E.8.3 #3 decomposition). compute() stages the
+  // shared pos/z/cell/pbc member buffers then dispatches to exactly one of these;
+  // run_compute_dd() (below) is the third model. Keeping each execution model in
+  // its own method keeps compute() a thin dispatcher.
+  void run_compute_single_tile(int eflag, int vflag, int nlocal, bool use_f64);
+  void run_compute_gp(int eflag, int vflag, int nlocal, bool use_f64);
+
   // --- Multi-node spatial domain decomposition (Phase A, deep halo k=1) ------
   // Distinct from the mn_active GP-over-MPI path above. Under DD each rank owns
   // a LAMMPS subdomain; LAMMPS supplies ghosts out to the model receptive field
