@@ -363,45 +363,30 @@ Prediction Predictor::predict_body() {
   // Clone so the persistent buffer is not marked requires_grad.
   auto pos_grad = pos_.detach().clone().set_requires_grad(true);
 
-  // P0'.1 step 2: virial via strain autograd. Apply a symmetric strain eps (a
-  // [3,3] leaf initialized to ZERO) to positions and cell:
-  //   pos_s  = pos_grad @ (I + eps)^T ,  cell_s = cell @ (I + eps)^T
-  // At eps=0 pos_s==pos_grad and cell_s==cell EXACTLY, so energy and forces are
-  // unchanged (parity preserved); eps only adds a second grad output. The global
-  // virial is W = -dE/deps (symmetrized). Only built when requested.
-  torch::Tensor strain, cell_used = cell_, pos_used = pos_grad;
+  // P0'.1 step 2: virial via the CELL + POSITION gradients (NOT a strain leaf).
+  // The traced module already takes `pos` and `cell` as inputs; forces are
+  // dE/dpos. For a graph potential with edge_vec = pos_j + S @ cell - pos_i, the
+  // exact global virial (LAMMPS convention W, energy units) is
+  //   W_ab = -( sum_i pos_i,a (dE/dpos_i)_b + sum_k cell_k,a (dE/dcell_k)_b )
+  // symmetrized. This differentiates only EXISTING traced inputs (same as forces),
+  // avoiding the matmul-derived strain leaf that segfaulted on XPU (jobs
+  // 8792138/8792362). cell_grad is a leaf clone of cell_ so we can read dE/dcell.
+  torch::Tensor cell_used = cell_;
+  torch::Tensor cell_grad;
   if (want_virial_) {
-    // P0'.1 step 2 (strain-autograd virial): W = -dE/deps at eps=0, computed by
-    // applying a symmetric strain leaf to pos+cell and taking a second grad output.
-    // STATUS: this SEGFAULTS on the Intel XPU backend — taking a gradient w.r.t. a
-    // strain leaf that feeds the traced umas_fast_pytorch module crashes at a low
-    // level (validated: jobs 8792138 with AC artifact, 8792362 with a PLAIN non-AC
-    // artifact + UMA_CKPT=0 + UMA_ENGINE_BUILD_GRAPH=1 — both SIGSEGV, no torch
-    // exception). It is also incompatible with the activation-checkpoint custom
-    // Functions. Until the XPU stack supports this, REFUSE loudly instead of
-    // crashing. (On a CUDA backend the same code path is expected to work; the
-    // guard is XPU-scoped.)
-#if defined(UMA_ENGINE_USE_XPU)
-    TORCH_CHECK(false,
-                "uma-engine: virial/stress (UMA_COMPUTE_VIRIAL=1) via strain "
-                "autograd is not supported on the Intel XPU backend (it segfaults "
-                "in the traced module's second-derivative path). NPT/pressure is "
-                "unavailable on XPU; use NVE/NVT.");
-#endif
-    const bool any_ac = BlockContext::instance().num_chunks() > 0 ||
-                        BlockContext::instance().num_blocks() > 0 ||
-                        BlockContext::instance().edgedeg_loaded() ||
-                        checkpoint_enabled();
-    TORCH_CHECK(!any_ac,
-                "uma-engine: virial (UMA_COMPUTE_VIRIAL=1) is not supported with "
-                "activation-checkpointed artifacts. Export a plain (non-AC) "
-                "artifact and set UMA_CKPT=0 for stress/NPT.");
-    strain = torch::zeros({3, 3}, cell_.options()).set_requires_grad(true);
-    auto eye = torch::eye(3, cell_.options());
-    auto def = eye + strain;                       // deformation gradient at eps=0 = I
-    pos_used = torch::matmul(pos_grad, def.t());   // [N,3] @ [3,3]
-    cell_used = torch::matmul(cell_, def.t());     // [3,3] @ [3,3]
+    // The whole-module CheckpointModuleFn custom autograd Function only tracks
+    // `pos`; it cannot yield dE/dcell. Require a non-checkpointed run for stress.
+    const bool ckpt_active =
+        BlockContext::instance().num_chunks() > 0 ||
+        BlockContext::instance().num_blocks() > 0 ||
+        BlockContext::instance().edgedeg_loaded() || checkpoint_enabled();
+    TORCH_CHECK(!ckpt_active,
+                "uma-engine: virial (UMA_COMPUTE_VIRIAL=1) requires a "
+                "non-checkpointed run (plain artifact + UMA_CKPT=0).");
+    cell_grad = cell_.detach().clone().set_requires_grad(true);
+    cell_used = cell_grad;
   }
+  torch::Tensor pos_used = pos_grad;
 
   // P2.1: pad the edge count up to the fixed traced capacity so the traced
   // per-chunk loop count matches the runtime edge count (fixes the N-specific
@@ -484,23 +469,33 @@ Prediction Predictor::predict_body() {
   }
 
   std::vector<torch::Tensor> grad_inputs = {pos_grad};
-  if (want_virial_) grad_inputs.push_back(strain);
+  if (want_virial_) grad_inputs.push_back(cell_grad);
   auto grads = torch::autograd::grad({energy.sum()}, grad_inputs,
                                      /*grad_outputs=*/{},
                                      /*retain_graph=*/false,
                                      /*create_graph=*/false,
-                                     /*allow_unused=*/false);
+                                     /*allow_unused=*/want_virial_);
   auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
 
   Prediction out;
   out.energy = energy.reshape({-1})[0].item<double>();
   out.forces = forces;
   if (want_virial_) {
-    // W = -dE/deps, symmetrized (eps is symmetric strain). LAMMPS Voigt order
-    // {xx, yy, zz, xy, xz, yz}.
-    auto dEde = grads[1].to(torch::kFloat64).contiguous();  // [3,3]
-    auto W = (-0.5) * (dEde + dEde.t());
-    auto a = W.accessor<double, 2>();
+    // W_ab = -( sum_i pos_i,a (dE/dpos_i)_b + sum_k cell_k,a (dE/dcell_k)_b ),
+    // symmetrized. dE/dpos = grads[0] (== -forces); dE/dcell = grads[1].
+    auto dE_dpos = grads[0].to(torch::kFloat64);          // [N,3]
+    auto pos64 = pos_grad.detach().to(torch::kFloat64);   // [N,3]
+    // sum_i pos_i,a * dE/dpos_i,b  ->  [3,3] = pos^T @ dE_dpos
+    auto Wp = torch::matmul(pos64.t(), dE_dpos);          // [3,3]
+    auto W = Wp;
+    if (grads.size() > 1 && grads[1].defined()) {
+      auto dE_dcell = grads[1].to(torch::kFloat64);       // [3,3]
+      auto cell64 = cell_grad.detach().to(torch::kFloat64);
+      W = W + torch::matmul(cell64.t(), dE_dcell);        // + sum_k cell_k,a dE/dcell_k,b
+    }
+    W = (-0.5) * (W + W.t());                             // symmetrize, sign
+    auto Wc = W.to(torch::kCPU).contiguous();
+    auto a = Wc.accessor<double, 2>();
     out.has_virial = true;
     out.virial[0] = a[0][0];  // xx
     out.virial[1] = a[1][1];  // yy

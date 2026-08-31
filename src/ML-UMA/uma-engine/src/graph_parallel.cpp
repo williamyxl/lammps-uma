@@ -220,13 +220,30 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
 
   int to_child[2] = {-1, -1};
   int from_child[2] = {-1, -1};
-  if (pipe(to_child) != 0 || pipe(from_child) != 0) {
-    throw std::runtime_error(std::string("pipe failed: ") + std::strerror(errno));
+  // P3.4: close any already-open fds before throwing so a partial pipe()/fork()
+  // failure does not leak descriptors.
+  auto close_pipe = [](int p[2]) {
+    if (p[0] >= 0) close(p[0]);
+    if (p[1] >= 0) close(p[1]);
+    p[0] = p[1] = -1;
+  };
+  if (pipe(to_child) != 0) {
+    throw std::runtime_error(std::string("pipe(to_child) failed: ") +
+                             std::strerror(errno));
+  }
+  if (pipe(from_child) != 0) {
+    const int e = errno;
+    close_pipe(to_child);
+    throw std::runtime_error(std::string("pipe(from_child) failed: ") +
+                             std::strerror(e));
   }
 
   const pid_t pid = fork();
   if (pid < 0) {
-    throw std::runtime_error(std::string("fork failed: ") + std::strerror(errno));
+    const int e = errno;
+    close_pipe(to_child);
+    close_pipe(from_child);
+    throw std::runtime_error(std::string("fork failed: ") + std::strerror(e));
   }
   if (pid == 0) {
     // Child: stdin = to_child[0], stdout = from_child[1]

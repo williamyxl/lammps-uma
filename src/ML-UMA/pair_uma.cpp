@@ -708,15 +708,10 @@ void PairUMA::init_style()
   // do NOT yet compute a virial, so a barostat on those paths would silently drive
   // the box with a zero stress -> refuse loudly. no_virial_fdotr_compute=1 (ctor)
   // still prevents a bogus fdotr virial on the paths that don't fill virial[].
-  // P0'.1: the strain-autograd virial (step 2) is implemented but SEGFAULTS on the
-  // Intel XPU backend (see predictor.cpp), so on XPU no path computes a usable
-  // virial and any barostat is refused. On a non-XPU build the single-tile virial
-  // is available under UMA_COMPUTE_VIRIAL=1.
-#if defined(UMA_ENGINE_USE_XPU)
-  const bool virial_supported = false;
-#else
+  // P0'.1: the single-tile virial (pos+cell gradient, step 2) is available under
+  // UMA_COMPUTE_VIRIAL=1 (works on XPU via the cell-gradient path). The GP/DD paths
+  // still have no virial, so a barostat there is refused.
   const bool virial_supported = !mn_active && !dd_active_ && want_virial_flag_;
-#endif
   if (!virial_supported) {
     for (const auto &ifix : modify->get_fix_list()) {
       const char *s = ifix->style;
@@ -724,12 +719,18 @@ void PairUMA::init_style()
           utils::strmatch(s, "^npt") || utils::strmatch(s, "^nph") ||
           utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
           utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug");
-      if (barostat)
-        error->all(FLERR,
-                   "Pair style uma does not compute a usable virial on this build "
-                   "(strain-autograd stress segfaults on Intel XPU; GP/DD paths have "
-                   "no virial). Pressure control (fix {}) is not supported; use "
-                   "NVE/NVT.", s);
+      if (barostat) {
+        if (mn_active || dd_active_)
+          error->all(FLERR,
+                     "Pair style uma does not compute the virial on the multi-node "
+                     "(GP/DD) path; pressure control (fix {}) is not supported "
+                     "there. Use a single tile for NPT, or NVE/NVT.", s);
+        else
+          error->all(FLERR,
+                     "Pair style uma: pressure control (fix {}) needs the virial. "
+                     "Set UMA_COMPUTE_VIRIAL=1 (single-tile stress via pos+cell "
+                     "autograd) + UMA_CKPT=0, or use NVE/NVT.", s);
+      }
     }
   }
 

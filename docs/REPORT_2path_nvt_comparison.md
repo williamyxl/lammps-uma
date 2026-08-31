@@ -1278,3 +1278,40 @@ search (inert on XPU) + moving a never-built file.
 cos = 1.0, forces at the FP64 floor. **No physics change.** Local CI green under
 Tier-0 STRICT (30 Tier-1 tests + all guards).
 Jobs: rebuild 8792466; tripwire 8792484; full suite 8792485.
+
+### 14.9 Sprint 6 (round 3) — real virial WORKS + P3.4 + Tier 2 CI (2026-08-30)
+
+Finished the three Sprint-6 residuals:
+- **Real virial (P0'.1 step 2) — now WORKING on XPU.** Reworked from the strain-leaf
+  approach (segfaulted) to the pos+cell gradient identity
+  `W_ab = -(Σ_i pos_i,a dE/dpos_i,b + Σ_k cell_k,a dE/dcell_k,b)`, symmetrized —
+  differentiating only existing traced inputs. **FD-stress validation PASS** (job
+  8792561, re-confirmed 8792593 on the final binary): analytic vs box-strain finite
+  difference agree to **0.013 bar** (tol 50) on σxx/σyy/σzz. Single-tile NPT/pressure
+  is available under `UMA_COMPUTE_VIRIAL=1` + `UMA_CKPT=0`.
+- **P3.4** — fork/pipe fd-leak fix in `graph_parallel.cpp`.
+- **Tier 2 CI** — `ci/tier2_cpu_build.sh` builds `uma_engine` CPU-only against the
+  fxpu `libtorch_cpu` and runs the `graph_shard_smoke` CTest green on a login node
+  (no allocation).
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8792591 (final binary):**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 163.6 | 204 | 5.07e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 92.0  | 116 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.7  | 64  | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.6  | 44  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.5  | 45  | 7.94e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.89 | 94  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.3 | 173 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Virial FD-stress (single tile, 64-atom NaCl, non-AC artifact), job 8792593:**
+σxx −9240.20 / σyy −8408.75 / σzz −9046.15 bar; analytic−FD ≤ 0.013 bar → PASS.
+**Tripwire (job 8792590):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Tier-2 CPU build + CTest:** `graph_shard_smoke` PASS on a login node (no alloc).
+
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.8/…/§13, cos =
+1.0, forces at the FP64 floor. The virial is opt-in, so the default path is
+unchanged. **No physics change; NPT now unblocked.**
+Jobs: rebuild 8792571; tripwire 8792590; full suite 8792591; virial 8792561/8792593.

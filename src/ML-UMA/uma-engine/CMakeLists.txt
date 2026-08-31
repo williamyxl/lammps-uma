@@ -247,4 +247,15 @@ add_test(NAME graph_shard_smoke COMMAND graph_shard_smoke)
 if(NOT UMA_ENGINE_USE_XPU)
   add_test(NAME kokkos_peer_smoke COMMAND kokkos_peer_smoke)
 endif()
+# Ensure CTest children can resolve the Torch libs (and, on the fxpu XPU-torch CPU
+# build, the SYCL runtime) without relying on the caller's LD_LIBRARY_PATH. The
+# UMA_CTEST_LD_PREFIX cache var lets the CI script inject a libsycl compat dir.
+if(TORCH_INSTALL_PREFIX)
+  set(_uma_ctest_ld "${TORCH_INSTALL_PREFIX}/lib")
+  if(DEFINED UMA_CTEST_LD_PREFIX)
+    set(_uma_ctest_ld "${UMA_CTEST_LD_PREFIX}:${_uma_ctest_ld}")
+  endif()
+  set_tests_properties(graph_shard_smoke PROPERTIES
+    ENVIRONMENT "LD_LIBRARY_PATH=${_uma_ctest_ld}:$ENV{LD_LIBRARY_PATH}")
+endif()
 install(DIRECTORY include/ DESTINATION include)
