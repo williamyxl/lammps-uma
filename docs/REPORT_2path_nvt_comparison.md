@@ -1506,3 +1506,10 @@ on the teardown-only binary). **Regression verdict (G3):** every step-0 PE
 **bit-identical** to §14.14/…/§13, cos = 1.0, FP64 floor. **No physics change.**
 Rebuild 8795092 (`LMP BUILD OK`, `pack_shards_cpu` deletion clean); CI green (9 HARD
 / 4 REPORT, 33 Tier-1). Jobs: rebuild 8795092; tripwire 8795130; full suite 8795114.
+
+**G9 completion re-validation (2026-09-01):** after the user reminded me to follow
+S7's G9 instruction in full, `register_uma_peer_ops()` (empty no-op) and its 4 call
+sites were deleted across the compiled TUs (commit `cecc0829`). Rebuild 8795745
+`LMP BUILD OK`; tripwire 8795780 PASS; full G4 8795781 all 7 configs bit-identical
+(N=16 all-W −110673.829050, N=32 −885377.060040, cos = 1.0, max\|dF\| ≤ 1.61e-13).
+**No physics change** — dead-code deletion only.
