@@ -44,11 +44,10 @@ import torch
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-HEN_ROOT = Path("/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen")
-# hen shim provides patch_fairchem_xpu_device (XPU device allowlist + wigner chunk)
-for p in (HEN_ROOT / "shim", HEN_ROOT / "patches", HEN_ROOT):
-    if p.is_dir():
-        sys.path.insert(0, str(p))
+# G15/S7: hen shim (patch_fairchem_xpu_device etc.) via UMA_HEN_ROOT, not a
+# hardcoded path.
+from uma_hen import add_hen_to_syspath  # noqa: E402
+HEN_ROOT = add_hen_to_syspath()
 
 
 def build_nacl(n: int, rattle: float = 0.05, seed: int = 0):

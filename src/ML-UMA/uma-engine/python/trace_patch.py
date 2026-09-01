@@ -221,6 +221,18 @@ def _install_shape_patches() -> None:
             D[:, 9:16, 9:16] = _wdh.quaternion_to_wigner_d_matmul(
                 q, 3, custom_kernels.C_l3, custom_kernels.monomials_l3)
         if lmax >= 5:
+            # G18/S7 (audit rev 16): make the fallback LOUD. The symbolic/traceable
+            # path is only implemented up to l=4 (UMA-s-1p2 uses lmax=4). For lmax>=5
+            # we fall back to the ORIGINAL fairchem hybrid — correct numerically, but
+            # NOT the chunked/shape-generic variant, so a >l4 model would silently
+            # export without the trace-shape guarantees. Warn once so it is not a
+            # silent behavior change for a future model.
+            import warnings
+            warnings.warn(
+                f"trace_patch: lmax={lmax} > 4 exceeds the traceable symbolic Wigner "
+                f"path (implemented to l=4); falling back to the original fairchem "
+                f"hybrid. Export shape-genericity is not guaranteed for l>4.",
+                RuntimeWarning, stacklevel=2)
             return _orig_hybrid(q, lmax, coeffs=coeffs, U_blocks=U_blocks,
                                 custom_kernels=custom_kernels)
         return D

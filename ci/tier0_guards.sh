@@ -94,6 +94,20 @@ else say "  FAIL: $lib_fp library file(s) with foreign paths:"; \
        | grep -vE "/(tests|docs)/|/spike_|/attic/" | sed 's/^/    /'; \
       hard_fail=$((hard_fail+lib_fp)); fi
 
+# ---- HARD 4b: no hardcoded absolute user-workdir/hen path in ANY library python -
+# G15/S7 (audit rev 16): the production exporters hardcoded another user's absolute
+# `/lus/.../<user>/workdir/hen` path — a portability defect the FOREIGN pattern above
+# missed (it is a current-machine project path, not a "foreign" one) and that HARD 4
+# excluded for spike_*. Ban hardcoded absolute .../workdir/hen literals in ALL
+# uma-engine python (spike included); use UMA_HEN_ROOT (uma_hen.py) instead.
+hdr "HARD: no hardcoded absolute .../workdir/hen path in library python [G15/S7]"
+hen_hard=$(grep -rlE '"/[^"]*/workdir/hen' src/ML-UMA/uma-engine/python 2>/dev/null \
+             | grep -v "/uma_hen.py" | wc -l | tr -d ' ')
+if [ "$hen_hard" -eq 0 ]; then say "  OK: no hardcoded hen path (uses UMA_HEN_ROOT)"
+else say "  FAIL: $hen_hard python file(s) hardcode an absolute workdir/hen path:"; \
+     grep -rlE '"/[^"]*/workdir/hen' src/ML-UMA/uma-engine/python 2>/dev/null \
+       | grep -v "/uma_hen.py" | sed 's/^/    /'; hard_fail=$((hard_fail+hen_hard)); fi
+
 # ---- HARD 5: every UMA_* env var read in library source is documented (E3) --
 # Grep the compiled library source for getenv("UMA_*") / environ["UMA_*"] and fail
 # if any name is missing from docs/ENV_VARS.md. Makes the ENV_VARS.md completeness

@@ -1,5 +1,8 @@
 #pragma once
 
+// G7/S7: the full dated design narrative below is retained inline for context; the
+// migrated design history lives in `docs/activation_checkpointing.md` (P6.1).
+//
 // Per-block activation checkpointing for traced UMA inference.
 //
 // The traced top module (model_traced.pt) records calls to a custom op:

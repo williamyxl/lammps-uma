@@ -62,6 +62,7 @@ backward), `UMA_EDGE_PAD_E` (override traced edge-pad cap), `UMA_CUDA_GRAPH_WARM
 | Variable | Type | Default | Meaning |
 |---|---|---|---|
 | `UMA_GPUS_PER_NODE` | int | 4 | GPUs per node for local-rank device binding (GP). |
+| `UMA_HEN_ROOT` | path | (repo `../hen`) | **G15/S7**: root of the `hen` shim/patches checkout used by the export/worker layer. Resolved via `uma_hen.py` (env → `hen` sibling of the repo → loud `FileNotFoundError`); replaced 4 hardcoded absolute-path sites. |
 | `UMA_PYTHON` / `UMA_PYTHON_GP_WORKER` | path | (auto) | Python interpreter / GP worker script for the eager FairChem devices>1 path. |
 | `UMA_GP_WORKER` / `UMA_LIBTORCH_MP_WORKER` | path | (auto) | Worker binary/script overrides. |
 | `UMA_ALLOW_RAY_GP` / `UMA_FORBID_RAY_GP` | 0/1 | 0 | Ray-based GP fallback opt-in/opt-out (**scheduled for removal, P3.1**). |

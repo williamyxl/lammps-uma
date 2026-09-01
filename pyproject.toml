@@ -3,7 +3,7 @@
 # under ci/tests/ also run as plain `python3 ci/tests/test_*.py` (pytest optional).
 
 [tool.pytest.ini_options]
-testpaths = ["ci/tests"]
+testpaths = ["ci/tests", "src/ML-UMA/uma-engine/python"]  # G10/S7: wire the 2 engine-python tests (torch-gated, see conftest)
 python_files = ["test_*.py"]
 markers = [
     "xpu: requires Aurora XPU (Tier 3, PBS only)",

@@ -20,6 +20,18 @@ def _have(mod: str) -> bool:
     return importlib.util.find_spec(mod) is not None
 
 
+# G10/S7: the engine-python tests (test_gather_bwd_semantics.py,
+# test_shared_gather_skew.py) are now in `testpaths` (pyproject.toml) so they are no
+# longer orphaned (P1.6). They import torch + kokkos_gp_runtime, so on the base env
+# (no torch) skip them at COLLECTION — an unmarked torch import would otherwise error
+# the whole run. Under fxpu they collect and execute normally.
+collect_ignore_glob = []
+if not _have("torch"):
+    collect_ignore_glob = [
+        str(REPO / "src" / "ML-UMA" / "uma-engine" / "python" / "test_*.py"),
+    ]
+
+
 def pytest_collection_modifyitems(config, items):
     skip_torch = pytest.mark.skip(reason="torch not available (run under fxpu env)")
     skip_fc = pytest.mark.skip(reason="fairchem-core not available (run under fxpu env)")

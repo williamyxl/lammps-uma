@@ -108,13 +108,9 @@ class WorkerState:
         # large edge counts, NaCl N>=10). See hen/docs/finding_xpu_ag_fd_cliff.
         xpu_ok = hasattr(torch, "xpu") and torch.xpu.is_available()
         if xpu_ok:
-            for p in (
-                "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen/shim",
-                "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen/patches",
-                "/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen",
-            ):
-                if p not in sys.path and Path(p).is_dir():
-                    sys.path.insert(0, p)
+            # G15/S7: hen shim via UMA_HEN_ROOT (no hardcoded machine path).
+            from uma_hen import add_hen_to_syspath
+            add_hen_to_syspath()
             from fairchem_xpu_parallel import patch_fairchem_xpu_device
             patch_fairchem_xpu_device()
             device = "xpu"

@@ -96,10 +96,9 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-HEN = Path("/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen")
-for p in (HEN / "shim", HEN / "patches", HEN):
-    if p.is_dir():
-        sys.path.insert(0, str(p))
+# G15/S7: resolve the hen shim/patches root via UMA_HEN_ROOT (no hardcoded path).
+from uma_hen import add_hen_to_syspath  # noqa: E402
+HEN = add_hen_to_syspath()
 
 
 def build_nacl(n, rattle=0.05, seed=0):

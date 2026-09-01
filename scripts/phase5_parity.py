@@ -67,9 +67,13 @@ def lammps_pe_step0(log_path):
 def main():
     d = Path(os.environ["DIR"])
     ckpt = Path(os.environ.get("UMA_CKPT_FILE", str(HEN / "uma-cache" / "uma-s-1p2.pt")))
-    e_tol = float(os.environ.get("E_TOL", "1e-6"))
-    f_tol = float(os.environ.get("F_TOL", "1e-5"))
-    min_sample = int(os.environ.get("MIN_SAMPLE", "100"))
+    # G11/S7: tolerances from the single source (scripts/uma_gates.py), not a local
+    # copy that can silently diverge (P1.5).
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import uma_gates
+    e_tol = float(os.environ.get("E_TOL", "1e-6"))  # this gate uses an absolute E tol
+    f_tol = uma_gates.f_tol()
+    min_sample = uma_gates.min_sample()
 
     pos = np.load(d / "positions.npy")
     cell = np.load(d / "cell.npy")
