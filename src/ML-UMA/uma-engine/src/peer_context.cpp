@@ -43,7 +43,9 @@ void PeerContext::set_thread_rank(int rank) {
 }
 int PeerContext::thread_rank() { return instance().process_rank_; }
 
-void register_uma_peer_ops() {}
+// G9/S7: register_uma_peer_ops() was an empty no-op with 4 call sites that did
+// nothing — deleted (fn + decl + all call sites). The uma_peer TorchScript ops are
+// registered via TORCH_LIBRARY static init, not this function.
 
 int64_t uma_peer_op_rank() {
   return static_cast<int64_t>(PeerContext::thread_rank());

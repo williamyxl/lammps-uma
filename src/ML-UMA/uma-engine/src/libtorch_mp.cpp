@@ -146,7 +146,6 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
     return nullptr;
   }
 
-  register_uma_peer_ops();
   disable_torchscript_texpr_once();
 
   auto rt = std::unique_ptr<LibtorchMpRuntime>(

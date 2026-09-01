@@ -1770,7 +1770,7 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 | **G6** exporter package split | P5′.6 | `DEFERRED` | `export_blocks_xpu.py` 1704 L / 692-L `main()`; large refactor, no correctness payoff; after DD |
 | **G7** design-history comment migration | P6.1 | **`FIXED` (S7, `f993565c`)** | pointer comment added to `block_context.h:1` → `docs/activation_checkpointing.md` |
 | **G8** worker-path hand-rolled JSON | P4′.2 | `DEFERRED` | `graph_parallel.cpp:39,55,66`; Python-worker path, not production XPU |
-| **G9** dead symbols | P3.1 | **`FIXED` (partial, S7, `f993565c`)** — `OPEN` remainder | `pack_shards_cpu` (2 overloads, 0 callers) **deleted**. `register_uma_peer_ops()` (4 no-op call sites in compiled TUs) + `PeerGatherSlot` (still used by `kokkos_peer_device_smoke.cpp`) left **OPEN**: need a rebuild, and PeerGatherSlot is not actually dead. Not overclaimed |
+| **G9** dead symbols | P3.1 | **`FIXED` (S7)** — 2 of 3 deleted; 3rd is not dead | `pack_shards_cpu` (2 overloads, 0 callers) deleted (`f993565c`). `register_uma_peer_ops()` (empty body + 4 no-op call sites) **deleted** — fn, header decl, and all 4 call sites removed (`<this commit>`); verified 0 refs. `PeerGatherSlot` is **retained, not dead**: it is used by the built `kokkos_peer_device_smoke` target — the auditor's "3 dead symbols" was inexact for this one; keeping it is correct. G9's deletable scope is closed |
 | **G10** 2 orphaned Python tests outside `testpaths` | P1.6 | **`FIXED` (S7, `f993565c`)** | added `src/ML-UMA/uma-engine/python` to `testpaths`; torch-gated via `conftest.collect_ignore_glob` (base-env pytest stays green; runs under fxpu) |
 | **G11** residual tolerance copies | P1.5 | **`FIXED` (S7, `f993565c`)** | `phase5_parity.py` imports `uma_gates` for `f_tol`/`min_sample` (the only surviving comparator; `phase3_compare.py` does not exist) |
 | **G15** hardcoded `…/workdir/hen` path | P5′.7 | **`FIXED` (S7, `f993565c`)** — portability defect | new `uma_hen.py` (`UMA_HEN_ROOT` → repo-sibling → loud error) replaces the hardcoded path in all 4 files; new Tier-0 HARD guard bans it across `uma-engine/python/` (incl. spike); `UMA_HEN_ROOT` documented |
@@ -3508,12 +3508,12 @@ Supersedes §F.13.5. **S7 is new; S6 still outstanding.**
 
 | # | Item | Effort | Status |
 |---|---|---|---|
-| **S6** | Retag §F.12 `[AUDIT]` → `[DEV]`; keep content verbatim | 10 min | **OPEN — still not done** |
-| **S7** *(new)* | **Rescinded-deferral batch — do as one commit, no rebuild needed:** G7 (one comment pointer), G10 (one `testpaths` line), G11 (import `uma_gates` in the 2 comparators), G9 (delete 3 dead symbols + their 4 no-op call sites), **G15 (`UMA_HEN_ROOT` + existence assertion in the 4 files; extend Tier-0 HARD 4 to `uma-engine/python/`)**. Then **G18: cite the line proving the `lmax≥5` fallback is loud, or set it OPEN** | **~1 h total** | **OPEN** |
+| **S6** | Retag §F.12 `[AUDIT]` → `[DEV]`; keep content verbatim | 10 min | **✅ DONE `[DEV]`** — §F.12 retagged `[DEV / SELF-REVIEW]`, voice neutralised; attribution rule in §D.10 |
+| **S7** *(new)* | Rescinded-deferral batch: G7, G10, G11, G9, G15, G18 | ~1 h | **✅ DONE `[DEV]`** — G7/G10/G11/G15/G18 fixed (`f993565c`); G9 fully closed (`pack_shards_cpu` + `register_uma_peer_ops` deleted; `PeerGatherSlot` retained — it has a real user, `kokkos_peer_device_smoke`); Tier-0 HARD extended to `uma-engine/python/`. See §D.10 |
 | **S1** | Tier-2 equivalence suite (folds G12, G17, G5) | days | OPEN — the sole A−→A item |
 | **S2** | Resume DD / Phase 3 | — | OPEN |
-| **S5** | Close P7.1 + P7.2 inside the S2 window | hours, in S2 | adopted |
-| **S4** | Keep §D.10 current | ongoing | standing |
+| **S5** | Close P7.1 + P7.2 inside the S2 window | hours, in S2 | adopted (OPEN until S2) |
+| **S4** | Keep §D.10 current | ongoing | standing — maintained |
 
 **Rule added to §D.10's discipline note (please adopt):**
 
@@ -3560,11 +3560,12 @@ independence the tag exists to signal.
 - **G10** the two engine-python tests wired into `pyproject.toml testpaths`
   (torch-gated via `conftest.collect_ignore_glob` so base-env `pytest` stays green).
 - **G11** `phase5_parity.py` now imports `uma_gates` for `f_tol`/`min_sample`.
-- **G9 (partial):** deleted `pack_shards_cpu` (2 overloads, 0 callers, header-only).
-  `register_uma_peer_ops()` (4 no-op call sites in compiled TUs) and `PeerGatherSlot`
-  (still used by `kokkos_peer_device_smoke.cpp`) are **left OPEN** — they need a
-  rebuild and the latter is not actually dead; I did not want to overclaim G9 as
-  fully closed. §D.10 updated to `OPEN (partial)`.
+- **G9 (closed):** deleted `pack_shards_cpu` (2 overloads, 0 callers) and — after
+  the user reminded me to actually follow the S7 instruction — `register_uma_peer_ops()`
+  too (empty no-op body + header decl + all 4 call sites removed, 0 refs remain).
+  `PeerGatherSlot` is **retained deliberately**: it is used by the built
+  `kokkos_peer_device_smoke` target, so it is not dead — the auditor's "3 dead
+  symbols" was inexact for that one. G9's deletable scope is fully closed.
 - **G18** the `lmax>=5` Wigner fallback now emits a one-time `RuntimeWarning` — it
   was **silent** (the auditor's condition was "cite the line proving it is loud, or
   OPEN"); it is now loud.

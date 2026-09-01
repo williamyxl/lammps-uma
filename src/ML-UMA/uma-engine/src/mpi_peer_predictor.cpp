@@ -122,7 +122,6 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   // Mid-backward uma_peer collectives must run in deterministic reverse-forward
   // order on both ranks; autograd's thread pool would desync the NCCL calls.
   c10::AutogradState::get_tls_state().set_multithreading_enabled(false);
-  register_uma_peer_ops();
 
   auto self = std::unique_ptr<MpiPeerPredictor>(new MpiPeerPredictor());
   self->world_ = world;

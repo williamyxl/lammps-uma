@@ -102,7 +102,6 @@ int main(int argc, char** argv) {
     // Mid-backward uma_peer collectives must run in deterministic reverse-forward
     // order on both ranks. Autograd's thread pool would desync the shm barrier.
     c10::AutogradState::get_tls_state().set_multithreading_enabled(false);
-    uma::register_uma_peer_ops();
 
     int fd = ::open(shm_path.c_str(), O_RDWR);
     if (fd < 0) {

@@ -33,7 +33,7 @@ class PeerContext {
   kokkos_peer::SharedPeerGatherSlot* slot_ = nullptr;  // not owned
 };
 
-void register_uma_peer_ops();
+// (G9/S7: register_uma_peer_ops() removed — was an empty no-op.)
 
 // Autograd-aware wrappers (same schemas as torch.ops.uma_peer.*).
 torch::Tensor all_gather_nodes_autograd(const torch::Tensor& local,
