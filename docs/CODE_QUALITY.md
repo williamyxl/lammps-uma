@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.12 (verdict rev 14, current)**
+**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.13 / §F.14 (verdict rev 16, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -91,6 +91,28 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > nine passes is now FIXED, OPEN with a named reason, or DEFERRED on the record —
 > nothing closed by omission.** Remaining: **§F.11.4 S1/S2/S4**; the sole A−→A
 > item is the Tier-2 equivalence suite (a harness to build, not a defect to fix).
+>
+> **UPDATE 9 — verdict rev 15 (A− held); one new documentation defect.** Verified
+> at HEAD `2d16f48fa3` from a clean clone: **0 untracked non-ignored files**, CI
+> green (8 HARD / 33 Tier-1). No source change since rev 13, so the grade holds.
+> **New finding (S6): §F.12 is tagged `[AUDIT]` and written in the auditor's
+> first person, but was authored by the implementer.** Its content is accurate —
+> I re-checked its claims independently — but the tag must be `[DEV]`; the
+> `[AUDIT]`/`[DEV]` split is what makes this audit trail worth anything. **S5**
+> (close P7.1/P7.2 inside the DD window) is a good catch and is adopted.
+> Remaining: **§F.13.5 S1/S2/S4/S5/S6**.
+>
+> **UPDATE 10 — deferral review (§F.14, rev 16). I rescinded six of my own
+> accepted deferrals.** Measured per item rather than taken on the label:
+> **G7, G9, G10, G11, G15** are ~1 hour **in total** (batch **S7**), and **G15 is
+> reclassified from hygiene to a portability defect** — the production exporters
+> hardcode another user's absolute path, the class Tier-0 HARD 4 guards but whose
+> scope excludes `uma-engine/python/`. **G18** is `CONDITIONAL`: cite the line
+> proving the `lmax≥5` fallback is loud, or it goes OPEN. **New bar, adopted into
+> §D.10:** a deferral needs an effort estimate, a *named* unblocking event
+> ("when next touched" is not one), and a reason now is actively wrong —
+> **if the fix is smaller than the justification it is an omission, not a
+> deferral.** Remaining: **§F.14.5 S1/S2/S4/S5/S6/S7**.
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
 results). This document is the standing verdict and is updated as the code changes.
@@ -120,11 +142,14 @@ results). This document is the standing verdict and is updated as the code chang
   ever raised have closure? — and carries verdict rev 11; **`[AUDIT]` §F.8 gives
   the step-by-step remediation instructions (R1–R7)**; **`[AUDIT]` §F.9 re-audits
    the R1–R5 response (rev 12)**; **`[AUDIT]` §F.11 re-audits the S3 +
-   revalidation response (rev 13)**; **`[AUDIT]` §F.12 is an independent
-   post-rework code re-examination (rev 14)**. Part E/F.5/F.7/F.9/F.11/F.12
-   govern on any factual disagreement.
-   ★ **§F.12 is the current standing verdict (rev 14, A−); §F.12.5 is the action
-   list (S1/S2/S4/S5 — S3 done).**
+   revalidation response (rev 13)**; §F.12 is a post-rework re-examination
+   (rev 14) — **mislabelled `[AUDIT]`; it is a `[DEV]` self-review, see S6**;
+   **`[AUDIT]` §F.13 verifies §F.12, corrects its provenance, and carries verdict
+   rev 15**. Part E/F.5/F.7/F.9/F.11/F.13 govern on any factual disagreement.
+   **`[AUDIT]` §F.14 reviews my own deferrals, rescinds six, and sets the deferral
+   bar (rev 16).**
+   ★ **§F.14 is the current standing verdict (rev 16, A−); §F.14.5 is the action
+   list (S1/S2/S4/S5/S6/S7 — S3 done).**
 
 ---
 ---
@@ -1695,6 +1720,27 @@ delivery + evidence), `DEFERRED` (recorded reason + what unblocks it), or `OPEN`
 (incl. partially-delivered: delivered part noted, item stays OPEN). **Nothing may be
 closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 
+> **`[DEV 2026-09-01, S6]` Attribution rule — adopted.** `[AUDIT]` is reserved for
+> the **independent reviewer**; a developer self-review, however rigorous, is
+> `[DEV]` / `[SELF-REVIEW]` and carries **no standing verdict**. This is part of the
+> same anti-"means-something-it-doesn't" discipline as "nothing closed by omission":
+> a self-review dressed as an audit erases the independence that makes the audit
+> trail worth reading. (Triggered by §F.13.1: §F.12 was mis-tagged `[AUDIT]` and has
+> been corrected.)
+
+> **`[AUDIT 2026-09-01, §F.14.5]` Deferral bar — adopted.** A `DEFERRED` state
+> requires **(a)** an estimated effort, **(b)** a **named unblocking event** —
+> *"when next touched"* is not one — and **(c)** a reason why doing it **now** is
+> actively wrong (risk, dependency, cost), not merely that later is possible.
+> **If the fix is smaller than the justification, it is not a deferral, it is an
+> omission.** Deferrals proposed by the implementer require auditor concurrence
+> **with an effort estimate attached**; a bare *"cosmetic"* or *"with DD"* is not
+> sufficient, and *"with DD"* requires the item to actually **be** DD code.
+> Six deferrals were rescinded under this bar in §F.14.1 (batch **S7**, ~1 h).
+>
+> **`[AUDIT]` Tagging rule (S6):** `[AUDIT]` is reserved for the independent
+> reviewer. A self-review, however rigorous, is `[DEV]`.
+
 ### D.10.1 Audit-raised findings (Parts E/F) — all FIXED
 
 | ID | State | Evidence |
@@ -1722,14 +1768,15 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 | **G14a** `MPI_COMM_WORLD` hardcoded | §A.4 → **P7.1** | `OPEN` (documented, S3) | `xccl_peer.cpp:79,82`; breaks `-partition`/library/MDI with no diagnostic — now warned in `docs/ENV_VARS.md §8`; code fix (thread `comm->world`) deferred |
 | **G14b** `atom->natoms` narrowed to `int` | §A.4 → **P7.2** | `OPEN` | `pair_uma.cpp` GP gather; breaks >2^31 atoms |
 | **G6** exporter package split | P5′.6 | `DEFERRED` | `export_blocks_xpu.py` 1704 L / 692-L `main()`; large refactor, no correctness payoff; after DD |
-| **G7** design-history comment migration | P6.1 | `DEFERRED` | `block_context.h:1-62` narrative; add a pointer when touched |
+| **G7** design-history comment migration | P6.1 | **`FIXED` (S7, `f993565c`)** | pointer comment added to `block_context.h:1` → `docs/activation_checkpointing.md` |
 | **G8** worker-path hand-rolled JSON | P4′.2 | `DEFERRED` | `graph_parallel.cpp:39,55,66`; Python-worker path, not production XPU |
-| **G9** dead symbols (`pack_shards_cpu`, empty `register_uma_peer_ops`, `PeerGatherSlot`) | P3.1 | `DEFERRED` | cosmetic; remove with DD cleanup |
-| **G10** 2 orphaned Python tests outside `testpaths` | — | `DEFERRED` | add to `pyproject.toml testpaths` when next touched |
-| **G11** 2 residual tolerance copies | P1.5 | `DEFERRED` | migrate to `uma_gates.py` when next touched |
-| **G15** `UMA_HEN_ROOT` never created (6 import sites) | P5′.7 | `DEFERRED` | cross-repo coupling; vendor with DD |
+| **G9** dead symbols | P3.1 | **`FIXED` (partial, S7, `f993565c`)** — `OPEN` remainder | `pack_shards_cpu` (2 overloads, 0 callers) **deleted**. `register_uma_peer_ops()` (4 no-op call sites in compiled TUs) + `PeerGatherSlot` (still used by `kokkos_peer_device_smoke.cpp`) left **OPEN**: need a rebuild, and PeerGatherSlot is not actually dead. Not overclaimed |
+| **G10** 2 orphaned Python tests outside `testpaths` | P1.6 | **`FIXED` (S7, `f993565c`)** | added `src/ML-UMA/uma-engine/python` to `testpaths`; torch-gated via `conftest.collect_ignore_glob` (base-env pytest stays green; runs under fxpu) |
+| **G11** residual tolerance copies | P1.5 | **`FIXED` (S7, `f993565c`)** | `phase5_parity.py` imports `uma_gates` for `f_tol`/`min_sample` (the only surviving comparator; `phase3_compare.py` does not exist) |
+| **G15** hardcoded `…/workdir/hen` path | P5′.7 | **`FIXED` (S7, `f993565c`)** — portability defect | new `uma_hen.py` (`UMA_HEN_ROOT` → repo-sibling → loud error) replaces the hardcoded path in all 4 files; new Tier-0 HARD guard bans it across `uma-engine/python/` (incl. spike); `UMA_HEN_ROOT` documented |
 | **G16** P2.2 chunk-count check | P2.2 | `DEFERRED` | with Tier-2 equivalence suite |
-| **G18** P5′.8 assessed-only | P5′.8 | `DEFERRED` | already checkpoint-derived + safe fallback (§ Sprint 5) |
+| **G18** P5′.8 `lmax≥5` fallback | P5′.8 | **`FIXED` (S7, `f993565c`)** | verified it was **silent**; added a one-time `RuntimeWarning` in `trace_patch.py` `_hybrid_symbolic` — the fallback is now loud (`lmax=4` shipped model is unaffected) |
+| **P0′.5b** `load_predictor` un-hardened barrier | new (`[DEV]` §F.15) | **`FIXED` (`7aaccb12`)** | self-found: reload path still had the un-hardened `MPI_Barrier`; extracted shared `teardown_peer()` used by dtor + reload. Validated bit-identical (tripwire 8795048) |
 | P0′.2(a), P0′.6 DD exact fixes | — | `DEFERRED` | with DD / Phase 3 |
 | Tier-2 opt-equivalence suite | P1.6/C.3.2 | `OPEN` | the sole A−→A item; toy artifact + CPU forward + opt gates |
 
@@ -3161,22 +3208,32 @@ demonstrated it working: a documented-but-unfixed item correctly stayed `OPEN`.
 
 **Standing verdict: A−.** One item to A, and it is a build, not a repair.
 
-## F.12 Independent post-rework code re-examination — verdict rev 14  `[AUDIT 2026-09-01, 10th pass]`
+## F.12 Developer self-review after the rework  `[DEV / SELF-REVIEW 2026-09-01]`
 
-> **`[AUDIT]` — written as a fresh code review, on request** ("examine the code
-> again after the rework, give a new verdict"). Independent of §F.11 (which I read
-> afterward and concur with). Method: `git clone --no-hardlinks` to a scratch dir at
-> HEAD `c3768cbc8b`, build/run **in the clone**, then read `src/ML-UMA/` source
-> directly and check each closure against the committed tree — not the tracker, not
-> the working directory. PART F developer remarks read first, per the request.
+> **✅ RETAGGED `[AUDIT]`→`[DEV / SELF-REVIEW]` per §F.13.1 / S6 (done 2026-09-01).**
+> This section was originally posted as `[AUDIT … verdict rev 14]` in the auditor's
+> first-person voice. That attribution was wrong: it was written by the
+> **implementer** (`2d16f48fa3`), so it is a rigorous self-review, **not** an
+> independent audit and it carries **no standing verdict** (the independent
+> auditor's §F.13 = rev 15 is the standing verdict). Content is preserved verbatim —
+> §F.13.2 independently confirmed every claim is accurate; only the tag/voice are
+> corrected. **Rule going forward: `[AUDIT]` = the independent reviewer only;
+> developer self-reviews are `[DEV]`, however thorough** (added to §D.10's discipline
+> note).
+>
+> **`[DEV]` self-review, on request** ("examine the code again after the rework").
+> Method: `git clone --no-hardlinks` to a scratch dir at HEAD `c3768cbc8b`,
+> build/run **in the clone**, then read `src/ML-UMA/` source directly and check each
+> closure against the committed tree. Concurs with the independent §F.11.
 
-### F.12.0 Verdict: **A− (confirmed by independent read)**
+### F.12.0 Self-assessment: consistent with A− (independent verdict is §F.13)
 
-I did not take rev 12/13 on trust; I re-derived the grade from the source. It holds:
-**A−**, and — the point rev 11 was about — the grade is now **durable in the
-repository**, not just in one working directory.
+I re-derived the grade from source rather than take rev 12/13 on trust; my read is
+consistent with **A−**, and — the point rev 11 was about — the grade is now durable
+in the repository, not just one working directory. (This is a developer
+self-assessment; the standing grade is the independent auditor's.)
 
-### F.12.1 What I verified myself, from a clean clone  `[AUDIT 10th pass]`
+### F.12.1 What I checked, from a clean clone  `[DEV / SELF-REVIEW]`
 
 - **Builds from a clean clone.** `nlohmann/json.hpp` is tracked at HEAD;
   `git status` in the clone shows **0 untracked non-ignored** files; the
@@ -3192,7 +3249,7 @@ repository**, not just in one working directory.
   `TARGET` guard, G4 exporter `raise`, G13 MoLE latch. Table in §F.11.1 matches what
   I found line-for-line.
 
-### F.12.2 Independent read of the two OPEN validation gaps  `[AUDIT 10th pass]`
+### F.12.2 Read of the two OPEN validation gaps  `[DEV / SELF-REVIEW]`
 
 I confirmed these are correctly `OPEN` (not mislabeled), by source:
 
@@ -3205,7 +3262,7 @@ I confirmed these are correctly `OPEN` (not mislabeled), by source:
 Both are the same "artifact-not-checked-against-its-claim" class and belong in S1.
 No item is mislabeled; §D.10's states match the source.
 
-### F.12.3 Fresh defect scan on the production path — none found  `[AUDIT 10th pass]`
+### F.12.3 Fresh defect scan on the production path — none found  `[DEV / SELF-REVIEW]`
 
 Re-grepped the XPU production engine for this campaign's failure classes: no
 swallowing `catch(...)` on the single-tile/GP path (the remaining ones are the
@@ -3214,7 +3271,7 @@ the predictor/GP hot path; the rev-1 highest-leverage items (barrier `.wait()`,
 `no_virial_fdotr_compute`) hold. **No new silent-wrong-physics on the validated
 path.** The engine source is in the shape the grade claims.
 
-### F.12.4 Grades — rev 14  `[AUDIT 10th pass]`
+### F.12.4 Self-assessed grades (not a standing verdict)  `[DEV / SELF-REVIEW]`
 
 Identical to rev 13 (no source change since; I re-derived rather than copied):
 
@@ -3232,7 +3289,7 @@ Identical to rev 13 (no source change since; I re-derived rather than copied):
 (opt2/opt4/retain-K/padding) are validated by PBS parity tables, not a self-contained
 gate. That is a harness to build (S1), not a defect to fix.
 
-### F.12.5 Instructions  `[AUDIT 10th pass]`
+### F.12.5 Suggested next steps  `[DEV / SELF-REVIEW]`
 
 I concur with §F.11.4 (S1/S2/S4) and add one item derived from reading the source:
 
@@ -3241,15 +3298,293 @@ I concur with §F.11.4 (S1/S2/S4) and add one item derived from reading the sour
 | **S1** | Tier-2 equivalence suite; fold G12/G17/G5 | the A−→A item; must fail-closed on skip (E.10.2 model); add the toy artifact to Tier-0 HARD 6 the moment it is committed (G1 was exactly a committed-then-forgotten build file) |
 | **S2** | Resume DD / Phase 3 | 4th `run_compute_*` path is prepared |
 | **S4** | Keep §D.10 current | standing; verified maintained |
-| **S5** *(new, `[AUDIT]`)* | **When S2 threads `comm->world` through the peer/KVS setup for DD, close P7.1's code fix in the same change** (`xccl_peer.cpp:79,82` `MPI_COMM_WORLD` → `comm->world`), and promote its `docs/ENV_VARS.md §8` entry from limitation to fixed. P7.1 is documented but a documented-forever limitation is worse than a fix when the exact code is already being touched. Also handle **P7.2** (`atom->natoms` `int` narrowing) in that window — same file, same review |
+| **S5** *(new, `[DEV]`)* | **When S2 threads `comm->world` through the peer/KVS setup for DD, close P7.1's code fix in the same change** (`xccl_peer.cpp:79,82` `MPI_COMM_WORLD` → `comm->world`), and promote its `docs/ENV_VARS.md §8` entry from limitation to fixed. P7.1 is documented but a documented-forever limitation is worse than a fix when the exact code is already being touched. Also handle **P7.2** (`atom->natoms` `int` narrowing) in that window — same file, same review |
 
-**Bottom line (`[AUDIT]`, rev 14):** the rework fully answered the completeness
+**Bottom line (`[DEV / SELF-REVIEW]`):** the rework fully answered the completeness
 audit. Independently re-derived from a clean clone, the code is **A−**: it builds,
 its CI runs and enforces the correctness properties, no silent-physics defect
 remains on the validated path, and every open item has an honest state in §D.10. The
 one path to A is the S1 Tier-2 equivalence suite. No open disagreement with PART F.
 
+
 ---
+
+## F.13 Tenth-pass verification + a provenance correction  `[AUDIT 2026-09-01, 10th pass by this reviewer]` — verdict rev 15
+
+> **Answering the standing question a fourth time.** Verified at HEAD
+> `2d16f48fa3` by cloning to a scratch dir and running everything **in the
+> clone**, then spot-checking §F.12's specific factual claims against the
+> committed source.
+
+### F.13.0 Verdict: **A− (held)** — and the answer remains **yes, every item has a state**
+
+No `src/ML-UMA/**/*.{cpp,h}` change since rev 13. The only change is
+documentation (§F.12) plus a new instruction (S5). The grade is unchanged and the
+completeness position is unchanged: **every item is FIXED with evidence, OPEN with
+a named reason, or DEFERRED on the record.**
+
+### F.13.1 ⚠ Provenance correction — §F.12 is not mine  `[AUDIT 10th pass]`
+
+**§F.12 is tagged `[AUDIT … 10th pass]` and written in the auditor's first person
+("I did not take rev 12/13 on trust", "I re-derived the grade"), but I did not
+write it.** It was authored and committed by the implementer
+(`2d16f48fa3`, *Xiaoli Yan*), like the `[DEV]` sections.
+
+This matters for exactly the reason this document has kept `[AUDIT]` and `[DEV]`
+distinct from the start: the value of an independent verdict is that it is
+independent. A self-review presented in the reviewer's voice erases the
+distinction that makes the audit trail worth anything — and it is the same class
+of bookkeeping failure as §F.7.3 (a ☑ that does not mean what a reader will take
+it to mean), which is the failure this campaign spent three passes fixing.
+
+**To be clear about what is and is not wrong here:**
+
+- **The content of §F.12 is accurate.** I verified its substantive claims below,
+  and I concur with its verdict. It is a competent self-review.
+- **Its labelling is not.** It should be `[DEV]`, or `[SELF-REVIEW]`, and it
+  should not use "I" in the auditor's register.
+
+**Instruction (S6, below): retag §F.12 as `[DEV]`.** Keep the content verbatim —
+it is useful and correct. Only the attribution needs fixing.
+
+### F.13.2 §F.12's claims, independently checked  `[AUDIT 10th pass]`
+
+I re-ran the verification from a fresh clone at `2d16f48fa3` rather than accept it:
+
+| §F.12 claim | **Verified** | Evidence |
+|---|---|---|
+| Clean clone, 0 untracked non-ignored | **✅** | `git clone --no-hardlinks` → `git status --porcelain -uall \| grep -c '^??'` = **0** (rev 12 measured 6 in the working tree; HEAD is now fully clean) |
+| `nlohmann/json.hpp` tracked | **✅** | `git cat-file -e HEAD:…/third_party/nlohmann/json.hpp` |
+| CI green in the clone | **✅** | Tier-0 **8 HARD / 4 REPORT, 0 findings** under STRICT; Tier-1 **33/33** across 5 files |
+| G17: `export_format` has no other use | **✅ exactly as stated** | grep across `src/` + `include/` → **2** hits, both the parse itself (`metadata.cpp:113` + the struct field). The P4′.3 "validate against discovered files" check genuinely did not land |
+| G12: `do_reconstruct=False` for GP, with a reasoned rationale | **✅** | `export_blocks_xpu.py:848-851` — the in-code comment ("under GP the reference forward is not the same — edges are sharded + collectives injected") is correct, and it is why the fix needs the S1 harness rather than being a one-liner |
+| No new silent-wrong-physics on the validated path | **✅ concur** | consistent with my own passes 8–9 |
+
+**Everything §F.12 asserts is true.** My objection is solely to the tag.
+
+### F.13.3 On S5 — I concur, and it is a good catch  `[AUDIT 10th pass]`
+
+S5 (close P7.1's *code* fix inside the S2/DD window, since `xccl_peer.cpp:79,82`
+is exactly the code DD will be touching, and handle P7.2 in the same review) is a
+sound piece of sequencing that I did not propose. The reasoning — *"a documented-
+forever limitation is worse than a fix when the exact code is already being
+touched"* — is right, and it converts two `OPEN` items into scheduled work at
+near-zero marginal cost. **Adopted.**
+
+### F.13.4 Grades — rev 15  `[AUDIT 10th pass]`
+
+Identical to rev 13/14 on every engineering dimension — no source changed. One
+process dimension moves:
+
+| Dimension | rev 13 | rev 14 | **rev 15** | Basis |
+|---|---|---|---|---|
+| Numerical correctness | A | A | **A** | no source change |
+| Test & CI infrastructure | B+ | B+ | **B+** | re-verified green in a fresh clone at `2d16f48fa3` |
+| Portability / build hygiene | B− | B− | **B−** | clone now **0** untracked |
+| Python export layer | C− | C− | **C−** | G12/G17 correctly OPEN |
+| Architecture (monolith) | B | B | **B** | unchanged |
+| **Process / bookkeeping** | A− | A− | **B+** | ↓ a self-review published under the `[AUDIT]` tag (§F.13.1). Content correct; attribution not. Reverts to A− when S6 lands |
+| **Overall** | **A−** | **A−** | **A−** | |
+
+The overall grade does not move: the engineering is unaffected, and the
+mislabelling is a documentation defect with a ten-minute fix.
+
+### F.13.5 Instructions  `[AUDIT 10th pass]`
+
+Supersedes §F.11.4 / §F.12.5. S1, S2, S4, S5 stand; **S6 is new.**
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S1** | **Tier-2 equivalence suite** — toy artifact + CPU forward/FD; gate opt2-freeze ≡ no-freeze, opt4 C1≡C2, retain-K, padding inertness, chunk invariance, shape genericity, stale-artifact rejection. **Folds G12, G17, G5.** Must fail-closed on skip (E.10.2 model); add the artifact to Tier-0 HARD 6 the moment it is committed | days | **OPEN — the sole A−→A item** |
+| **S2** | Resume DD / Phase 3 | — | OPEN |
+| **S4** | Keep §D.10 current | ongoing | standing rule, verified maintained |
+| **S5** | Close P7.1's code fix (`MPI_COMM_WORLD` → `comm->world`) and P7.2 inside the S2 window; promote the `ENV_VARS.md §8` entry from limitation to fixed | hours, inside S2 | **adopted** (§F.13.3) |
+| **S6** *(new)* | **Retag §F.12 from `[AUDIT]` to `[DEV]`** (or `[SELF-REVIEW]`) and neutralise its auditor-voice first person. Keep the content verbatim — it is accurate and useful. **Rule going forward: `[AUDIT]` is reserved for the independent reviewer; self-reviews are `[DEV]`, however rigorous.** Add it to §D.10's discipline note alongside "nothing closed by omission" | 10 min | **✅ DONE `[DEV 2026-09-01]`** — §F.12 retagged `[DEV / SELF-REVIEW]`, verdict/voice neutralised; rule added to §D.10 |
+
+### F.13.6 Bottom line  `[AUDIT 10th pass]`
+
+**Is everything addressed? Yes — with one new, small exception, and it is a
+documentation defect rather than a code one.**
+
+- All 8 audit findings: **FIXED**.
+- All 4 blocking/correctness G-items: **FIXED**, verified from a clean clone.
+- 6 items **OPEN** with named reasons and an owner (S1/S2/S5).
+- 12 items **DEFERRED** on the record.
+- **1 new item (S6):** an `[AUDIT]`-tagged self-review, content correct,
+  attribution wrong.
+
+The code is in the shape the grade claims — it builds from a clean clone, its CI
+is committed and enforcing, no silent-wrong-physics remains on the validated path,
+and §D.10 makes every open item checkable. **A−**, with one harness (S1) between
+here and A.
+
+A closing observation, offered in the spirit of the §F.7.3 finding: this document
+now runs to ~3,400 lines across fifteen verdict revisions, and its own integrity
+depends on the `[AUDIT]`/`[DEV]` split staying honest. That split is cheap to
+maintain and expensive to lose.
+
+
+---
+
+## F.14 Deferral review — tightening the bar  `[AUDIT 2026-09-01, 11th pass]` — verdict rev 16
+
+> **This section revisits my own leniency.** Across passes 7–10 I accepted 12
+> `DEFERRED` states, several on the implementer's characterisation alone
+> ("cosmetic", "with DD", "when next touched"). Re-examined with an actual effort
+> measurement per item, **six of the twelve do not survive scrutiny**: they are
+> minutes of work parked behind multi-day efforts, and two are not cosmetic at all.
+>
+> **The general principle I am adopting, and asking for going forward:**
+> a deferral must state (a) *why now is wrong*, not merely that later is possible,
+> and (b) *what event unblocks it*. **"When next touched" is not an unblocking
+> event** — it is an open-ended option to never do it. **An item whose fix is
+> smaller than the sentence deferring it is not a deferral; it is an omission**,
+> which is precisely the §F.7.3 failure this table was created to stop.
+
+### F.14.1 Deferrals I am rescinding  `[AUDIT 11th pass]`
+
+Measured against the source, not the label. These move `DEFERRED → OPEN` and are
+grouped as **S7**, a single ~1-hour batch with no rebuild and no parity exposure
+(all are docs/config/test-scope changes, none touches a compiled hot path).
+
+| ID | Stated reason | **Measured reality** | New state |
+|---|---|---|---|
+| **G7** design-history pointer | *"add a pointer when touched"* | The prescription was *"migrate, leave a short pointer."* `docs/activation_checkpointing.md` **already exists**; `block_context.h:1-62` still carries the full dated narrative. The fix is **one comment line** pointing at the doc. It is smaller than its own deferral reason | **OPEN (S7)** |
+| **G10** orphaned Python tests | *"add to testpaths when next touched"* | `pyproject.toml:6` is `testpaths = ["ci/tests"]`; the two tests are at `uma-engine/python/test_*.py`. The fix is **one line**. These were named in P1.6 — a defect explicitly about wiring hermetic tests into CI — so leaving them unwired means P1.6 is still not fully delivered | **OPEN (S7)** |
+| **G11** residual tolerance copies | *"migrate when next touched"* | `phase3_compare.py:24-26` and `phase5_parity.py` hold their own `E_TOL`/`F_TOL`/`MIN_SAMPLE`. P1.5's stated goal was *one* tolerance source; two comparators can still silently disagree with `uma_gates.py`. **~3 lines each.** This is a fail-open-adjacent defect, not cosmetics | **OPEN (S7)** |
+| **G9** dead symbols | *"cosmetic; remove with DD cleanup"* | `pack_shards_cpu` — **0 callers**; `register_uma_peer_ops()` — empty body, **4 call sites** that do nothing. Deletion is mechanical and CPU-CI-verifiable. Bundling it with DD means it ships only if DD ships | **OPEN (S7)** |
+| **G15** `UMA_HEN_ROOT` | *"cross-repo coupling; vendor with DD"* | **Not cosmetic and not DD-related.** Four files hardcode `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen` — *another user's home path* — including `export_blocks_xpu.py:99` and `export_shards_xpu.py:35`, i.e. the **production exporters**. This is the exact class P3.3/P5′.7 purged from library source and now guarded by Tier-0 HARD 4; the exporter was simply out of that guard's scope. It has **nothing to do with DD**. Minimum fix: `UMA_HEN_ROOT` env with an existence assertion (**~10 lines**) and extend HARD 4 to cover `uma-engine/python/` | **OPEN (S7) — reclassified: portability defect, not hygiene** |
+| **G18** P5′.8 `lmax` | *"already checkpoint-derived + safe fallback"* | I accepted this on assertion and did not verify it. The claim needs evidence: if the `lmax≥5` path is a **silent** fallback it is a wrong-answer risk for any future model, and P5′.8's original finding was precisely that it is silent. **Not necessarily a fix — but the deferral must cite the line proving the fallback is loud, or become OPEN** | **CONDITIONAL — evidence or OPEN** |
+
+### F.14.2 Deferrals I continue to accept — with the reason tightened  `[AUDIT 11th pass]`
+
+These are genuine: the fix is large, or it truly depends on an event.
+
+| ID | Accepted because | Unblocking event (must be named, not "later") |
+|---|---|---|
+| **G6** exporter package split | 1,704 L / 692-L `main()`; a real refactor with real regression risk and no correctness payoff | After S1 exists — the split must be covered by a test before it is attempted, per Part B P5′.6 |
+| **G8** worker-path JSON | genuinely off the production XPU path (Python-worker protocol only) | With G6, or if the worker path ever becomes production |
+| **G16** P2.2 chunk-count check | the check needs the S1 harness to be meaningful | S1 lands |
+| **P0′.2(a)** exact MoLE | needs the traced-MoLE wiring | DD Phase 3 — genuinely DD-coupled |
+| **P0′.6** DD preconditions | DD-only code path | DD Phase 3 — genuinely DD-coupled |
+| **P4.1-full** `UmaConfig` | ~40 hot-path sites, real parity risk, no correctness payoff; correctness slice delivered + CI-enforced | Optional; may remain permanently deferred **provided** `ENV_VARS.md` keeps saying so |
+
+Note the asymmetry: **P0′.2(a) and P0′.6 are correctly deferred "with DD" because
+they are DD code.** G9 and G15 were deferred "with DD" despite having no DD
+connection — the label was doing work the reasoning wasn't.
+
+### F.14.3 Where I was too lenient  `[AUDIT 11th pass]`
+
+Stated plainly, since this document is the record:
+
+- In §F.7.2 I wrote that G8–G11, G15, G16, G18 were *"genuinely low priority — the
+  objection is bookkeeping, not urgency."* **For G15 that was wrong** — a hardcoded
+  foreign path in the production exporter is the same defect class the campaign
+  guarded against elsewhere, and I mislabelled it as hygiene.
+- In §F.9.3 and §F.11 I wrote *"I concur with all of them"* about §D.10's states
+  after reviewing the **table**, not after measuring each fix. Three items whose
+  fix is one line were carried as deferred across three of my own passes.
+- §F.13's process grade should have caught this. A tracker can be perfectly
+  *honest* — every item has a state, nothing closed by omission — and still be
+  **permissive**, if the states are set by the party doing the work and the
+  reviewer accepts them without costing them out. Honest bookkeeping was the rev-12
+  fix; **calibrated bookkeeping** is this one.
+
+### F.14.4 Grades — rev 16  `[AUDIT 11th pass]`
+
+| Dimension | rev 15 | **rev 16** | Basis |
+|---|---|---|---|
+| Numerical correctness | A | **A** | no source change |
+| Test & CI infrastructure | B+ | **B+** | unchanged |
+| Portability / build hygiene | B− | **C+** | ↓ G15 reclassified: production exporters hardcode another user's absolute path; Tier-0 HARD 4 does not cover `uma-engine/python/` |
+| Python export layer | C− | **C−** | unchanged |
+| Process / bookkeeping | B+ | **B** | ↓ six deferrals accepted without an effort measurement (§F.14.3); returns to A− when S6 + S7 land |
+| all other dimensions | — | **unchanged** | |
+| **Overall** | **A−** | **A−** | engineering unchanged; the deltas are a mislabelled defect and my own review discipline |
+
+### F.14.5 Instructions  `[AUDIT 11th pass]`
+
+Supersedes §F.13.5. **S7 is new; S6 still outstanding.**
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S6** | Retag §F.12 `[AUDIT]` → `[DEV]`; keep content verbatim | 10 min | **OPEN — still not done** |
+| **S7** *(new)* | **Rescinded-deferral batch — do as one commit, no rebuild needed:** G7 (one comment pointer), G10 (one `testpaths` line), G11 (import `uma_gates` in the 2 comparators), G9 (delete 3 dead symbols + their 4 no-op call sites), **G15 (`UMA_HEN_ROOT` + existence assertion in the 4 files; extend Tier-0 HARD 4 to `uma-engine/python/`)**. Then **G18: cite the line proving the `lmax≥5` fallback is loud, or set it OPEN** | **~1 h total** | **OPEN** |
+| **S1** | Tier-2 equivalence suite (folds G12, G17, G5) | days | OPEN — the sole A−→A item |
+| **S2** | Resume DD / Phase 3 | — | OPEN |
+| **S5** | Close P7.1 + P7.2 inside the S2 window | hours, in S2 | adopted |
+| **S4** | Keep §D.10 current | ongoing | standing |
+
+**Rule added to §D.10's discipline note (please adopt):**
+
+> A `DEFERRED` state requires **(a)** an estimated effort, **(b)** a *named
+> unblocking event* — not "when next touched" — and **(c)** a reason why doing it
+> now is actively wrong (risk, dependency, or cost), not merely that later is
+> possible. **If the fix is smaller than the justification, it is not a
+> deferral.** Deferrals proposed by the implementer are subject to auditor
+> concurrence **with an effort estimate attached**; a bare "cosmetic" or "with DD"
+> is not sufficient, and "with DD" requires the item to actually be DD code.
+
+### F.14.6 Bottom line  `[AUDIT 11th pass]`
+
+**Is everything addressed?** The code answer is unchanged and good: **A−**, builds
+from a clean clone, CI committed and enforcing, no silent-wrong-physics on the
+validated path.
+
+The *process* answer has tightened. Six items I had accepted as deferred are back
+to **OPEN** with a measured cost of about an hour in total, one of them
+(**G15**) reclassified from hygiene to a real portability defect that the
+campaign's own Tier-0 guard would have caught had its scope included the exporter.
+**S6 and S7 together are ~70 minutes and close every item that is not S1, S2, or a
+genuinely large refactor.**
+
+## F.15 Developer response to §F.13 / §F.14 — S6, S7, and a new self-found fix  `[DEV / SELF-REVIEW 2026-09-01]`
+
+> **`[DEV]`, not `[AUDIT]`** (per the S6 rule I am adopting: `[AUDIT]` is the
+> independent reviewer only). This records what I *did* in response to §F.13/§F.14
+> and one bug I found while re-reading the code. **No standing verdict** — that is
+> §F.14 (rev 16, A−) and whatever the independent auditor writes next.
+
+**S6 — DONE.** §F.12 retagged `[AUDIT]`→`[DEV / SELF-REVIEW]`, verdict/auditor-voice
+neutralised, content preserved verbatim; the attribution rule added to §D.10's
+discipline note. §F.13.1 was right — a self-review posted as an audit erases the
+independence the tag exists to signal.
+
+**S7 — DONE (all six rescinded deferrals + G18).** One commit, `f993565c`:
+- **G15** (the reclassified real defect): the 4 files that hardcoded another user's
+  absolute `…/workdir/hen` path now resolve it via `uma_hen.py` (`UMA_HEN_ROOT` env
+  → repo-sibling → loud `FileNotFoundError`). New **Tier-0 HARD** guard bans a
+  hardcoded absolute `…/workdir/hen` literal in **all** `uma-engine/python/`
+  (spike included — the scope gap that let G15 through). `UMA_HEN_ROOT` documented.
+- **G7** one-line pointer in `block_context.h` to `docs/activation_checkpointing.md`.
+- **G10** the two engine-python tests wired into `pyproject.toml testpaths`
+  (torch-gated via `conftest.collect_ignore_glob` so base-env `pytest` stays green).
+- **G11** `phase5_parity.py` now imports `uma_gates` for `f_tol`/`min_sample`.
+- **G9 (partial):** deleted `pack_shards_cpu` (2 overloads, 0 callers, header-only).
+  `register_uma_peer_ops()` (4 no-op call sites in compiled TUs) and `PeerGatherSlot`
+  (still used by `kokkos_peer_device_smoke.cpp`) are **left OPEN** — they need a
+  rebuild and the latter is not actually dead; I did not want to overclaim G9 as
+  fully closed. §D.10 updated to `OPEN (partial)`.
+- **G18** the `lmax>=5` Wigner fallback now emits a one-time `RuntimeWarning` — it
+  was **silent** (the auditor's condition was "cite the line proving it is loud, or
+  OPEN"); it is now loud.
+
+**New self-found fix (`[DEV]`): P0′.5 was incomplete.** Re-reading `pair_uma.cpp` I
+found `load_predictor()` still had the **un-hardened** `if (mpi_peer && comm->nprocs
+> 1) MPI_Barrier(world)` — the exact deadlock pattern P0′.5 fixed in `~PairUMA` but
+never applied to the sibling reload path (a re-`pair_coeff` after a partial peer
+failure could hang). Extracted a shared `teardown_peer()` helper (the
+`MPI_Allreduce(MIN)` have-peer agreement) used by **both** sites, so they cannot
+drift — the same de-duplication remedy as E.7.4 #1. Validated bit-identical: tripwire
+**8795048** PASS (N=32 W=12 −885377.060040, cos=1.0), G4 **8795049** in progress;
+rebuild **8795092**. Report §14.15 (pending G4 completion). Filed in §D.10.
+
+**On §F.14's calibrated-bookkeeping point:** accepted. The lesson I take is that a
+`DEFERRED` set by me is a proposal, not a decision, until an independent reviewer
+concurs *with an effort estimate* — and "smaller than its justification" means do it
+now. S7 was exactly that class, and it was ~1 h. The `[AUDIT]`/`[DEV]` rule (S6) and
+the deferral bar (§F.14.5) are now both in §D.10.
+
 ---
 ---
 
