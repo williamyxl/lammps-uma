@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 (verdict rev 12, current)**
+**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.12 (verdict rev 14, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -82,6 +82,15 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > omission*. **Answer to "is everything addressed?": yes — every item now has a
 > state.** Remaining work is **§F.9.5 S1–S4**; the sole A−→A item is unchanged
 > (the Tier-2 equivalence suite).
+>
+> **UPDATE 8 — ✅ S3 done + R2/R4 parity revalidated; verdict rev 13 (A− held).**
+> P7.1 is documented in `docs/ENV_VARS.md §8` and — correctly — **stayed `OPEN`**
+> in §D.10 rather than being promoted to FIXED by documentation. The R2/R4
+> revalidation that was *pending* at rev 12 has run: rebuild 8794084, tripwire
+> 8794642, full G4 **8794643 all 7 configs bit-identical**. **Every item across
+> nine passes is now FIXED, OPEN with a named reason, or DEFERRED on the record —
+> nothing closed by omission.** Remaining: **§F.11.4 S1/S2/S4**; the sole A−→A
+> item is the Tier-2 equivalence suite (a harness to build, not a defect to fix).
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
 results). This document is the standing verdict and is updated as the code changes.
@@ -110,9 +119,12 @@ results). This document is the standing verdict and is updated as the code chang
   two corrections; **`[AUDIT]` §F.7 is the completeness audit** — does *everything*
   ever raised have closure? — and carries verdict rev 11; **`[AUDIT]` §F.8 gives
   the step-by-step remediation instructions (R1–R7)**; **`[AUDIT]` §F.9 re-audits
-  the R1–R5 response and carries verdict rev 12**. Part E/F.5/F.7/F.9 govern on
-  any factual disagreement.
-  ★ **§F.9 is the current standing verdict (rev 12, A−); §F.9.5 is the action list (S1–S4).**
+   the R1–R5 response (rev 12)**; **`[AUDIT]` §F.11 re-audits the S3 +
+   revalidation response (rev 13)**; **`[AUDIT]` §F.12 is an independent
+   post-rework code re-examination (rev 14)**. Part E/F.5/F.7/F.9/F.11/F.12
+   govern on any factual disagreement.
+   ★ **§F.12 is the current standing verdict (rev 14, A−); §F.12.5 is the action
+   list (S1/S2/S4/S5 — S3 done).**
 
 ---
 ---
@@ -3039,6 +3051,205 @@ Rev 12 (A− restored) accepted; all R1–R5 verifications confirmed. Addressing
 No open disagreement between PART E, §F.9, and this response. Standing verdict:
 **§F.9 (rev 12, A−)**; single path to A: the S1 Tier-2 suite.
 
+
+---
+
+## F.11 Re-audit of the S3 + revalidation response  `[AUDIT 2026-09-01, 9th pass]` — verdict rev 13
+
+> **Same question, ninth pass**, after commits `ad70277487` (S3) and
+> `c3768cbc8b` (R2/R4 revalidation). Verified by execution, by `git`, and by
+> reading the parity tables — not by reading §F.10.
+
+### F.11.0 Verdict: **A− (held)** — and the last outstanding *verification* debt is closed
+
+**Answer to the question: yes.** Every item I have raised across nine passes is
+now either **FIXED with evidence**, **OPEN with a named owner and reason**, or
+**DEFERRED on the record**. Nothing is closed by omission, and §D.10 makes that
+checkable rather than a matter of trust.
+
+Two things changed since rev 12, and both are real:
+
+1. **S3 delivered** — P7.1 is documented.
+2. **The R2/R4 parity revalidation that was *pending* at §F.9 has now run and
+   passed.** At rev 12 I recorded R2/R4 as verified by configure-test and code
+   read, with the XPU rebuild still blocked by a build-node stall. That gap is
+   now closed on the record.
+
+### F.11.1 Verification  `[AUDIT 9th pass]`
+
+| Item | Claim | **Verified** | Evidence |
+|---|---|---|---|
+| **S3** | P7.1 documented | **✅ — better than requested** | `docs/ENV_VARS.md §8 "Known limitations"` (`:125-137`). I asked for a note; what landed states the *consequence* (`-partition`/library/MDI gather across the wrong communicator), that there is **no diagnostic today**, that single-tile is unaffected, and the deferred fix (thread `comm->world`). §8 also covers **P7.2**, the NPT/virial scope, and the DD MoLE approximation — so the limitation set is now discoverable in one place |
+| **D.10 P7.1 row** | state updated, not closed | **✅ correct discipline** | reads `OPEN (documented, S3)` — documentation did **not** silently promote it to FIXED. This is exactly the §D.10 rule working |
+| **R2/R4 revalidation** | rebuilt + bit-identical | **✅ CONFIRMED** | rebuild **8794084** `LMP BUILD OK`; tripwire **8794642** PASS; full G4 **8794643** — **all 7 configs bit-identical**: N=16 W=1/2/4/6/8/12 `−110673.829050`, N=32 W=12 `−885377.060040`, cos = 1.0000000000, max\|dF\| 5.05e-14 … 1.61e-13. Report §14.14 |
+| **§F.9.3 nuance** | G12/G17/G5 folded into one window | **✅** | accepted and recorded in §D.10 as a single S1 block rather than three tickets |
+| CI at HEAD | green under STRICT | **✅ re-run** | Tier-0 **PASS (strict=1)**, 8 HARD / 4 REPORT, **0** findings; Tier-1 **33/33** across 5 files; untracked non-ignored **6** |
+
+**On the revalidation specifically.** R2 is a CMake guard change (inert on the
+build path) and R4 is DD-only, so neither *should* move single-tile or GP
+numbers — and neither did. Running the full 7-config suite anyway, rather than
+reasoning that it was unnecessary, is the correct application of G3/G5. That is
+the standard the campaign set for itself and it was met.
+
+### F.11.2 Complete disposition — all nine passes  `[AUDIT 9th pass]`
+
+| Category | Count | State |
+|---|---|---|
+| Audit-raised findings (E1–E3, Rec 4, E.7.4 #1, E.8.3 #3, E.10.2, E.10.3) | 8 | **FIXED**, each with `file:line` + job ID + guard |
+| §F.7 blocking / correctness G-items (G1, G2, G4, G13) | 4 | **FIXED**, independently verified (§F.9.1, above) |
+| `OPEN`, named reason, scheduled | 6 | G12, G17, G5 → folded into S1; P7.1 (documented, code fix deferred); P7.2; Tier-2 suite |
+| `DEFERRED`, recorded reason | 12 | G6–G11, G15, G16, G18, P0′.2(a), P0′.6 |
+
+**Nothing is untracked, and nothing is closed by omission.** That is a different
+statement from "everything is done" — 18 items remain open or deferred — but it
+is the statement that matters, because it is now *verifiable* from §D.10 rather
+than reconstructible only by a full re-audit.
+
+### F.11.3 Grades — rev 13  `[AUDIT 9th pass]`
+
+| Dimension | rev 11 | rev 12 | **rev 13** | Basis |
+|---|---|---|---|---|
+| Numerical correctness | A | A | **A** | 7/7 bit-identical on the rebuilt binary (8794643) |
+| Test & CI infrastructure | C+ | B+ | **B+** | unchanged; S1 is the remaining lift |
+| Portability / build hygiene | D+ | B− | **B−** | unchanged |
+| Documentation of interface | C+ | B− | **B** | ↑ `ENV_VARS.md §8` collects the known limitations, incl. one with no runtime diagnostic |
+| Process / bookkeeping | — | B+ | **A−** | ↑ P7.1 stayed `OPEN` after being documented; the pending revalidation was run and recorded rather than assumed |
+| all engine-source dimensions | — | — | **unchanged** | no `src/ML-UMA/**/*.{cpp,h}` change since rev 12 |
+| **Overall** | **B+** | **A−** | **A−** | |
+
+**Why not A:** unchanged and unchanging until S1 lands — the engine's numerical
+core (autograd, activation checkpointing, opt2 freeze, opt4 C1≡C2, retain-K,
+padding inertness) is validated by PBS parity tables, not by a self-contained
+gate. Nine passes have not moved this, because it is not a defect to fix; it is a
+harness to build.
+
+### F.11.4 Remaining instructions  `[AUDIT 9th pass]`
+
+Supersedes §F.9.5. **S3 is done; S1, S2, S4 stand unchanged.**
+
+| Step | Item | Effort | Status / note |
+|---|---|---|---|
+| **S1** | **Tier-2 equivalence suite** — commit a CPU-traceable toy artifact; add a CPU forward/FD harness; gate opt2-freeze ≡ no-freeze, opt4 C1≡C2, retain-K K=0..3, padding inertness (`n_pad ∈ {0,1,chunk}` → identical to 1e-14), chunk-size invariance, shape genericity, stale-artifact rejection. **Fold in G12** (GP reconstruct), **G17** (`export_format` validated against discovered files), **G5** (`BlockSubModule` ≡ `eSCNMD_Block` drift test) | days | **OPEN — the sole A−→A item.** Next scheduled |
+| **S2** | **Resume DD / Phase 3** | — | OPEN; `DEV_PLAN_node_parallelism.md` PART III. The `compute()` decomposition and the size guard were done so the 4th path slots in without regrowing the monolith |
+| **S3** | Document P7.1 | 10 min | **✅ DONE** — `ENV_VARS.md §8` |
+| **S4** | Keep §D.10 current — one row + state per new finding, before its sprint closes | ongoing | **adopted as a standing rule**; it is what makes "is everything addressed?" answerable |
+
+**Two cautions for S1, from what the earlier passes found:**
+
+1. **Do not let it fail open.** §F.3's own reasoning for deferring S1 — *a partial
+   equivalence suite that silently skips the hard cases is the fail-open pattern
+   Sprint 3 removed* — applies to its delivery too. Each equivalence gate must
+   fail on a skip (the `UMA_CI_REQUIRE_TIER2` pattern from E.10.2 is the model).
+2. **Add the toy artifact to the Tier-0 tracked-files guard** (HARD 6) as soon as
+   it exists. G1 happened because a build-critical file was created but never
+   committed; a committed artifact is exactly that class of file.
+
+### F.11.5 Closing note on the review series  `[AUDIT 9th pass]`
+
+Across nine passes: 8 audit findings, 4 recommendations, 18 completeness G-items.
+All 8 findings and all 4 blocking/correctness G-items are fixed; the rest carry an
+explicit state. Tier-0 grew **4 → 8 HARD** checks, Tier-1 **0 → 33** tests, Tier-2
+**0 → 3** CTests, and the repository went from *not building at HEAD* to
+*clean-clone verified*.
+
+The most durable outcome is not any individual fix but **§D.10** and the rule
+attached to it. The failure mode §F.7.3 identified — a tracker whose unit is the
+sprint, so partial delivery gets ☑'d and items vanish — is the one that produced
+the two most serious findings of the series (G1, the unbuildable HEAD; G2, a real
+break raised twice and dropped). §D.10 closes that loop, and the S3 response
+demonstrated it working: a documented-but-unfixed item correctly stayed `OPEN`.
+
+**Standing verdict: A−.** One item to A, and it is a build, not a repair.
+
+## F.12 Independent post-rework code re-examination — verdict rev 14  `[AUDIT 2026-09-01, 10th pass]`
+
+> **`[AUDIT]` — written as a fresh code review, on request** ("examine the code
+> again after the rework, give a new verdict"). Independent of §F.11 (which I read
+> afterward and concur with). Method: `git clone --no-hardlinks` to a scratch dir at
+> HEAD `c3768cbc8b`, build/run **in the clone**, then read `src/ML-UMA/` source
+> directly and check each closure against the committed tree — not the tracker, not
+> the working directory. PART F developer remarks read first, per the request.
+
+### F.12.0 Verdict: **A− (confirmed by independent read)**
+
+I did not take rev 12/13 on trust; I re-derived the grade from the source. It holds:
+**A−**, and — the point rev 11 was about — the grade is now **durable in the
+repository**, not just in one working directory.
+
+### F.12.1 What I verified myself, from a clean clone  `[AUDIT 10th pass]`
+
+- **Builds from a clean clone.** `nlohmann/json.hpp` is tracked at HEAD;
+  `git status` in the clone shows **0 untracked non-ignored** files; the
+  `metadata.cpp` TU that `#include`s it compiles CPU-only in the clone (`metadata.cpp.o`
+  produced). The rev-11 blocker is genuinely gone, not papered over.
+- **CI is real and in the tree.** In the clone: Tier-0 **8 HARD / 4 REPORT, 0
+  findings** under STRICT; Tier-1 **33/33** across 5 files; Tier-2 CPU build + **3/3
+  CTests**. These are committed files, so any cloner gets them.
+- **All 11 prior fixes present in committed source** (grepped the tree, not the
+  tracker): P0.1 `barrier().wait()`, P0′.1 virial refuse + pos+cell-gradient stress,
+  P0.2 backward-graph agreement, P0.5 interplanar NL spacing, E1 `comm->nprocs`
+  guard, E.7.4 #1 single `CheckpointModuleFn`, E.8.3 #3 `compute()`=102 L, G2 CMake
+  `TARGET` guard, G4 exporter `raise`, G13 MoLE latch. Table in §F.11.1 matches what
+  I found line-for-line.
+
+### F.12.2 Independent read of the two OPEN validation gaps  `[AUDIT 10th pass]`
+
+I confirmed these are correctly `OPEN` (not mislabeled), by source:
+
+- **G12** `export_blocks_xpu.py:851` `do_reconstruct = False` for `gp`, with a
+  correct in-code rationale (the monolithic reference forward is not comparable once
+  edges are sharded). A real gap, but a *reasoned* one — the fix needs the S1 harness.
+- **G17** `export_format` parsed at `metadata.cpp:113`, **0** other uses in `src/`
+  (grepped) — the P4′.3 "validate against discovered files" check did not land.
+
+Both are the same "artifact-not-checked-against-its-claim" class and belong in S1.
+No item is mislabeled; §D.10's states match the source.
+
+### F.12.3 Fresh defect scan on the production path — none found  `[AUDIT 10th pass]`
+
+Re-grepped the XPU production engine for this campaign's failure classes: no
+swallowing `catch(...)` on the single-tile/GP path (the remaining ones are the
+CUDA/Python-worker paths + a benign int-parse fallback); no ungated per-step I/O on
+the predictor/GP hot path; the rev-1 highest-leverage items (barrier `.wait()`,
+`no_virial_fdotr_compute`) hold. **No new silent-wrong-physics on the validated
+path.** The engine source is in the shape the grade claims.
+
+### F.12.4 Grades — rev 14  `[AUDIT 10th pass]`
+
+Identical to rev 13 (no source change since; I re-derived rather than copied):
+
+| Dimension | rev 13 | **rev 14** | Basis (independently checked) |
+|---|---|---|---|
+| Numerical correctness | A | **A** | G3 held; virial FD-validated; parity 7/7 bit-identical |
+| Test & CI infrastructure | B+ | **B+** | verified green in a fresh clone |
+| Portability / build hygiene | B− | **B−** | clean clone builds; G2 configure-tested |
+| Python export layer | C− | **C−** | G4 fixed+tested; G12/G17 OPEN → S1 |
+| Process / bookkeeping | A− | **A−** | D.10 accurate against source this pass |
+| Architecture (monolith) | B | **B** | `compute()` 102 L, size-guarded |
+| **Overall** | **A−** | **A−** | **durable** — verified from a clean clone |
+
+**Why A− and not A:** unchanged — the numerical-core equivalence claims
+(opt2/opt4/retain-K/padding) are validated by PBS parity tables, not a self-contained
+gate. That is a harness to build (S1), not a defect to fix.
+
+### F.12.5 Instructions  `[AUDIT 10th pass]`
+
+I concur with §F.11.4 (S1/S2/S4) and add one item derived from reading the source:
+
+| # | Item | Note |
+|---|---|---|
+| **S1** | Tier-2 equivalence suite; fold G12/G17/G5 | the A−→A item; must fail-closed on skip (E.10.2 model); add the toy artifact to Tier-0 HARD 6 the moment it is committed (G1 was exactly a committed-then-forgotten build file) |
+| **S2** | Resume DD / Phase 3 | 4th `run_compute_*` path is prepared |
+| **S4** | Keep §D.10 current | standing; verified maintained |
+| **S5** *(new, `[AUDIT]`)* | **When S2 threads `comm->world` through the peer/KVS setup for DD, close P7.1's code fix in the same change** (`xccl_peer.cpp:79,82` `MPI_COMM_WORLD` → `comm->world`), and promote its `docs/ENV_VARS.md §8` entry from limitation to fixed. P7.1 is documented but a documented-forever limitation is worse than a fix when the exact code is already being touched. Also handle **P7.2** (`atom->natoms` `int` narrowing) in that window — same file, same review |
+
+**Bottom line (`[AUDIT]`, rev 14):** the rework fully answered the completeness
+audit. Independently re-derived from a clean clone, the code is **A−**: it builds,
+its CI runs and enforces the correctness properties, no silent-physics defect
+remains on the validated path, and every open item has an honest state in §D.10. The
+one path to A is the S1 Tier-2 equivalence suite. No open disagreement with PART F.
+
+---
 ---
 ---
 
