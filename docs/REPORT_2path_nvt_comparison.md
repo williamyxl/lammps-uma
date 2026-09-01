@@ -1445,3 +1445,33 @@ test_m3). **Tripwire (job 8793776):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
 3× the C++ surface.** The Tier-2 toy-artifact opt-equivalence suite (E.10.3) remains
 a larger scoped follow-on.
 Jobs: rebuild 8793769; tripwire 8793776; full suite 8793777.
+
+### 14.14 Completeness-audit response (§F.7/§F.9, rev 11→12) — R2/R4 revalidation (2026-09-01)
+
+The §F.7 completeness audit found the campaign deliverables were never committed
+(HEAD didn't build) and two correctness-relevant items (G2 CMake guard-scope, G4
+exporter fail-open) had been ☑'d on partial delivery. Response R1–R5: committed all
+deliverables (the build blocker); fixed G2 (CMake `TARGET` guard), G4
+(`export_shards_xpu.py` fail-loud), G13/P0'.2(b) (one-time DD MoLE warning + removed
+the per-step allreduce); added the D.10 standing open-items table. This run
+revalidates the two **compiled** changes (R2 CMake — inert on the build path; R4 —
+DD-only) on the rebuilt binary (job 8794084 `LMP BUILD OK`).
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8794643:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 161.4 | 201 | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.4  | 115 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 47.8  | 64  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.0  | 44  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.4  | 45  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.84 | 26  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.6 | 173 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8794642):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Clean-clone verification (§F.9.1):** `git clone` → Tier-0 STRICT + 33 Tier-1 +
+Tier-2 3/3 all PASS in the clone (the build blocker is fixed at HEAD).
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.13/…/§13, cos =
+1.0, FP64 floor. **No physics change; R2/R4 confirmed behaviour-preserving.**
+Jobs: rebuild 8794084; tripwire 8794642; full suite 8794643.
