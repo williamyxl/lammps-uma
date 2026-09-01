@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor reply §F.5 (verdict rev 10, current)**
+**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 (verdict rev 12, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -71,6 +71,17 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > Findings in **§F.7**; **step-by-step fixes in §F.8 (R1–R7)** — R1 (`git add`,
 > minutes) alone restores A−; R1–R4 clear everything build- or
 > correctness-relevant.
+>
+> **UPDATE 7 — ✅ R1–R5 DONE; verdict rev 12 restores A− (§F.9).** Verified by
+> execution and by `git`: a **clean clone now builds** `libuma_engine` and passes
+> Tier-0 STRICT + **33 Tier-1** + **3/3 Tier-2 CTests**; untracked files
+> **165 → 6**; G2 confirmed by an actual `-DUMA_ENGINE_USE_XPU=ON` configure
+> (exit 0); G4 fail-loud with a new 3/3 test; G13 warning + allreduce off the hot
+> path. **The key structural fix is §D.10** — a standing open-items table where
+> every ID carries `FIXED | OPEN | DEFERRED` and *nothing may be closed by
+> omission*. **Answer to "is everything addressed?": yes — every item now has a
+> state.** Remaining work is **§F.9.5 S1–S4**; the sole A−→A item is unchanged
+> (the Tier-2 equivalence suite).
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
 results). This document is the standing verdict and is updated as the code changes.
@@ -98,10 +109,10 @@ results). This document is the standing verdict and is updated as the code chang
   verifies those claims (rev 10)**; `[DEV]` §F.6 acknowledges and applies §F.5's
   two corrections; **`[AUDIT]` §F.7 is the completeness audit** — does *everything*
   ever raised have closure? — and carries verdict rev 11; **`[AUDIT]` §F.8 gives
-  the step-by-step remediation instructions (R1–R7)**. Part E/F.5/F.7 govern on
+  the step-by-step remediation instructions (R1–R7)**; **`[AUDIT]` §F.9 re-audits
+  the R1–R5 response and carries verdict rev 12**. Part E/F.5/F.7/F.9 govern on
   any factual disagreement.
-  ★ **§F.7 is the standing verdict (rev 11, B+); §F.8 is the action list.**
-- **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
+  ★ **§F.9 is the current standing verdict (rev 12, A−); §F.9.5 is the action list (S1–S4).**
 
 ---
 ---
@@ -1696,7 +1707,7 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 | **G12** GP reconstruct never written | P1.4/P5′.3 | `OPEN` | `export_blocks_xpu.py:850-851` forces `do_reconstruct=False` for GP; P1.4 exit code never gates GP artifacts |
 | **G17** `export_format` parsed, never used | P4′.3 | `OPEN` | `metadata.cpp:113` reads it; path selection still by `access()` |
 | **G5** `BlockSubModule`≡`eSCNMD_Block` structural test | P5′.2(c) | `OPEN` | CPU-only drift guard; not written |
-| **G14a** `MPI_COMM_WORLD` hardcoded | §A.4 → **P7.1** | `OPEN` | `xccl_peer.cpp:79,82` |
+| **G14a** `MPI_COMM_WORLD` hardcoded | §A.4 → **P7.1** | `OPEN` (documented, S3) | `xccl_peer.cpp:79,82`; breaks `-partition`/library/MDI with no diagnostic — now warned in `docs/ENV_VARS.md §8`; code fix (thread `comm->world`) deferred |
 | **G14b** `atom->natoms` narrowed to `int` | §A.4 → **P7.2** | `OPEN` | `pair_uma.cpp` GP gather; breaks >2^31 atoms |
 | **G6** exporter package split | P5′.6 | `DEFERRED` | `export_blocks_xpu.py` 1704 L / 692-L `main()`; large refactor, no correctness payoff; after DD |
 | **G7** design-history comment migration | P6.1 | `DEFERRED` | `block_context.h:1-62` narrative; add a pointer when touched |
@@ -2902,6 +2913,130 @@ forward/FD + opt2/opt4/retain-K/padding gates) → **A**; then resume DD / Phase
 
 **R1 alone returns the project to rev 10's A−.** R1–R4 together clear every
 finding that is build- or correctness-relevant.
+
+
+---
+
+## F.9 Re-audit of the R1–R5 response  `[AUDIT 2026-09-01, 8th pass]` — verdict rev 12
+
+> **Answering the same question again — "is everything I raised now addressed?" —
+> after the R1–R5 response (commits `5e70aaa5ad`, `3dcb831d76`, `4d0f54c772`).**
+> Verified by execution and by `git`, not by reading the tracker.
+
+### F.9.0 Verdict: **B+ → A−** (restored), and the answer is now **"yes, or explicitly deferred"**
+
+Every blocking and correctness-relevant item from §F.7 is closed and verified.
+The remaining items each carry an explicit `OPEN` or `DEFERRED` state in the new
+**§D.10 open-items table** — which is the structural fix that makes the question
+answerable at all.
+
+### F.9.1 R-step verification  `[AUDIT 8th pass]`
+
+| Step | Claim | **Verified** | How I checked |
+|---|---|---|---|
+| **R1** | repo tracked; clean clone builds | **✅ CONFIRMED — the check that matters** | `git clone --no-hardlinks` to a temp dir, then **in the clone**: `json.hpp` present; `ci/ci_local.sh` → Tier-0 STRICT + **33 Tier-1 tests PASS**; `ci/tier2_cpu_build.sh --strict` → **real CPU build of `libuma_engine` + 3/3 CTests PASS**. Untracked non-ignored files **165 → 6** |
+| **R1 guard** | Tier-0 HARD 6 tracked-files | **✅** | `tier0_guards.sh:118-129`, `git ls-files --error-unmatch` per build-critical path; HARD count 7 → **8** |
+| **R2** | G2 CMake guard scope | **✅ CONFIRMED by configure** | `if(UMA_ENGINE_HAS_NCCL AND TARGET uma_libtorch_mp_worker)` (`CMakeLists.txt:237`). Ran `cmake -DUMA_ENGINE_USE_XPU=ON` → **exit 0**, zero `"not built by this project"`. Guarding on `TARGET` is the more robust of the two forms I offered |
+| **R3** | G4 exporter fail-loud | **✅** | `export_shards_xpu.py:88,118` now `raise RuntimeError` with the `UMA_ALLOW_MISSING_PATCHES=1` escape hatch, matching the sibling. New `ci/tests/test_exporter_fail_loud.py` — ran it: **3/3 PASS** |
+| **R4** | G13 MoLE warning + off hot path | **✅** | one-time `error->warning` + `mole_composition_done_` latch (`pair_uma.cpp:1199,1231`), reset in `init_style:719` so a re-setup re-warns. The per-step 119-element allreduce is gone |
+| **R5** | standing open-items table | **✅ — and it is the most valuable item in the response** | **§D.10**, every ID from Parts A/B/E/F in exactly one state, with the rule *"☑ elsewhere in this doc is subordinate to this table"* and *"nothing may be closed by omission"* |
+| **R5b** | promote untracked §A.4 items | **✅** | G14a/G14b → **P7.1/P7.2**, now real IDs that must be closed or deferred on the record |
+
+**Full CI, re-run:** Tier-0 **PASS (strict=1)**, 8 HARD / 4 REPORT, 0 findings;
+Tier-1 **33/33** across 5 files (was 30/4); Tier-2 **3/3**. Green in the working
+tree *and* in a clean clone.
+
+### F.9.2 Answering the question directly  `[AUDIT 8th pass]`
+
+**Is everything I raised addressed?** Now: **yes, in the sense that matters** —
+every item has a *state*, and nothing is closed by omission.
+
+| Category | Count | Status |
+|---|---|---|
+| Audit-raised findings (E1–E3, Rec 4, E.7.4 #1, E.8.3 #3, E.10.2, E.10.3) | 8 | **all FIXED**, each with evidence |
+| §F.7 blocking / correctness G-items (G1, G2, G4, G13) | 4 | **all FIXED** and independently verified above |
+| G-items now `OPEN` with a named reason (G12, G17, G5, P7.1, P7.2, Tier-2 suite) | 6 | tracked, not dropped |
+| G-items `DEFERRED` with a recorded reason (G6–G11, G15, G16, G18, P0′.2(a), P0′.6) | 12 | agreed on the record |
+
+That is a materially different position from §F.7, where ~18 items had **no**
+state and two correctness-relevant ones (G2, G4) had silently vanished.
+
+### F.9.3 What remains, and my disposition  `[AUDIT 8th pass]`
+
+I reviewed §D.10's states and **concur with all of them**, with one nuance:
+
+- **The three `OPEN` validation gaps (G12, G17, G5) belong together.** All three
+  are "the artifact is not checked against what it claims to be": GP exports skip
+  reconstruct entirely; `export_format` is parsed and never compared to the files
+  found; and there is no `BlockSubModule` ≡ `eSCNMD_Block` drift test. They share
+  a fix window with the Tier-2 equivalence suite and should be scheduled as one
+  block, not three tickets.
+- **P7.1 (`MPI_COMM_WORLD`) deserves a note in `docs/ENV_VARS.md` or the README**
+  rather than silence: it is not a defect in normal use, but it *will* break
+  `-partition`, library mode and MDI, and a user hitting it gets no diagnostic.
+- Everything else `DEFERRED` is correctly classified. G6 (exporter split) and G15
+  (cross-repo coupling) are the two that will hurt most later; both are sensibly
+  sequenced after DD.
+
+### F.9.4 Grades — rev 12  `[AUDIT 8th pass]`
+
+| Dimension | rev 10 | rev 11 | **rev 12** | Basis |
+|---|---|---|---|---|
+| Numerical correctness | A | A | **A** | unchanged; R4 is DD-only, single-tile/GP parity untouched |
+| Test & CI infrastructure | B+ | C+ | **B+** | ↑↑ restored **and improved**: harness tracked, 8 HARD, 33 Tier-1, verified in a clean clone |
+| Portability / build hygiene | C+ | D+ | **B−** | ↑↑ clean clone builds; G2 fixed and configure-tested; tracked-files guard |
+| Python export layer | D | D | **C−** | ↑ G4 closed with a test; G6 formally deferred rather than ☑'d |
+| Dead code / redundancy | B− | C+ | **C+** | unchanged (G9 deferred) |
+| Documentation of interface | C+ | C+ | **B−** | ↑ §D.10 makes the tracker's claims auditable |
+| **Process / bookkeeping** *(new)* | — | — | **B+** | §D.10 + "nothing closed by omission" directly fixes the §F.7.3 failure mode |
+| all engine-source dimensions | — | — | **unchanged** | |
+| **Overall** | **A−** | **B+** | **A−** | |
+
+**Why not higher:** the A−→A item is unchanged — the Tier-2 equivalence suite.
+The engine's numerical core is still validated by PBS parity tables rather than a
+self-contained gate. That is the only thing standing between this and an A.
+
+### F.9.5 Remaining instructions  `[AUDIT 8th pass]`
+
+Supersedes §F.8 R6/R7; R1–R5 are complete.
+
+| Step | Item | Effort | Note |
+|---|---|---|---|
+| **S1** | **Tier-2 equivalence suite** — commit a CPU-traceable toy artifact, add a CPU forward/FD harness, then gate opt2-freeze / opt4 C1≡C2 / retain-K / padding-inertness | days | **The A−→A item.** Fold **G12, G17, G5** into this window (§F.9.3) — they are the same class of gap and share the harness |
+| **S2** | **Resume DD / Phase 3** | — | `DEV_PLAN_node_parallelism.md` PART III; the `compute()` decomposition was done so the 4th path slots in cleanly |
+| **S3** | Note **P7.1** (`MPI_COMM_WORLD` breaks `-partition`/library/MDI) in `ENV_VARS.md` or the README | 10 min | a user hitting this gets no diagnostic today |
+| **S4** | Keep **§D.10 current** — every new finding gets a row and a state before its sprint closes | ongoing | this is the durable fix; do not let it go stale |
+
+**On process.** §F.7.3 identified the root cause as a tracker whose unit was the
+sprint rather than the defect. §D.10 fixes exactly that, and the R1–R5 response
+was executed to the standard the earlier rounds set: every closure has a
+`file:line`, a verification, and — where a mechanical check is possible — a guard.
+The bookkeeping failure that produced G2 and G4 should not recur while §D.10 is
+maintained.
+
+## F.10 Developer response to §F.9  `[DEV 2026-09-01]`
+
+Rev 12 (A− restored) accepted; all R1–R5 verifications confirmed. Addressing §F.9.5:
+
+- **S3 DONE** (the one quick, concrete item): documented **P7.1** — `MPI_COMM_WORLD`
+  hardcoding breaks `-partition`/library/MDI with no diagnostic — in a new
+  **`docs/ENV_VARS.md §8` "Known limitations"** (also lists P7.2, the NPT/virial
+  scope, and the DD MoLE approximation). §D.10's P7.1 row now reads
+  `OPEN (documented, S3)`: the *code* fix (thread `comm->world` through the peer/KVS
+  setup) remains deferred, but a user hitting it now has a written diagnostic.
+- **§F.9.3 nuance accepted:** G12/G17/G5 are one class ("artifact not checked against
+  what it claims to be") and are folded into the **S1** Tier-2 window in D.10 rather
+  than three separate tickets.
+- **S1 (Tier-2 equivalence suite)** — the sole A−→A item — and **S2 (resume DD)** are
+  the scheduled multi-day efforts; S1 is next. **S4** (keep §D.10 current, one row +
+  state per new finding before a sprint closes) is adopted as the standing rule.
+- **Note:** the build-node activation stall that blocked my R2/R4 XPU revalidation
+  cleared; rebuild 8794084 = `LMP BUILD OK`, and §F.9.1 independently rebuilt +
+  ran Tier-2 3/3 in a clean clone. The R2/R4 tripwire + full-G4 parity revalidation
+  is now running (jobs 8794642/8794643) to close it on the record per G4/G5.
+
+No open disagreement between PART E, §F.9, and this response. Standing verdict:
+**§F.9 (rev 12, A−)**; single path to A: the S1 Tier-2 suite.
 
 ---
 ---

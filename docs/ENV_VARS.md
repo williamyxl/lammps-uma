@@ -121,3 +121,21 @@ keywords; the env var remains as an override:
 
 All gate tolerances are defined once in `scripts/uma_gates.py` (P1.5). Do not
 hard-code copies in comparators or `.pbs` scripts.
+
+## 8. Known limitations (not env vars)
+
+- **⚠ `MPI_COMM_WORLD` is hardcoded on the multi-node GP path** (P7.1;
+  `xccl_peer.cpp:79,82` build the XCCL KVS on `MPI_COMM_WORLD`, and the GP gather in
+  `pair_uma.cpp` uses `world`). Consequence: the GP/multi-node path assumes it owns
+  the whole MPI world, so it is **incompatible with anything that partitions
+  `MPI_COMM_WORLD`** — LAMMPS `-partition`/`run_multi`, library/`liblammps` mode with
+  a sub-communicator, and MDI coupling. In those modes GP ranks would gather across
+  the wrong communicator and there is **no diagnostic today** — the run silently
+  uses the wrong atom set. Single-tile (1 rank) is unaffected. Fix (deferred, P7.1):
+  thread `world = comm->world` (LAMMPS' communicator) through the peer/KVS setup.
+- **`atom->natoms` is narrowed to `int` on the GP gather** (P7.2, `pair_uma.cpp`) →
+  the GP path breaks above 2^31 atoms. Not reachable at validated sizes; tracked.
+- **NPT/stress requires `UMA_COMPUTE_VIRIAL=1` and is single-tile only** (P0'.1); the
+  GP/DD paths refuse a barostat (they compute no virial).
+- **DD multi-species energies are approximate** (P0'.2): the traced MoLE mixture uses
+  each rank's local composition; a one-time warning is emitted (R4). DD is deferred.
