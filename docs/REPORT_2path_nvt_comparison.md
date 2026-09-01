@@ -1384,3 +1384,64 @@ proof that the de-dup is behavior-preserving.
 incl. "single CheckpointModuleFn definition"). **No physics change; the duplication
 that caused P0'.3 is removed and guarded.**
 Jobs: rebuild 8793084; tripwire 8793106; full suite 8793107.
+
+### 14.12 Re-audit §E.8 follow-up — compute() decomposition (2026-08-31)
+
+The rev-7 re-audit (§E.8, B+→A−) confirmed all prior fixes and named the sole
+binding constraint on the grade: **§E.8.3 #3 — the `pair_uma.cpp` monolith**
+(`compute()` 225 L, three execution models behind env dispatch, "adding a fourth DD
+path will make it worse"). Decomposed: extracted the single-tile and GP branch
+bodies into `run_compute_single_tile()` / `run_compute_gp()` (mirroring the existing
+`run_compute_dd()`); `compute()` is now a thin shared-staging + 3-way dispatcher —
+**225 → 102 lines**. Pure mechanical (all staging buffers are members), so the fix
+must be — and is — bit-identical across every execution path.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8793201:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 162.9 | 204 | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.9  | 114 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.2  | 64  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.3  | 44  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.4  | 69  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.85 | 41  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 137.9 | 176 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8793200):** N=16 W=1 (single-tile handler) + N=32 W=12 (GP handler)
+PASS, bit-identical — the two extracted methods verified end-to-end.
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.11/…/§13, cos =
+1.0, forces at the FP64 floor. CI green under Tier-0 STRICT (7 HARD guards). **No
+physics change; the monolith is decomposed without touching behavior.**
+Jobs: rebuild 8793182; tripwire 8793200; full suite 8793201.
+
+### 14.13 Re-audit §E.9/§E.10 follow-up — CI-harness hardening (2026-09-01)
+
+Re-audits rev 8 (§E.9) and rev 9 (§E.10) held A−, confirmed all six prior findings
+closed and no silent-physics defects; their new items were all in the CI harness.
+Addressed: **(E.10.2)** Tier-2 fail-open — `tier2_cpu_build.sh --strict` /
+`UMA_CI_REQUIRE_TIER2=1` turns a missing-env SKIP into `exit 2`; **(E.10.3 / E.9.3
+#6)** registered the two orphaned CPU-logic tests `test_m0_device_binding` and
+`test_m3_gather_scatter` as CTests — Tier-2 now runs **3** CTests (was 1), all PASS
+under `--strict` on a login node; **(E.9.1)** added a Tier-0 REPORT guard that the
+`compute()` dispatcher stays ≤130 lines (now 102). No compiled compute code changed.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8793777:**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 163.7 | 203 | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 90.6  | 115 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.0  | 63  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.3  | 44  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.2  | 45  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.81 | 26  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 137.3 | 171 | 1.61e-13 | 1.0000000000 | ✅ PASS |
+
+**Tier-2 CTest (login node, `--strict`):** 3/3 PASS (graph_shard_smoke, test_m0,
+test_m3). **Tripwire (job 8793776):** N=16 W=1 + N=32 W=12 PASS, bit-identical.
+**Regression verdict (G3):** every step-0 PE **bit-identical** to §14.12/…/§13, cos =
+1.0, FP64 floor. **No physics change; the CI harness is now fail-closed and covers
+3× the C++ surface.** The Tier-2 toy-artifact opt-equivalence suite (E.10.3) remains
+a larger scoped follow-on.
+Jobs: rebuild 8793769; tripwire 8793776; full suite 8793777.

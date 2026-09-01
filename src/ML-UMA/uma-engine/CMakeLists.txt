@@ -209,6 +209,13 @@ target_link_libraries(uma_parity_cli PRIVATE uma_engine)
 add_executable(graph_shard_smoke tests/graph_shard_smoke.cpp)
 target_link_libraries(graph_shard_smoke PRIVATE uma_engine)
 
+# E.10.3 (audit rev 9): these two were pre-existing but UNREGISTERED CPU-logic
+# self-tests (device-binding math; gather/scatter tag-ordering) — no engine link,
+# no CUDA/NCCL/XCCL, return 0/1. Register them on every backend so `ctest` actually
+# exercises them (they were "5 test sources, none registered").
+add_executable(test_m0_device_binding tests/test_m0_device_binding.cpp)
+add_executable(test_m3_gather_scatter tests/test_m3_gather_scatter.cpp)
+
 # Multi-node / GP smoke tests + worker are CUDA/NCCL-only (Phase 4 on XPU).
 if(NOT UMA_ENGINE_USE_XPU)
 add_executable(kokkos_peer_smoke tests/kokkos_peer_smoke.cpp)
@@ -234,7 +241,8 @@ if(UMA_ENGINE_HAS_NCCL)
   message(STATUS "uma-engine: worker explicitly linked to NCCL (${NCCL_LIBRARY})")
 endif()
 
-set(UMA_ENGINE_INSTALL_TARGETS uma_engine uma_parity_cli graph_shard_smoke)
+set(UMA_ENGINE_INSTALL_TARGETS uma_engine uma_parity_cli graph_shard_smoke
+    test_m0_device_binding test_m3_gather_scatter)
 if(NOT UMA_ENGINE_USE_XPU)
   list(APPEND UMA_ENGINE_INSTALL_TARGETS kokkos_peer_smoke
        kokkos_peer_device_smoke uma_libtorch_mp_worker)
@@ -252,6 +260,8 @@ install(TARGETS ${UMA_ENGINE_INSTALL_TARGETS}
 # ---------------------------------------------------------------------------
 enable_testing()
 add_test(NAME graph_shard_smoke COMMAND graph_shard_smoke)
+add_test(NAME test_m0_device_binding COMMAND test_m0_device_binding)
+add_test(NAME test_m3_gather_scatter COMMAND test_m3_gather_scatter)
 if(NOT UMA_ENGINE_USE_XPU)
   add_test(NAME kokkos_peer_smoke COMMAND kokkos_peer_smoke)
 endif()
