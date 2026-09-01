@@ -1663,10 +1663,62 @@ FD test green. Update D.0.
 (cos → 1.0) added as the third mandatory-gate row; DD-only tasks (P0′.6, P0′.2,
 P5′.4 DD half, P3.1 DD transports, Part C.4) landed.
 
+## D.10 Standing open-items table (R5 — every ID, one state)  `[2026-09-01]`
+
+Added per audit §F.7.3 / R5 to stop the "closed by omission" failure: the tracker's
+unit was the *sprint*, so partially-delivered items got ☑'d. This table carries
+**every** defect ID from Parts A/B/E/F with exactly one state — `FIXED` (full
+delivery + evidence), `DEFERRED` (recorded reason + what unblocks it), or `OPEN`
+(incl. partially-delivered: delivered part noted, item stays OPEN). **Nothing may be
+closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
+
+### D.10.1 Audit-raised findings (Parts E/F) — all FIXED
+
+| ID | State | Evidence |
+|---|---|---|
+| E1 NPT refusal on multi-node | `FIXED` | `pair_uma.cpp` `comm->nprocs>1`; job 8793037; Tier-0 HARD 3b |
+| E2 per-step I/O ungated | `FIXED` | 4 sites gated; §14.10 |
+| E3 ENV_VARS describes absent code | `FIXED` | doc + Tier-0 HARD 5 env-completeness guard |
+| Rec4 CMake stale object | `FIXED` | `IMPLICIT_DEPENDS` on `xccl_peer.o` |
+| E.7.4 #1 CheckpointModuleFn dup | `FIXED` | shared header; job 8793107; Tier-0 HARD (single def) |
+| E.8.3 #3 monolith | `FIXED` | `compute()` 225→102; job 8793201; REPORT size guard |
+| E.10.2 Tier-2 fail-open | `FIXED` | `--strict`/`UMA_CI_REQUIRE_TIER2` → exit 2 |
+| E.10.3 orphaned CTests | `FIXED` | test_m0/test_m3 registered; 3/3 CTest |
+
+### D.10.2 Completeness-audit findings (§F.7) — G-items
+
+| ID | Maps to | State | Evidence / reason |
+|---|---|---|---|
+| **G1** repo not built from clean clone | F.7.1 | `FIXED` (R1) | commit 5e70aaa; json.hpp + ci/ + docs/ tracked; clean clone builds `metadata.cpp.o` + Tier0/1 green; Tier-0 HARD 6 |
+| **G2** CMake guard-scope (`uma_libtorch_mp_worker`) | P3.3b | `FIXED` (R2) | `if(UMA_ENGINE_HAS_NCCL AND TARGET ...)` |
+| **G4** `export_shards_xpu.py` fail-open on wigner patch | P5′.5 | `FIXED` (R3) | `raise` + `UMA_ALLOW_MISSING_PATCHES`; Tier-1 `test_exporter_fail_loud.py` |
+| **G13** DD MoLE per-step allreduce + no warning | P0′.2(b) | `FIXED` (R4) | one-time `error->warning` + `mole_composition_done_` (collective off hot path). *Note: P0′.2(a) exact-fix stays `DEFERRED` with DD.* |
+| **G12** GP reconstruct never written | P1.4/P5′.3 | `OPEN` | `export_blocks_xpu.py:850-851` forces `do_reconstruct=False` for GP; P1.4 exit code never gates GP artifacts |
+| **G17** `export_format` parsed, never used | P4′.3 | `OPEN` | `metadata.cpp:113` reads it; path selection still by `access()` |
+| **G5** `BlockSubModule`≡`eSCNMD_Block` structural test | P5′.2(c) | `OPEN` | CPU-only drift guard; not written |
+| **G14a** `MPI_COMM_WORLD` hardcoded | §A.4 → **P7.1** | `OPEN` | `xccl_peer.cpp:79,82` |
+| **G14b** `atom->natoms` narrowed to `int` | §A.4 → **P7.2** | `OPEN` | `pair_uma.cpp` GP gather; breaks >2^31 atoms |
+| **G6** exporter package split | P5′.6 | `DEFERRED` | `export_blocks_xpu.py` 1704 L / 692-L `main()`; large refactor, no correctness payoff; after DD |
+| **G7** design-history comment migration | P6.1 | `DEFERRED` | `block_context.h:1-62` narrative; add a pointer when touched |
+| **G8** worker-path hand-rolled JSON | P4′.2 | `DEFERRED` | `graph_parallel.cpp:39,55,66`; Python-worker path, not production XPU |
+| **G9** dead symbols (`pack_shards_cpu`, empty `register_uma_peer_ops`, `PeerGatherSlot`) | P3.1 | `DEFERRED` | cosmetic; remove with DD cleanup |
+| **G10** 2 orphaned Python tests outside `testpaths` | — | `DEFERRED` | add to `pyproject.toml testpaths` when next touched |
+| **G11** 2 residual tolerance copies | P1.5 | `DEFERRED` | migrate to `uma_gates.py` when next touched |
+| **G15** `UMA_HEN_ROOT` never created (6 import sites) | P5′.7 | `DEFERRED` | cross-repo coupling; vendor with DD |
+| **G16** P2.2 chunk-count check | P2.2 | `DEFERRED` | with Tier-2 equivalence suite |
+| **G18** P5′.8 assessed-only | P5′.8 | `DEFERRED` | already checkpoint-derived + safe fallback (§ Sprint 5) |
+| P0′.2(a), P0′.6 DD exact fixes | — | `DEFERRED` | with DD / Phase 3 |
+| Tier-2 opt-equivalence suite | P1.6/C.3.2 | `OPEN` | the sole A−→A item; toy artifact + CPU forward + opt gates |
+
+**Newly promoted P-numbers (R5):** G14a → **P7.1** (`MPI_COMM_WORLD`), G14b →
+**P7.2** (`int` narrowing of `natoms`), so the two §A.4 items that never had IDs are
+now trackable and can be closed or deferred on the record.
+
 ## D.9 Change log
 
 | Date | Sprint/task | Change | Gate jobid |
 |---|---|---|---|
+| 2026-09-01 | **§F.7/rev11 (A−→B+) response** | Completeness audit found the campaign deliverables were **never committed** → HEAD didn't build (missing vendored `nlohmann/json.hpp`) and every guard was unguarded at HEAD. **R1**: committed 144 deliverables (json.hpp, `ci/`, `docs/`, `scripts/`, env pins) — commit 5e70aaa; clean clone now builds `metadata.cpp.o` + Tier0/1 green; Tier-0 **HARD 6** tracked-files guard added. **R2** (G2): CMake `if(UMA_ENGINE_HAS_NCCL AND TARGET uma_libtorch_mp_worker)`. **R3** (G4): `export_shards_xpu.py` fail-loud on wigner/xpu patch (Tier-1 `test_exporter_fail_loud.py`). **R4** (G13/P0′.2(b)): one-time DD MoLE warning + allreduce off per-step path. **R5**: standing open-items table D.10 (every ID one state; G14a/b→P7.1/P7.2). Rebuild + revalidate pending. | pending |
 | 2026-08-29 | — | PART D sprint tracker created from Part A/B/C verdict rev 4; Sprint 6 marked required (non-deferrable). | n/a |
 | 2026-08-29 | — | Multi-node / DD (Phase 3) deferred: P0′.6, P0′.2(b), P5′.4 (DD half), P3.1 DD transports marked ⏸; collective cluster P0.2–P0.4 kept (hardens in-scope GP path). | n/a |
 | 2026-08-29 | — | Added goals G1–G5 (local CI, silent-physics, parity-never-regressed, per-sprint full N=16/N=32 energy+force+AG+FD record, strict serialization) + D.0.1 sprint-close checklist. | n/a |

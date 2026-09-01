@@ -230,7 +230,11 @@ endif()
 # Header-only NCCL paths live in shared_peer.h (included by the worker TU).
 # Explicitly attach defs + libnccl so the worker is not relying solely on
 # transitive propagation from the static uma_engine archive.
-if(UMA_ENGINE_HAS_NCCL)
+# G2 FIX (audit rev 11 / R2): the worker target is only created inside the
+# `if(NOT UMA_ENGINE_USE_XPU)` block above, so this NCCL block must guard on the
+# TARGET existing — otherwise configuring with UMA_ENGINE_USE_XPU=ON *and* NCCL
+# found is a hard CMake error ("... target not built by this project").
+if(UMA_ENGINE_HAS_NCCL AND TARGET uma_libtorch_mp_worker)
   target_compile_definitions(uma_libtorch_mp_worker PRIVATE UMA_ENGINE_USE_NCCL UMA_ENGINE_USE_CUDA)
   target_include_directories(uma_libtorch_mp_worker PRIVATE ${NCCL_INCLUDE_DIR})
   target_link_libraries(uma_libtorch_mp_worker PRIVATE ${NCCL_LIBRARY})

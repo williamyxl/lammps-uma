@@ -76,6 +76,7 @@ class PairUMA : public Pair {
   void run_compute_dd(int eflag, int vflag);
   int64_t build_dd_graph(int nall);        // edges among owned+ghost within cutoff
   void mole_composition_allreduce();        // owned-only per-Z counts, cross-rank
+  bool mole_composition_done_ = false;      // R4: run the (discarded) diagnostic + warn ONCE, not per DD step
   void install_halo_callbacks();            // bind HaloContext to LAMMPS comm
   bool dd_active_;                           // UMA_DD=1
   int64_t dd_edge_count_;

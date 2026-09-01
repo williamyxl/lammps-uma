@@ -71,12 +71,25 @@ def main() -> int:
     # Wigner-chunk fix (correct FP64 backward at large edge counts).
     os.environ.setdefault("FXPU_WIGNER_PREP_CHUNK", "65536")
     os.environ.setdefault("FXPU_WIGNER_PREP_CHUNK_MODE", "both")
+    # G4 FIX (audit rev 11 / R3): mirror export_blocks_xpu.py's P5'.5 — the
+    # wigner-chunk fix is CORRECTNESS-CRITICAL (the N>=10 FP64 cliff); a silently
+    # skipped patch yields an artifact with WRONG forces at N>=10. Fail loudly
+    # unless explicitly overridden (UMA_ALLOW_MISSING_PATCHES=1, logged).
+    _allow_missing = os.environ.get("UMA_ALLOW_MISSING_PATCHES", "0") == "1"
     try:
         from xpu_prepare_wigner import apply_xpu_prepare_wigner_chunking
         note = apply_xpu_prepare_wigner_chunking()
         print(f"wigner-chunk fix applied: {note}", flush=True)
     except Exception as exc:  # noqa: BLE001
-        print(f"WARN wigner-chunk not applied: {exc}", flush=True)
+        if _allow_missing:
+            print(f"WARN wigner-chunk not applied (UMA_ALLOW_MISSING_PATCHES=1): "
+                  f"{exc}", flush=True)
+        else:
+            raise RuntimeError(
+                f"wigner-chunk fix (N>=10 FP64 correctness patch) could not be "
+                f"applied: {exc}. Set UMA_ALLOW_MISSING_PATCHES=1 to export anyway "
+                f"(NOT recommended — the shard artifact may be numerically wrong)."
+            ) from exc
 
     from common import atoms_to_atomic_data, inference_settings_with_dtype
     from export_wrapper import make_traced_export_wrapper
@@ -99,6 +112,13 @@ def main() -> int:
         from fairchem_xpu_parallel import patch_fairchem_xpu_device
         patch_fairchem_xpu_device()
     except Exception as exc:  # noqa: BLE001
+        # R3: required to place fairchem tensors on the XPU during tracing on the
+        # XPU device path; fail loudly there (override UMA_ALLOW_MISSING_PATCHES=1).
+        if trace_dev == "xpu" and not _allow_missing:
+            raise RuntimeError(
+                f"patch_fairchem_xpu_device (required for TRACE_DEV=xpu shard "
+                f"export) failed: {exc}. Set UMA_ALLOW_MISSING_PATCHES=1 to override."
+            ) from exc
         print(f"WARN patch_fairchem_xpu_device: {exc}", flush=True)
 
     # (h) internal activation checkpointing: enable escn's edge-chunk AC so the

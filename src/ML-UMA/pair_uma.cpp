@@ -716,6 +716,7 @@ void PairUMA::init_style()
 {
   if (force->newton_pair) error->all(FLERR, "Pair style uma requires newton pair off");
   if (atom->tag_enable == 0) error->all(FLERR, "Pair style uma requires atom IDs");
+  mole_composition_done_ = false;  // R4: re-emit the one-time DD MoLE warning per setup
 
   // P4.1: echo the resolved runtime config once, so a run's log records exactly
   // which UMA_* flags were active (no more silent config). Full catalog: docs/ENV_VARS.md.
@@ -1188,9 +1189,17 @@ int64_t PairUMA::build_dd_graph(int nall)
 ------------------------------------------------------------------------- */
 void PairUMA::mole_composition_allreduce()
 {
+  // R4 / P0'.2(b) (audit rev 11 / G13): this diagnostic's result is DISCARDED
+  // (feeding the global composition into the traced MoLE mean is a deferred Phase-B
+  // exact fix; Phase A uses the homogeneous-composition approximation). It was
+  // running a 119-element MPI_Allreduce EVERY DD step and throwing the result away.
+  // Do it ONCE (first DD step) and (i) emit a one-time warning that the DD MoLE
+  // composition is approximate, (ii) keep the per-step hot path free of the
+  // collective. mole_composition_done_ is reset in init_style so a re-setup re-warns.
+  if (mole_composition_done_) return;
+
   const int nlocal = atom->nlocal;
   int *type = atom->type;
-  // Per-Z owned counts on this rank.
   const int maxz = 118;
   std::vector<long> local_counts(maxz + 1, 0);
   for (int i = 0; i < nlocal; i++) {
@@ -1200,17 +1209,26 @@ void PairUMA::mole_composition_allreduce()
   std::vector<long> global_counts(maxz + 1, 0);
   MPI_Allreduce(local_counts.data(), global_counts.data(), maxz + 1,
                 MPI_LONG, MPI_SUM, world);
-  // Diagnostic: report the global composition. The exact-fix hook (feeding this into
-  // the traced MoLE mean) is a Phase-B TODO; Phase A relies on the
-  // homogeneous-composition approximation (see run_compute_dd note).
-  // E2 (audit 2026-08-31): this is on the per-step DD path, so gate the print behind
-  // UMA_DD_DEBUG (read once) instead of printing every step.
+
+  // (i) One-time approximation warning (P0'.2(b)): DD evaluates the traced MoLE
+  // expert mixture on each rank's LOCAL owned+ghost composition, not the exact
+  // global composition, so multi-species DD energies carry a small approximation.
+  int nspecies = 0;
+  for (long c : global_counts) if (c > 0) nspecies++;
+  if (nspecies > 1)
+    error->warning(FLERR,
+                   "Pair style uma (DD): MoLE expert mixture uses the per-rank "
+                   "composition (homogeneous approximation); multi-species DD "
+                   "energies are approximate. Single-tile/GP are exact.");
+
   static const bool dd_debug = (std::getenv("UMA_DD_DEBUG") != nullptr);
   if (dd_debug && screen && comm->me == 0) {
     long total = 0;
     for (long c : global_counts) total += c;
-    fprintf(screen, "uma DD: global composition total atoms = %ld\n", total);
+    fprintf(screen, "uma DD: global composition total atoms = %ld (%d species)\n",
+            total, nspecies);
   }
+  mole_composition_done_ = true;
 }
 
 /* ----------------------------------------------------------------------

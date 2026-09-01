@@ -115,6 +115,28 @@ else
   say "  FAIL: docs/ENV_VARS.md missing"; hard_fail=$((hard_fail+1))
 fi
 
+# ---- HARD 6: vendored headers + CI harness are git-tracked [F.7.1/R1] --------
+# The whole point of Sprint 3-6 (guards, vendored nlohmann/json, env pins) is only
+# durable if it is in the repository. A clean clone must build and must carry the
+# harness. This guard fails if any build-critical or harness file is untracked
+# (the exact defect that took the grade A- -> B+ in rev 11).
+hdr "HARD: vendored headers + CI harness are git-tracked [F.7.1/R1]"
+untracked=0
+for f in src/ML-UMA/uma-engine/third_party/nlohmann/json.hpp \
+         ci/ci_local.sh ci/tier0_guards.sh ci/tier2_cpu_build.sh \
+         pyproject.toml requirements.txt docs/ENV_VARS.md docs/TESTING.md \
+         scripts/uma_gates.py scripts/_pbs_common.sh; do
+  git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { say "  UNTRACKED: $f"; untracked=$((untracked+1)); }
+done
+# Also: every vendored header actually #included by compiled library source.
+for hdr_inc in $(grep -rhoE '#include <nlohmann/[a-z_]+\.hpp>' \
+                   src/ML-UMA/uma-engine/src 2>/dev/null | grep -oE 'nlohmann/[a-z_]+\.hpp' | sort -u); do
+  git ls-files --error-unmatch "src/ML-UMA/uma-engine/third_party/${hdr_inc}" >/dev/null 2>&1 \
+    || { say "  UNTRACKED vendored header: ${hdr_inc}"; untracked=$((untracked+1)); }
+done
+if [ "$untracked" -eq 0 ]; then say "  OK: build-critical + harness files tracked"
+else hard_fail=$((hard_fail+untracked)); fi
+
 # ---- REPORT 1: foreign paths in examples/slurm/docs (historical, Delta era) -
 # Excludes build trees (compiled .o/.a bake the build-time path; they are gitignored
 # and regenerated) and the attic/ (retired Delta-era files kept for reference).
