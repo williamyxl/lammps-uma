@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#PBS -N p1_fixes
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-1 with BOTH fixes:
+#   Blocker A: shape-generic trace (symbolic-dim quaternion Wigner)
+#   Blocker B: activation checkpointing (fit large-N force graph on 1 tile)
+# Decisive test: eager XPU FP64 AG=FD at NaCl N=10 (256k edges, past the cliff)
+# with chunk fix ON, plus traced shape-generality self-check (N=trace_n+1).
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+ENG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/src/ML-UMA/uma-engine
+OUTDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/phase1_agfd
+mkdir -p "${OUTDIR}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export N_MIN=10
+export N_MAX=10
+export FD_EPS=1e-4
+export AG_FD_TOL=1e-5
+export FD_SAMPLE_ATOMS=100
+export TRACE_N=2
+export SHAPE_GENERIC=1
+export ACT_CKPT=1
+export FXPU_WIGNER_PREP_CHUNK=65536
+export FXPU_WIGNER_PREP_CHUNK_MODE=both
+export KEEP_TRACE_DIR="${OUTDIR}/traced_shapegeneric_xpu"
+export OUT="${OUTDIR}/spike_n10_fixes.json"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+python -c "import torch;print('torch',torch.__version__,'ndev',torch.xpu.device_count())"
+
+echo "=== N=10 chunk ON + AC + shape-generic ==="
+python -u "${ENG}/python/spike_xpu_force_agfd.py" || echo "exit=$?"
+echo "DONE"

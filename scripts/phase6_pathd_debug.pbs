@@ -1,0 +1,32 @@
+#!/bin/bash -l
+#PBS -N p6d_dbg
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+
+# Path (d) debug: CPU-trace ONE rank (W=12 r=4 N=18), full traceback captured
+# to locate the "index -1 size 3888" CPU op.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUT=${LU}/scripts/out/phase6_shards/uma-s-1p2-omat-f64-gp
+DBG=${LU}/scripts/out/phase6_pathd_debug; mkdir -p "${DBG}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export OUT N_LIST=18 W_LIST=12 EXPORT_ONLY_RANK=4 SKIP_EXISTING=0
+export TRACE_DEV=cpu MOVE_TRACED_TO_XPU=0
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+export OMP_NUM_THREADS=64
+echo "=== CPU-trace W=12 r=4 N=18 (full traceback) ==="
+python -u "${ENG}/python/export_shards_xpu.py" 2>&1 | tee "${DBG}/full.log" | grep -iE "File \"|line |index -1|Error|escn|mole|wigner|edge|scatter|index_|gather|Traceback" | tail -40
+echo "DONE"

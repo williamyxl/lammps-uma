@@ -1,0 +1,37 @@
+#!/bin/bash -l
+#PBS -N o5_exp
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# opt5 tile sweep EXPORT: N=32 opt2 artifacts for W in {4,6,8} (EDGE_AC_CHUNK=65536,
+# freeze ON). Each W gets its own dir scripts/out/opt2/n32_w${W}. W=12 already
+# exists (scripts/out/opt2/n32_chunk65536). Exports run sequentially per rank.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=65536
+for W in ${WLIST:-4 6 8}; do
+  ART=${LU}/scripts/out/opt2/n32_w${W}; mkdir -p "${ART}"
+  echo "=== export N=32 W=${W} ==="
+  for R in $(seq 0 $((W-1))); do
+    [ -f "${ART}/w${W}/r${R}/model_traced.pt" ] && continue
+    OUT="${ART}" N_LIST=32 EXPORT_WORLD=${W} EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+      python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_r${R}.log" 2>&1
+    echo "  W=${W} r${R}: $([ -f ${ART}/w${W}/r${R}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'opt2:|GRAPH-STRUCTURE|Error:' ${ART}/exp_r${R}.log | tail -1)"
+  done
+  [ -f "${ART}/w${W}/r0/metadata.json" ] && cp "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+  echo "  W=${W} ranks: $(ls -d ${ART}/w${W}/r*/model_traced.pt 2>/dev/null|wc -l)/${W}"
+done
+echo "DONE"

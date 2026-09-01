@@ -1,0 +1,92 @@
+#!/bin/bash -l
+#PBS -N p6b_gate1
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-6 Gate 1: 4x4x4 perturbed NaCl (512 atoms). Build LAMMPS+XCCL, run
+# pair_style uma on 1 tile (devices 1) and 2 tiles (devices 2, XCCL GP), verify
+# energy + per-atom force + AG=FD parity of 2-tile vs 1-tile (and 1-tile vs ASE).
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+ART=${LU}/scripts/out/phase6_shards_generic/uma-s-1p2-omat-f64-gp  # (b) shape-generic GP shards (N=2 trace)
+ART1=${LU}/scripts/out/phase3b/traced_mergemole_xpu               # single-tile (devices 1)
+OUTDIR=${LU}/scripts/out/phase6_pathb_gate1
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+
+echo "=== 1) build LAMMPS + XCCL ==="
+if [ -x "${LMP}" ] && [ "${FORCE_REBUILD:-0}" != "1" ]; then
+  echo "reusing existing ${LMP}"
+else
+  bash "${LU}/scripts/phase6_build_lammps_xccl.sh" 2>&1 | tee "${OUTDIR}/build.log" | tail -12
+fi
+[ -x "${LMP}" ] || { echo "BUILD FAILED"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+# oneCCL single-node knobs (hen recipe)
+export CCL_PROCESS_LAUNCHER=pmix
+export CCL_ATL_TRANSPORT=mpi
+export CCL_ZE_IPC_EXCHANGE=sockets
+export FI_PROVIDER=cxi
+
+# --- W=1 (single tile, devices 1) uses the single-tile traced artifact ---
+echo "=== 2) run W=1 (devices 1, single-tile artifact) ==="
+OUTDIR="${OUTDIR}" ART="${ART1}" N=4 W=1 python -u "${LU}/scripts/phase6_make_gp_inputs.py"
+R1="${OUTDIR}/nacl_n4_w1"
+( cd "${R1}" && mpiexec -n 1 --ppn 1 \
+    env ZE_AFFINITY_MASK=0 UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+    "${LMP}" -in in.sp > lmp.log 2>&1 )
+echo "  W=1 exit=$? :: $(grep -E '^\s*0\s' "${R1}/log.lammps" 2>/dev/null | head -1)"
+grep -iE "error|OUT_OF|Segmentation|xccl|abort" "${R1}/lmp.log" | head -3
+
+# --- W=2 (two tiles, devices 2, XCCL GP) ---
+echo "=== 3) run W=2 (devices 2, XCCL) ==="
+OUTDIR="${OUTDIR}" ART="${ART}" N=4 W=2 python -u "${LU}/scripts/phase6_make_gp_inputs.py"
+R2="${OUTDIR}/nacl_n4_w2"
+# (b) shape-generic shards use the N-agnostic fallback name -> do NOT set
+# UMA_MP_NATOMS. Traced at N=2, running here at N=4 (512 atoms) = the shape-
+# generality proof.
+( cd "${R2}" && mpiexec -n 2 --ppn 2 \
+    env UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+    gpu_tile_compact.sh \
+    "${LMP}" -in in.sp > lmp.log 2>&1 )
+echo "  W=2 exit=$? :: $(grep -E '^\s*0\s' "${R2}/log.lammps" 2>/dev/null | head -1)"
+grep -iE "error|OUT_OF|Segmentation|xccl ready|abort|traceback" "${R2}/lmp.log" | head -5
+
+echo "=== 4) Gate 1 parity (energy + per-atom force, >=100 atoms) ==="
+DIR1="${R1}" DIR2="${R2}" UMA_CKPT_FILE="${UMA_CHECKPOINT}" \
+  E_TOL=1e-6 F_TOL=1e-5 MIN_SAMPLE=100 \
+  python -u "${LU}/scripts/phase6_gate1_compare.py" 2>&1 | tail -12
+
+echo "=== 5) Gate 1 AG=FD on the 2-tile XCCL GP run ==="
+# central-difference of 2-tile GP energy vs autograd force. Runs are ~5s each;
+# 10 atoms x 3 comps x 2 = 60 GP runs. Launch template mirrors the W=2 run.
+export LMP_LAUNCH="mpiexec -n 2 --ppn 2 env UMA_CHECKPOINT=${UMA_CHECKPOINT} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} gpu_tile_compact.sh ${LMP} -in \$INFILE > \$LOGFILE 2>&1"
+DIR="${R2}" W=2 FD_EPS=1e-4 AG_FD_TOL=1e-5 FD_SAMPLE=10 \
+  python -u "${LU}/scripts/phase6_agfd.py" 2>&1 | tail -6
+
+echo "DONE phase6_gate1"

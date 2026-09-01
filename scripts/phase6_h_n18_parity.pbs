@@ -1,0 +1,32 @@
+#!/bin/bash -l
+#PBS -N p6h_n18par
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+# Rigorous N=18 parity: LAMMPS pair_style uma (already run) vs FRESH ASE FairChem
+# oracle on identical coords. Energy + per-atom force (>=100 atoms) + AG=FD.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+RD=${LU}/scripts/out/phase6_h_lmp18/nacl_n18_w1/nacl_n18_w1
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${LU}/scripts/out/phase6_h_lmp18/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+echo "=== N=18 LAMMPS pair_style uma  vs  ASE FairChem oracle ==="
+DIR="${RD}" UMA_CKPT_FILE="${UMA_CHECKPOINT}" MIN_SAMPLE=100 E_TOL=1e-6 F_TOL=1e-5 \
+  python -u "${LU}/scripts/phase5_parity.py" 2>&1 | grep -vi index_reduce | tail -10
+echo "DONE"

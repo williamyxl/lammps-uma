@@ -1,0 +1,67 @@
+#!/bin/bash -l
+#PBS -N p6h_m1rr
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu-gp
+CLI=${BUILD}/uma_parity_cli
+ART=${LU}/scripts/out/phase6_blocks/uma-s-1p2-omat-f64-blocks
+OUTDIR=${LU}/scripts/out/phase6_h_m1_run; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+
+echo "=== re-export per-block artifact (shape-generic balance fix) ==="
+rm -f "${ART}"/model_block_*.pt "${ART}"/model_traced.pt
+OUT="${ART}" N_LIST=2 TRACE_DEV=xpu RECONSTRUCT=1 \
+  python -u "${ENG}/python/export_blocks_xpu.py" 2>&1 | grep -E "RECONSTRUCT|dE=|max.dF|DONE|error|Error" | tail -4
+
+gen(){ python - "$1" "$2" <<'PY'
+import sys,numpy as np
+n=int(sys.argv[1]); out=sys.argv[2]; a=5.64
+na=np.array([[0,0,0],[0,.5,.5],[.5,0,.5],[.5,.5,0]],float); cl=na+0.5
+Z={'Na':11,'Cl':17}; sy=[]; sc=[]
+for ix in range(n):
+ for iy in range(n):
+  for iz in range(n):
+   o=np.array([ix,iy,iz],float)
+   for f in na: sy.append('Na'); sc.append((f+o)/n)
+   for f in cl: sy.append('Cl'); sc.append((f+o)/n)
+cell=np.eye(3)*(a*n); pos=np.array(sc)@cell
+pos=pos+np.random.default_rng(0).normal(0,0.05,pos.shape)
+open(out,'w').write(f"{len(sy)}\n"+"".join(f"{Z[s]} {pos[i,0]:.16e} {pos[i,1]:.16e} {pos[i,2]:.16e}\n" for i,s in enumerate(sy))+" ".join(f"{cell[r,c]:.16e}" for r in range(3) for c in range(3))+"\n")
+print(len(sy))
+PY
+}
+echo "=== single-tile per-block-AC sweep ==="
+BEST=0
+for N in 8 12 16 18 20; do
+  st="${OUTDIR}/nacl_n${N}.txt"; nat=$(gen ${N} "${st}")
+  t0=$SECONDS
+  "${CLI}" "${ART}" "${st}" --devices 1 > "${OUTDIR}/n${N}.log" 2>&1
+  rc=$?; dt=$((SECONDS-t0))
+  e=$(grep -oE 'energy=[-0-9.]+' "${OUTDIR}/n${N}.log" | head -1)
+  oom=$(grep -c "out of memory\|OUT_OF_RESOURCES" "${OUTDIR}/n${N}.log")
+  echo "N=${N} (${nat}) exit=${rc} wall=${dt}s ${e:-none} oom=${oom}"
+  [ ${rc} -eq 0 ] && [ -n "${e}" ] && BEST=${N} || { echo "  stop"; break; }
+done
+echo "SINGLE_TILE_PERBLOCK_MAX_N=${BEST} atoms=$((8*BEST*BEST*BEST))"
+echo "DONE"

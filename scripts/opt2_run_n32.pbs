@@ -1,0 +1,66 @@
+#!/bin/bash -l
+#PBS -N opt2_r32
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# opt2 12-tile benchmark: pair_style uma NVT 300K 10 steps, N=32 (262144 atoms).
+# Uses the opt2 (frozen top module) artifacts + opt3 CCL env + opt1 chunk65536.
+# Reports model load/setup time, LAMMPS Loop time, whole wall, energy/Fmax and
+# compares to the validated opt1+opt3 235 s / step-10 PE = -879646.224481715 eV.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=${N:-32}; NAT=$((8*N*N*N))
+ART=${ART:-${LU}/scripts/out/opt2/n32_chunk65536}
+OUTDIR=${LU}/scripts/out/opt2run/n${N}; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+# opt3 CCL env (validated: 450 -> 276 s, bit-identical)
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+echo "ART=${ART}  ranks: $(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null|wc -l)/12"
+RB=${OUTDIR}/run; mkdir -p "${RB}"
+OUTDIR="${RB}" ART="${ART}" N=${N} W=1 NVT_STEPS=10 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+echo "=== opt2 run pair_style uma NVT N=${N} (12 tiles) ==="
+t0=$SECONDS
+( cd "${RD}" && mpiexec -n 12 --ppn 12 env UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+rc=$?; WALL=$((SECONDS-t0))
+echo "N=${N} 12-tile exit=${rc} wall=${WALL}s :: step0 $(grep -E '^\s*0\s' ${RD}/log.lammps 2>/dev/null|head -1)"
+grep -iE "out of memory|OUT_OF|abort" ${RD}/lmp.log | grep -vi index_reduce | head -2
+echo "NVT last step: $(grep -E '^\s*10\s' ${RD}/log.lammps 2>/dev/null|tail -1)"
+echo "=== timing breakdown ==="
+grep -iE "model.*load|setup.*time|load.*setup|Loop time" ${RD}/lmp.log ${RD}/log.lammps 2>/dev/null | grep -vi index_reduce | head -8
+echo "=== step-10 PE (opt1+opt3 ref = -879646.224481715 eV, wall 235 s) ==="
+python3 - "${RD}/log.lammps" <<'PYEOF'
+import re,sys
+try: txt=open(sys.argv[1]).read()
+except OSError: sys.exit()
+m=re.search(r"^\s*Step\b.*PotEng.*$",txt,re.M)
+if not m: sys.exit()
+hdr=m.group(0).split(); pe=hdr.index("PotEng")
+last=None
+for ln in txt[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(hdr) and s and s[0].isdigit(): last=s
+if last:
+    e=float(last[pe]); ref=-879646.224481715
+    print(f"  step={last[0]}  PE={e:.9f} eV  ref={ref:.9f}  dE={abs(e-ref):.3e} eV")
+PYEOF
+echo "OPT2_RESULT N=${N} atoms=${NAT} exit=${rc} wall=${WALL}s"
+echo "DONE"

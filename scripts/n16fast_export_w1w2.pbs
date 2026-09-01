@@ -1,0 +1,41 @@
+#!/bin/bash -l
+#PBS -N n16f_e12
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+# Export N=16 W=1 and W=2 at EDGE_AC_CHUNK=32768 into scripts/out/n16_fast.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+ART=${LU}/scripts/out/n16_fast
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=32768 UMA_EDGE_PAD=1
+# W=1 (single-tile, RECONSTRUCT=1 -> writes to ART root; keep separate 1tile dir)
+ART1=${LU}/scripts/out/n16_fast_1tile; mkdir -p "${ART1}"
+if [ ! -f "${ART1}/model_traced.pt" ]; then
+  echo "=== export N=16 W=1 chunk=32768 ==="
+  OUT="${ART1}" N_LIST=16 EXPORT_WORLD=1 EXPORT_RANK=0 TRACE_DEV=xpu RECONSTRUCT=1 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${ART1}/exp.log" 2>&1
+  echo "  W=1: $([ -f ${ART1}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'P2.1 edge-cap|RECONSTRUCT' ${ART1}/exp.log|tail -2|tr '\n' ' ')"
+fi
+# W=2
+echo "=== export N=16 W=2 chunk=32768 ==="
+for R in 0 1; do
+  [ -f "${ART}/w2/r${R}/model_traced.pt" ] && continue
+  OUT="${ART}" N_LIST=16 EXPORT_WORLD=2 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_w2_r${R}.log" 2>&1
+done
+[ -f "${ART}/w2/r0/metadata.json" ] && echo "  W=2: $(ls -d ${ART}/w2/r*/model_traced.pt 2>/dev/null|wc -l)/2 $(grep -h 'P2.1 edge-cap' ${ART}/exp_w2_r0.log|tail -1)"
+echo DONE

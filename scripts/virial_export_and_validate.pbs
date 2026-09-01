@@ -1,0 +1,60 @@
+#!/bin/bash -l
+#PBS -N virial_ev
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# P0'.1 step 2 validation, end-to-end:
+#   (1) export a PLAIN (non-AC) traced artifact via w15_export_traced_fast on a small
+#       N=2 (64-atom) NaCl geometry;
+#   (2) run virial_fd_check against it with UMA_COMPUTE_VIRIAL=1 and
+#       UMA_ENGINE_BUILD_GRAPH=1 (engine builds its own shape-flexible graph so the
+#       strained deformed geometries work on the plain module).
+# PASS if analytic virial (pxx/pyy/pzz) matches the box-strain finite difference.
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+CKPT=${HEN}/uma-cache/uma-s-1p2.pt
+ART=${LU}/scripts/out/virial_plain_art
+BASE_META=${LU}/scripts/out/opt2/n16_chunk65536_1tile/metadata.json
+OUT=${LU}/scripts/out/virial_ev; mkdir -p "${OUT}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+set -uo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${CKPT}" UMA_ALLOW_LEGACY_METADATA=1 UMA_ALLOW_FAIRCHEM_MISMATCH=1
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUT}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+
+echo "### (1) build atoms + seed metadata ###"
+mkdir -p "${ART}"
+OUT="${ART}" BASE_META="${BASE_META}" N=2 python -u "${LU}/scripts/virial_make_atoms.py"
+
+echo "### (2) export PLAIN traced artifact (non-AC) ###"
+if [ -f "${ART}/model_traced.pt" ] && [ "${FORCE_EXPORT:-0}" != "1" ]; then
+  echo "reusing existing ${ART}/model_traced.pt (set FORCE_EXPORT=1 to re-export)"
+else
+  python -u "${ENG}/python/w15_export_traced_fast.py" \
+      --checkpoint "${CKPT}" --output "${ART}" --atoms "${ART}/nacl.extxyz" \
+      --dtype float64 --device xpu --out-name model_traced.pt
+fi
+[ -f "${ART}/model_traced.pt" ] || { echo "EXPORT FAILED"; exit 1; }
+[ -f "${ART}/model_block_0.pt" ] && { echo "UNEXPECTED: AC block module present"; exit 1; }
+echo "plain artifact ok (no model_block_*.pt)"
+
+echo "### (3) virial FD validation (engine graph, virial on) ###"
+export ART OUT
+export LMP
+export UMA_ENGINE_BUILD_GRAPH=1
+python -u "${LU}/scripts/virial_fd_check.py"
+RC=$?
+echo "virial_export_and_validate exit=${RC}"
+exit ${RC}

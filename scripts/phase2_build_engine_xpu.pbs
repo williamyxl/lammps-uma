@@ -1,0 +1,98 @@
+#!/bin/bash -l
+#PBS -N p2_engxpu
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-2: build the standalone uma-engine + uma_parity_cli for Intel XPU
+# (single tile), then smoke-test C++ torch::jit::load + XPU forward + autograd
+# forces + a C++ AG=FD check on the shape-generic FP64 traced artifact.
+#
+# Toolchain follows the proven MACE-on-Aurora recipe (GCC 13.4 + Cray MPICH not
+# needed for the standalone engine; torch cmake from the conda env; force conda
+# libsycl.so.9 over system libsycl.8).
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+ENG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu
+ART=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/phase1_agfd/traced_shapegeneric_xpu
+OUTDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/phase2
+mkdir -p "${OUTDIR}"
+
+# Activate torch+xpu conda env (torch 2.13.0+xpu, oneAPI 2026 runtime).
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+export CC=$GCC/bin/gcc
+export CXX=$GCC/bin/g++
+
+TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+# Force torch-bundled (conda) libsycl.so.9 over system oneAPI libsycl.so.8.
+SYCL_LIB_DIR=$CONDA_PREFIX/lib
+SYCL_INC_DIR=$CONDA_PREFIX/include
+echo "TORCH_CMAKE=$TORCH_CMAKE"
+echo "TORCH_LIB=$TORCH_LIB"
+echo "SYCL_LIB_DIR=$SYCL_LIB_DIR"
+ls -la $SYCL_LIB_DIR/libsycl.so* 2>/dev/null
+
+# compat symlink: any residual libsycl.so.8 NEEDED resolves to conda's .9
+COMPAT=${OUTDIR}/compat_libs
+mkdir -p "${COMPAT}"
+ln -sf "${SYCL_LIB_DIR}/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+
+echo "=== configure ==="
+rm -rf "${BUILD}" && mkdir -p "${BUILD}"
+cmake -S "${ENG}" -B "${BUILD}" \
+  -D CMAKE_BUILD_TYPE=Release \
+  -D CMAKE_C_COMPILER=$GCC/bin/gcc \
+  -D CMAKE_CXX_COMPILER=$GCC/bin/g++ \
+  -D CMAKE_CXX_STANDARD=17 \
+  -D CMAKE_PREFIX_PATH="$TORCH_CMAKE" \
+  -D UMA_ENGINE_USE_XPU=ON \
+  -D UMA_ENGINE_USE_CUDA=OFF \
+  -D SYCL_LIBRARY=$SYCL_LIB_DIR/libsycl.so \
+  -D SYCL_LIBRARY_DIR=$SYCL_LIB_DIR \
+  -D SYCL_INCLUDE_DIR=$SYCL_INC_DIR \
+  -D SYCL_INCLUDE_SYCL_DIR=$SYCL_INC_DIR/sycl \
+  -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" \
+  -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,$SYCL_LIB_DIR -Wl,-rpath,$TORCH_LIB" \
+  2>&1 | tee "${OUTDIR}/cmake_configure.log" | tail -20
+
+echo "=== build ==="
+cmake --build "${BUILD}" -j 32 2>&1 | tee "${OUTDIR}/make_build.log" | tail -25
+if [ ! -x "${BUILD}/uma_parity_cli" ]; then
+  echo "BUILD FAILED (no uma_parity_cli)"; exit 1
+fi
+echo "BUILD OK"
+echo "=== ldd (want libtorch_xpu, libsycl.so.9, NO libsycl.so.8) ==="
+ldd "${BUILD}/uma_parity_cli" 2>/dev/null | grep -iE "torch|sycl|c10" | tee "${OUTDIR}/ldd.log"
+
+# ---- Smoke test on one XPU tile ----
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+# conda lib (libsycl.9) + compat (.8->.9) FIRST so system libsycl.8 never loads.
+export LD_LIBRARY_PATH="${COMPAT}:${SYCL_LIB_DIR}:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+
+echo "=== runtime ldd (want NO system libsycl.so.8) ==="
+ldd "${BUILD}/uma_parity_cli" 2>/dev/null | grep -iE "sycl" | tee "${OUTDIR}/ldd_runtime.log"
+
+echo "=== smoke: default NaCl 2x2x2, energy+forces+AG=FD (100 atoms) ==="
+"${BUILD}/uma_parity_cli" "${ART}" --devices 1 --fd --fd-sample 100 > "${OUTDIR}/smoke_nacl2.log" 2>&1
+rc=$?
+echo "smoke exit=${rc}"
+cat "${OUTDIR}/smoke_nacl2.log"
+
+echo "DONE phase2"

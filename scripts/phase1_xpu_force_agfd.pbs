@@ -1,0 +1,71 @@
+#!/bin/bash -l
+#PBS -N p1_agfd
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-1 force spike: UMA FP64 autograd-vs-FD on ONE Intel XPU tile.
+# Answers: does backward through the traced UMA energy module give correct
+# forces on XPU at NaCl N>=10 with the hen wigner-prep chunk fix?
+
+module reset 2>/dev/null || true
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+ENG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/src/ML-UMA/uma-engine
+OUTDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/phase1_agfd
+mkdir -p "${OUTDIR}"
+
+# One visible XPU tile (flat hierarchy -> 12 tiles; pin tile 0).
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+
+# Offline model/hub
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+
+# UMA + wigner chunk knobs
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export N_MIN=1
+export N_MAX=12
+export FD_EPS=1e-4
+export AG_FD_TOL=1e-5
+export FD_SAMPLE_ATOMS=100
+export FXPU_WIGNER_PREP_CHUNK=65536
+export FXPU_WIGNER_PREP_CHUNK_MODE=both
+export OUT="${OUTDIR}/spike_wigner_on.json"
+export KEEP_TRACE_DIR="${OUTDIR}/traced_n12_xpu"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+
+echo "=== env ==="
+python -c "import torch;print('torch',torch.__version__,'xpu',torch.xpu.is_available(),'ndev',torch.xpu.device_count())"
+echo "ZE_AFFINITY_MASK=${ZE_AFFINITY_MASK}"
+
+echo "=== RUN 1: wigner chunk ON (the fix) ==="
+# P1.3: RUN 1 is the real AG=FD gate — capture its exit code (do NOT swallow it
+# with `|| echo`, which always succeeded and made the job fail-open).
+python -u "${ENG}/python/spike_xpu_force_agfd.py"; RUN1_RC=$?
+echo "RUN1 exit=${RUN1_RC}"
+
+echo "=== RUN 2: wigner chunk OFF (reproduce N>=10 cliff, expect fail) ==="
+# RUN 2 is a NEGATIVE control (expected to fail at N>=10); it is informational and
+# must NOT gate the job.
+export WIGNER_CHUNK_OFF=1
+export OUT="${OUTDIR}/spike_wigner_off.json"
+export KEEP_TRACE_DIR=""
+python -u "${ENG}/python/spike_xpu_force_agfd.py" || echo "RUN2 exit=$? (negative control; ignored)"
+
+echo "DONE phase1 (RUN1_RC=${RUN1_RC})"
+# Fail-closed: the job's exit reflects RUN 1 (the fix), not RUN 2.
+exit ${RUN1_RC}

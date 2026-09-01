@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N p6_p4exp
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# P4: rebuild engine (mpi_peer AC merge) + export W=12 N=18 per-rank AC artifacts.
+# Process-per-rank; SKIP existing. RANKS env selects subset.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu-gp
+ART=${LU}/scripts/out/phase6_p4/blocks_ac_gp
+OUTDIR=${LU}/scripts/out/phase6_p4; mkdir -p "${ART}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+export CC=$GCC/bin/gcc CXX=$GCC/bin/g++
+echo "=== rebuild engine (mpi_peer AC merge) ==="
+cmake --build "${BUILD}" -j 32 --target uma_engine uma_parity_cli 2>&1 | tail -5
+[ -e "${BUILD}/libuma_engine.a" ] && echo "ENGINE OK"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both EDGE_AC_CHUNK=16384
+echo "=== export W=12 N=18 per-rank AC artifacts ==="
+for R in ${RANKS:-0 1 2 3 4 5 6 7 8 9 10 11}; do
+  [ -f "${ART}/w12/r${R}/model_traced.pt" ] && { echo "r${R} exists"; continue; }
+  echo "--- export rank ${R} ---"
+  OUT="${ART}" N_LIST=18 EXPORT_WORLD=12 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${OUTDIR}/exp_r${R}.log" 2>&1
+  echo "  r${R}: $([ -f ${ART}/w12/r${R}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'GRAPH-STRUCTURE|error|Error' ${OUTDIR}/exp_r${R}.log | tail -1)"
+done
+echo "ranks done: $(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null | wc -l)/12"
+echo "DONE"

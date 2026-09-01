@@ -1,0 +1,77 @@
+#!/bin/bash -l
+#PBS -N par_gate
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# MANDATORY per-round ASE parity gate (all phases, every code edit).
+# Two configs, reusing already-validated ASE oracles:
+#   (a) N=16 W=1  (single-tile predictor path)   vs ase_n16_parity/*_w01
+#   (b) N=32 W=12 (12-tile GP collective path)    vs ase12_n32/*_w12  (existing)
+# LAMMPS pair_style uma C1 step-0 energy + all-atom forces. Fail-closed.
+# NOTE: set -euo pipefail is applied AFTER sourcing activate_fxpu.sh, because the
+# conda/oneAPI activation scripts reference unset vars (SETVARS_CALL) and would
+# trip `set -u`. The gate logic itself runs fully under set -euo pipefail.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+ART_16_1T=${LU}/scripts/out/opt2/n16_chunk65536_1tile
+ART_32_GP=${LU}/scripts/out/opt2/n32_chunk65536
+ORACLE_16_1=${HEN}/pbs/out/ase_n16_parity        # summary_w01.json / forces_w01.npy
+ORACLE_32_12=${HEN}/pbs/out/ase12_n32            # summary_w12.json / forces_w12.npy
+OUTDIR=${LU}/scripts/out/parity_gate; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+# Now enforce fail-closed for all gate logic below (activation is done).
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "LMP MISSING"; exit 1; }
+[ -f "${ART_16_1T}/model_traced.pt" ] || { echo "N=16 W=1 artifact MISSING"; exit 1; }
+[ "$(ls -d ${ART_32_GP}/w12/r*/model_traced.pt 2>/dev/null | wc -l)" -ge 12 ] || { echo "N=32 W=12 artifacts MISSING"; exit 1; }
+[ -f "${ORACLE_16_1}/summary_w01.json" ] && [ -f "${ORACLE_16_1}/forces_w01.npy" ] || { echo "N=16 W=1 oracle MISSING"; exit 1; }
+[ -f "${ORACLE_32_12}/summary_w12.json" ] && [ -f "${ORACLE_32_12}/forces_w12.npy" ] || { echo "N=32 W=12 oracle MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+
+run_and_check () {
+  local NLBL=$1 W=$2 ART=$3 ORACLE_DIR=$4 ORA_W=$5
+  local N=${NLBL} NAT=$((8*NLBL*NLBL*NLBL))
+  local RB=${OUTDIR}/n${N}_w${W}; mkdir -p "${RB}"
+  [ $W -gt 1 ] && cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=${W} NVT_STEPS=0 \
+    python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null | head -1))
+  echo "=== N=${N} W=${W} C1 single-point ==="
+  if [ $W -eq 1 ]; then
+    ( cd "${RD}" && mpiexec -n 1 --ppn 1 env UMA_ALLOW_LEGACY_METADATA=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  else
+    ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env UMA_ALLOW_LEGACY_METADATA=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+        UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  fi
+  echo "--- parity N=${N} W=${W} vs ASE oracle ---"
+  local OD=${RB}/oracle; mkdir -p "${OD}"
+  ln -sf "${ORACLE_DIR}/summary_w${ORA_W}.json" "${OD}/summary_w12.json"
+  ln -sf "${ORACLE_DIR}/forces_w${ORA_W}.npy"  "${OD}/forces_w12.npy"
+  LMP_DIR="${RD}" ASE_DIR="${OD}" MIN_SAMPLE=100 E_TOL_PER_ATOM_MEV=1e-3 F_TOL=1e-5 \
+    python3 "${LU}/scripts/parity_vs_asegp.py"
+}
+
+echo "### Per-round ASE parity gate: N=16 W=1 + N=32 W=12 ###"
+run_and_check 16 1  "${ART_16_1T}" "${ORACLE_16_1}"  "01"
+run_and_check 32 12 "${ART_32_GP}" "${ORACLE_32_12}" "12"
+echo "PARITY_GATE PASS (N=16 W=1 single-tile + N=32 W=12 GP)"
+echo "DONE"

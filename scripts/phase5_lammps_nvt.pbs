@@ -1,0 +1,77 @@
+#!/bin/bash -l
+#PBS -N p5_nvt
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-5: build LAMMPS (no Kokkos) with pair_style uma on XPU (eager engine),
+# run 10-step NVT@300K on perturbed NaCl at N (single tile), and verify the
+# first-frame energy + per-atom forces match the ASE UMA oracle.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP_BUILD=${LU}/build-lmp-xpu
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu
+OUTDIR=${LU}/scripts/out/phase5
+mkdir -p "${OUTDIR}"
+
+N=${N:-16}   # 16^3 = 32768 atoms; under the N=18 single-point ceiling w/ MD headroom
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+
+echo "=== 1) build LAMMPS+ML-UMA (XPU) ==="
+if [ -x "${LMP_BUILD}/lmp" ] && [ "${FORCE_REBUILD:-0}" != "1" ]; then
+  echo "reusing existing ${LMP_BUILD}/lmp (set FORCE_REBUILD=1 to rebuild)"
+else
+  bash "${LU}/scripts/phase5_build_lammps_xpu.sh" 2>&1 | tee "${OUTDIR}/build.log" | tail -12
+fi
+[ -x "${LMP_BUILD}/lmp" ] || { echo "BUILD FAILED"; exit 1; }
+
+# runtime libsycl.9
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_EAGER_CKPT=1
+
+echo "=== 2) generate LAMMPS inputs (N=${N}) ==="
+OUTDIR="${OUTDIR}" ART="${ART}" N="${N}" python -u "${LU}/scripts/phase5_make_lammps_inputs.py"
+RUNDIR="${OUTDIR}/nacl_n${N}"
+
+echo "=== 3) run 10-step NVT@300K (mpiexec -n 1, 1 tile) ==="
+cd "${RUNDIR}"
+# LAMMPS built with MPI must launch under the PALS launcher (else PMIX_Init -25).
+# One rank pinned to one XPU tile.
+mpiexec -n 1 --ppn 1 \
+  env ZE_AFFINITY_MASK=0 UMA_EAGER_CKPT=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+  "${LMP_BUILD}/lmp" -in in.nvt > "${RUNDIR}/lmp_stdout.log" 2>&1
+rc=$?
+echo "lmp exit=${rc}"
+cp -f "${RUNDIR}/log.lammps" "${RUNDIR}/log.lammps" 2>/dev/null || true
+grep -E "^\s*[0-9]+\s" "${RUNDIR}/log.lammps" 2>/dev/null | head -12
+grep -iE "out of memory|OUT_OF|Segmentation|ERROR" "${RUNDIR}/lmp_stdout.log" | head -3
+
+echo "=== 4) ASE parity (first frame E + per-atom forces, >=100 atoms) ==="
+DIR="${RUNDIR}" UMA_CKPT_FILE="${UMA_CHECKPOINT}" MIN_SAMPLE=100 E_TOL=1e-6 F_TOL=1e-5 \
+  python -u "${LU}/scripts/phase5_parity.py" 2>&1 | tail -8
+
+echo "DONE phase5"

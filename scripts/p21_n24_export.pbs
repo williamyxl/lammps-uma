@@ -1,0 +1,36 @@
+#!/bin/bash -l
+#PBS -N p21_e24
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# P2.1: re-export N=24 W=12 opt2 artifacts WITH edge padding (UMA_EDGE_PAD=1,
+# default). Writes scripts/out/p21/n24_chunk65536. RANKS env optional.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+ART=${LU}/scripts/out/p21/n24_chunk65536
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=65536 UMA_EDGE_PAD=1
+echo "=== P2.1 export N=24 W=12 (edge padding ON) ==="
+for R in ${RANKS:-0 1 2 3 4 5 6 7 8 9 10 11}; do
+  [ -f "${ART}/w12/r${R}/model_traced.pt" ] && { echo "  r${R}: exists"; continue; }
+  OUT="${ART}" N_LIST=24 EXPORT_WORLD=12 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_r${R}.log" 2>&1
+  echo "  r${R}: $([ -f ${ART}/w12/r${R}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'P2.1 edge-cap|GRAPH-STRUCTURE|Error:' ${ART}/exp_r${R}.log | tail -2 | tr '\n' ' ')"
+done
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+echo "ranks: $(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null|wc -l)/12"
+echo "=== metadata edge_pad_cap ==="; grep -oE '"edge_pad_cap": [0-9]*|"edge_pad_atom": [0-9]*|"edge_ac_chunk": [0-9]*' ${ART}/metadata.json 2>/dev/null
+echo "DONE"

@@ -1,0 +1,54 @@
+#!/bin/bash -l
+#PBS -N p6_clchk
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+# Validate the O(N) cell-list edge builder vs from_ase (edge-set + timing) at N=8,12,18.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+python - <<'PY'
+import os, time, numpy as np, torch
+from ase import Atoms
+from common import atoms_to_atomic_data, inference_settings_with_dtype, _cell_list_edges
+def build(n):
+    a=5.64; na=np.array([[0,0,0],[0,.5,.5],[.5,0,.5],[.5,.5,0]],float); cl=na+0.5
+    sy=[];sc=[]
+    for ix in range(n):
+     for iy in range(n):
+      for iz in range(n):
+       o=np.array([ix,iy,iz],float)
+       for f in na: sy.append('Na'); sc.append((f+o)/n)
+       for f in cl: sy.append('Cl'); sc.append((f+o)/n)
+    at=Atoms(symbols=sy,scaled_positions=sc,cell=np.eye(3)*(a*n),pbc=True)
+    at.positions+=np.random.default_rng(0).normal(0,0.05,at.positions.shape)
+    at.info['charge']=0; at.info['spin']=0; return at
+s=inference_settings_with_dtype("float64"); s.external_graph_gen=True
+def edgeset(ei,co):
+    # canonical set of (center, neighbor, offset)
+    ei=ei.numpy(); co=np.rint(co.numpy()).astype(int)
+    return set((int(ei[1,k]),int(ei[0,k]),int(co[k,0]),int(co[k,1]),int(co[k,2])) for k in range(ei.shape[1]))
+for n in (8,12):
+    at=build(n)
+    t=time.perf_counter(); os.environ.pop("UMA_EXPORT_CELL_LIST",None)
+    d0=atoms_to_atomic_data(at,"omat",s); t0=time.perf_counter()-t
+    t=time.perf_counter(); os.environ["UMA_EXPORT_CELL_LIST"]="1"
+    d1=atoms_to_atomic_data(at,"omat",s); t1=time.perf_counter()-t
+    s0=edgeset(d0.edge_index,d0.cell_offsets); s1=edgeset(d1.edge_index,d1.cell_offsets)
+    print(f"N={n} nat={len(at)} from_ase E={len(s0)}({t0:.1f}s) celllist E={len(s1)}({t1:.1f}s) match={s0==s1} onlyfromase={len(s0-s1)} onlycl={len(s1-s0)}",flush=True)
+# timing only at N=18 (from_ase ~27s)
+at=build(18); os.environ["UMA_EXPORT_CELL_LIST"]="1"; t=time.perf_counter()
+d1=atoms_to_atomic_data(at,"omat",s); print(f"N=18 celllist {time.perf_counter()-t:.1f}s nedges={d1.edge_index.shape[1]}",flush=True)
+PY
+echo "DONE"

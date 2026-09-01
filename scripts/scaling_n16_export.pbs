@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -N sc16_exp
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# N=16 scaling export: opt2 frozen artifacts (EDGE_AC_CHUNK=65536) for W in
+# 2 4 6 8 12 (GP, sequential per rank). W=1 is handled separately.
+# All written into scripts/out/opt2/n16_chunk65536/w{W}/r{R}/.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+ART=${LU}/scripts/out/opt2/n16_chunk65536
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=65536
+echo "=== N=16 scaling export (W=2,4,6,8,12) ==="
+for W in 2 4 6 8 12; do
+  echo "--- W=${W} ---"
+  for R in $(seq 0 $((W-1))); do
+    [ -f "${ART}/w${W}/r${R}/model_traced.pt" ] && { echo "  r${R}: exists, skip"; continue; }
+    OUT="${ART}" N_LIST=16 EXPORT_WORLD=${W} EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+      python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_w${W}_r${R}.log" 2>&1
+    echo "  W=${W} r${R}: $([ -f ${ART}/w${W}/r${R}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'opt2:|GRAPH-STRUCTURE|Error:' ${ART}/exp_w${W}_r${R}.log | tail -1)"
+  done
+  [ -f "${ART}/w${W}/r0/metadata.json" ] && cp "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+  echo "  W=${W} ranks: $(ls -d ${ART}/w${W}/r*/model_traced.pt 2>/dev/null|wc -l)/${W}"
+done
+echo "DONE"

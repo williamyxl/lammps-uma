@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N p6_shards
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-6 Step 1b: offline per-rank GP shard export (CPU trace) for W=1,2 at N=4
+# (Gate 1). Shards embed uma_peer ops; C++ XcclPeer implements collectives.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUT=${LU}/scripts/out/phase6_shards/uma-s-1p2-omat-f64-gp
+mkdir -p "${OUT}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export OUT
+export N_LIST=4
+export W_LIST=1,2
+export FXPU_WIGNER_PREP_CHUNK=65536
+export FXPU_WIGNER_PREP_CHUNK_MODE=both
+
+python -c "import torch;print('torch',torch.__version__)"
+echo "=== export GP shards W=1,2 N=4 ==="
+python -u "${ENG}/python/export_shards_xpu.py" || echo "exit=$?"
+echo "=== shards ==="; ls -la "${OUT}"/*.pt 2>/dev/null
+echo "DONE phase6_shards"

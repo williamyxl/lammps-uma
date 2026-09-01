@@ -1,0 +1,47 @@
+#!/bin/bash -l
+#PBS -N p1_n10off
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+
+# Control: eager XPU FP64 AG-vs-FD at NaCl N=10 with the Wigner chunk fix OFF.
+# Expected to FAIL (reproduces the >2e5-edge XPU FP64 backward cliff), proving
+# the fix is necessary.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+ENG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/src/ML-UMA/uma-engine
+OUTDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/phase1_agfd
+mkdir -p "${OUTDIR}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export N_MIN=10
+export N_MAX=10
+export FD_EPS=1e-4
+export AG_FD_TOL=1e-5
+export FD_SAMPLE_ATOMS=100
+export TRACE_N=2
+export WIGNER_CHUNK_OFF=1
+export OUT="${OUTDIR}/spike_n10_wigner_off.json"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+
+echo "=== N=10 chunk OFF (expect FAIL) ==="
+python -u "${ENG}/python/spike_xpu_force_agfd.py" || echo "exit=$?"
+echo "DONE"

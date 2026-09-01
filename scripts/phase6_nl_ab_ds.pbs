@@ -1,0 +1,72 @@
+#!/bin/bash -l
+#PBS -N p6_nlab
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# A/B: LAMMPS-NL (default) vs engine-graph (UMA_ENGINE_BUILD_GRAPH=1) at N=8 (fast,
+# engine graph feasible) -> must match E+F bit-exact. Then time NL at N=18 vs engine.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+ART=${LU}/scripts/out/phase6_h_p1b/blocks_n18   # AC artifact (fits N<=18; has block/chunk/edgedeg modules)
+OUTDIR=${LU}/scripts/out/phase6_nlab; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+echo "=== rebuild LAMMPS (pair_uma NL consume + predict_host_extgraph) ==="
+FORCE_REBUILD=1 bash "${LU}/scripts/phase6_build_lammps_xccl.sh" 2>&1 | tail -6
+[ -x "${LMP}" ] || { echo "LMP BUILD FAILED"; exit 1; }
+echo "LMP OK"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+# N=8 A/B (engine graph feasible at N=8)
+for ARM in extgraph enginegraph; do
+  RD=${OUTDIR}/n8_${ARM}; mkdir -p "${RD}"
+  OUTDIR="${RD}" ART="${ART}" N=8 W=1 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  D=$(dirname $(ls ${RD}/*/in.sp|head -1))
+  EX=""; [ "${ARM}" = "enginegraph" ] && EX="UMA_ENGINE_BUILD_GRAPH=1"
+  t0=$SECONDS
+  ( cd "${D}" && mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 ${EX} UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" "${LMP}" -in in.sp > lmp.log 2>&1 )
+  echo "N=8 ${ARM} exit=$? wall=$((SECONDS-t0))s :: $(grep -E '^\s*0\s' ${D}/log.lammps 2>/dev/null|head -1)"
+  cp ${D}/forces_step0.dump ${OUTDIR}/f_${ARM}.dump 2>/dev/null; cp ${D}/log.lammps ${OUTDIR}/log_${ARM} 2>/dev/null
+done
+echo "=== compare N=8 extgraph vs enginegraph (energy + forces bit-exact?) ==="
+python - <<PY
+import re,numpy as np
+def pe(f):
+  t=open(f).read(); m=re.search(r'^\s*0\s.*$',t,re.M); return float(m.group(0).split()[2])
+def fdump(f,nat):
+  L=open(f).read().splitlines(); F=np.zeros((nat,3))
+  for k,l in enumerate(L):
+    if l.startswith('ITEM: ATOMS'):
+      c=l.split()[2:]; ix={x:j for j,x in enumerate(c)}
+      for j in range(nat):
+        v=L[k+1+j].split(); a=int(v[ix['id']])-1; F[a]=[float(v[ix['fx']]),float(v[ix['fy']]),float(v[ix['fz']])]
+      break
+  return F
+o="${OUTDIR}"; nat=8*8**3
+e1=pe(o+"/log_extgraph"); e2=pe(o+"/log_enginegraph")
+f1=fdump(o+"/f_extgraph.dump",nat); f2=fdump(o+"/f_enginegraph.dump",nat)
+print(f"dE(ext-engine)={abs(e1-e2):.3e} eV  max|dF|={np.abs(f1-f2).max():.3e}")
+print("AB_MATCH" if abs(e1-e2)<1e-9 and np.abs(f1-f2).max()<1e-10 else "AB_MISMATCH")
+PY
+echo "=== N=18 NL timing: extgraph (LAMMPS NL) run wall ==="
+RD=${OUTDIR}/n18_ext; mkdir -p "${RD}"
+OUTDIR="${RD}" ART="${ART}" N=18 W=1 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+D=$(dirname $(ls ${RD}/*/in.sp|head -1))
+t0=$SECONDS
+( cd "${D}" && mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" "${LMP}" -in in.sp > lmp.log 2>&1 )
+echo "N=18 extgraph exit=$? wall=$((SECONDS-t0))s :: $(grep -E '^\s*0\s' ${D}/log.lammps 2>/dev/null|head -1)"
+echo "DONE"

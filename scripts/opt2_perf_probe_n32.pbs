@@ -1,0 +1,63 @@
+#!/bin/bash -l
+#PBS -N o2_perf
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+# Perf probe: N=32 W=12, UMA_MP_PERF=1, 3 NVT steps only. Prints per-step
+# ms_graph / ms_fwd / ms_bwd / ms_force_ar to locate the Loop-time bottleneck.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=${N:-32}; NAT=$((8*N*N*N))
+ART=${ART:-${LU}/scripts/out/opt2/n32_chunk65536}
+OUTDIR=${LU}/scripts/out/opt2perf/n${N}; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+export UMA_MP_PERF=1
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+RB=${OUTDIR}/run; mkdir -p "${RB}"
+OUTDIR="${RB}" ART="${ART}" N=${N} W=1 NVT_STEPS=${STEPS:-3} python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+echo "=== perf probe N=${N} W=12 steps=${STEPS:-3} ==="
+t0=$SECONDS
+( cd "${RD}" && mpiexec -n 12 --ppn 12 env UMA_MP_PERF=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+rc=$?; WALL=$((SECONDS-t0))
+echo "exit=${rc} wall=${WALL}s"
+echo "=== per-step MP_PERF (rank 0) ==="
+grep "MP_PERF rank=0 " ${RD}/lmp.log 2>/dev/null
+echo "=== avg across all ranks (per call) ==="
+python3 - "${RD}/lmp.log" <<'PYEOF'
+import re,sys
+rows=[]
+for ln in open(sys.argv[1],errors='ignore'):
+    m=re.search(r"MP_PERF rank=(\d+).*ms_graph=([\d.]+) ms_fwd=([\d.]+) ms_bwd=([\d.]+) ms_force_ar=([\d.]+) ms_total=([\d.]+)",ln)
+    if m: rows.append([float(x) for x in m.groups()[1:]])
+if rows:
+    import statistics as st
+    names=["graph","fwd","bwd","force_ar","total"]
+    n=len(rows)
+    for i,nm in enumerate(names):
+        vals=[r[i] for r in rows]
+        print(f"  {nm:9s} mean={st.mean(vals):8.1f} ms  max={max(vals):8.1f}  min={min(vals):8.1f}  (n_calls={n})")
+    tot=st.mean([r[4] for r in rows])
+    print(f"  -> fwd%={100*st.mean([r[1] for r in rows])/tot:.1f}  bwd%={100*st.mean([r[2] for r in rows])/tot:.1f}  graph%={100*st.mean([r[0] for r in rows])/tot:.1f}  force_ar%={100*st.mean([r[3] for r in rows])/tot:.1f}")
+else:
+    print("  (no MP_PERF lines)")
+PYEOF
+echo "DONE"

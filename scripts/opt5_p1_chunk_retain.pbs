@@ -1,0 +1,73 @@
+#!/bin/bash -l
+#PBS -N o5p1_n32
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# opt5 P-1: selective per-chunk retain sweep at N=32 W=12. Baseline C2
+# (UMA_NO_RECOMPUTE_BLOCK+EDEG) already retains block+prologue; add
+# UMA_CHUNK_RETAIN_K=k to also retain the first k chunks/block. Find the largest k
+# that fits HBM and its Loop-time gain. step-0 PE must stay -885377.060040.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=32; NAT=$((8*N*N*N))
+ART=${LU}/scripts/out/opt2/n32_chunk65536
+OUTDIR=${LU}/scripts/out/opt5p1/n32; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "LMP MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+cp -f "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+
+run_k () {
+  local BASE=$1 K=$2   # BASE=C1 (no block/edeg retain) or C2 (block+edeg retain)
+  local NRENV=""
+  [ "${BASE}" = "C2" ] && NRENV="UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1"
+  local RB=${OUTDIR}/${BASE}_k${K}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=12 NVT_STEPS=10 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  local t0=$SECONDS
+  set +e
+  ( cd "${RD}" && mpiexec -n 12 --ppn 12 env \
+      ${NRENV} UMA_CHUNK_RETAIN_K=${K} \
+      UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  local rc=$?; set -e
+  local WALL=$((SECONDS-t0))
+  local LOOP=$(grep -oE 'Loop time of [0-9.]+ .* for 10 steps' ${RD}/log.lammps 2>/dev/null|grep -oE '[0-9.]+'|head -1)
+  local OOM=$(grep -icE "out of memory|OUT_OF|UR_RESULT_ERROR" ${RD}/lmp.log 2>/dev/null)
+  local PE0=$(python3 - "${RD}/log.lammps" <<'PYEOF'
+import re,sys
+try: txt=open(sys.argv[1]).read()
+except: sys.exit()
+m=re.search(r"^\s*Step\b.*PotEng.*$",txt,re.M)
+if not m: sys.exit()
+h=m.group(0).split(); pe=h.index("PotEng")
+for ln in txt[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(h) and s and s[0]=="0": print(f"{float(s[pe]):.6f}"); break
+PYEOF
+)
+  echo "O5P1 N=32 W=12 base=${BASE} RETAIN_K=${K} exit=${rc} oom=${OOM} wall=${WALL}s loop=${LOOP}s step0=${PE0} (ref -885377.060040; C1 loop 182.7 C2 loop 139.0)"
+}
+
+echo "### opt5 P-1 chunk-retain sweep on top of C1 (headroom vs C2) ###"
+for K in 1 2 3 4; do run_k C1 ${K}; done
+echo "DONE"

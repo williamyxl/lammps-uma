@@ -1,0 +1,55 @@
+#!/bin/bash -l
+#PBS -N p6h_m1be
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# (h) Milestone 1 part A: build engine (with block_context) + export the
+# per-block-checkpointed artifact on XPU (N=2 trace + RECONSTRUCT check).
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu-gp
+OUT=${LU}/scripts/out/phase6_blocks/uma-s-1p2-omat-f64-blocks
+OUTDIR=${LU}/scripts/out/phase6_h_m1; mkdir -p "${OUTDIR}" "${OUT}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+export CC=$GCC/bin/gcc CXX=$GCC/bin/g++
+TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
+SYCL_LIB_DIR=$CONDA_PREFIX/lib SYCL_INC_DIR=$CONDA_PREFIX/include
+
+echo "=== build engine + uma_parity_cli (with block_context) ==="
+cmake -S "${ENG}" -B "${BUILD}" \
+  -D CMAKE_BUILD_TYPE=Release -D CMAKE_C_COMPILER=$GCC/bin/gcc -D CMAKE_CXX_COMPILER=$GCC/bin/g++ \
+  -D CMAKE_CXX_STANDARD=17 -D CMAKE_PREFIX_PATH="$TORCH_CMAKE" \
+  -D MPI_CXX_COMPILER=$MPICH/bin/mpicxx -D MPI_C_COMPILER=$MPICH/bin/mpicc \
+  -D UMA_ENGINE_USE_XPU=ON -D UMA_ENGINE_USE_CUDA=OFF -D UMA_ENGINE_USE_XCCL=ON \
+  -D UMA_ICPX="$(which icpx)" -D ONECCL_ROOT="$CONDA_PREFIX" \
+  -D SYCL_LIBRARY=$SYCL_LIB_DIR/libsycl.so -D SYCL_LIBRARY_DIR=$SYCL_LIB_DIR \
+  -D SYCL_INCLUDE_DIR=$SYCL_INC_DIR -D SYCL_INCLUDE_SYCL_DIR=$SYCL_INC_DIR/sycl \
+  -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" 2>&1 | tee "${OUTDIR}/cmake.log" | tail -4
+cmake --build "${BUILD}" -j 32 --target uma_engine uma_parity_cli 2>&1 | tee "${OUTDIR}/build.log" | tail -8
+[ -x "${BUILD}/uma_parity_cli" ] || { echo "BUILD FAILED"; grep -iE "error:" "${OUTDIR}/build.log" | head; exit 1; }
+echo "BUILD OK"
+
+echo "=== export per-block artifact (N=2 trace + RECONSTRUCT) ==="
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export OUT N_LIST=2 TRACE_DEV=xpu RECONSTRUCT=1
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+python -u "${ENG}/python/export_blocks_xpu.py" 2>&1 | grep -vE "TracerWarning|warnings.warn" | grep -E "RECONSTRUCT|block|dE=|max.dF|OK|FAIL|num_layers|saved|error|Error" | tail -15
+echo "=== artifact ==="; ls "${OUT}"/model_traced.pt "${OUT}"/model_block_*.pt 2>/dev/null | wc -l; ls "${OUT}"/model_block_*.pt 2>/dev/null | wc -l
+echo "DONE p6h_m1be"

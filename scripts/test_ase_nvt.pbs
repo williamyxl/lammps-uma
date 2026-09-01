@@ -1,0 +1,27 @@
+#!/bin/bash -l
+#PBS -N t_ase
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# Path A: ASE FairChem NoseHoover NVT 300K 10 steps, single tile, N=6,12,18.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUTDIR=${LU}/scripts/out/test3path/ase; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" OUTDIR FD_SAMPLE=100
+for N in 6 12 18; do
+  echo "=== ASE NVT N=${N} ==="
+  N=${N} python -u "${LU}/scripts/test_ase_nvt.py" 2>&1 | grep -vi index_reduce | grep -E "ASE N=|Error|Traceback|OUT_OF" | tail -3
+done
+echo "DONE"

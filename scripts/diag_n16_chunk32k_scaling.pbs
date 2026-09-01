@@ -1,0 +1,76 @@
+#!/bin/bash -l
+#PBS -N d16_sc32k
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:50:00
+#PBS -j oe
+#PBS -k doe
+# N=16 C2 NVT-10 scaling at EDGE_AC_CHUNK=32768 (the tuned chunk), W=4,6,8,12.
+# Needs per-W exports at chunk=32768. Compares to the chunk=65536 §5 numbers.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=16; NAT=$((8*N*N*N)); CHUNK=32768
+ART=${LU}/scripts/out/diag16/n16_chunk${CHUNK}_scaling
+OUTDIR=${LU}/scripts/out/diag16run/scaling32k; mkdir -p "${OUTDIR}" "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+
+do_export () {
+  local W=$1
+  [ -f "${ART}/w${W}/r0/model_traced.pt" ] && return
+  export EDGE_AC_CHUNK=${CHUNK} UMA_EDGE_PAD=1 UMA_EXPORT_CELL_LIST=1
+  export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+  export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both ZE_AFFINITY_MASK=0
+  for R in $(seq 0 $((W-1))); do
+    OUT="${ART}" N_LIST=16 EXPORT_WORLD=${W} EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+      python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_w${W}_r${R}.log" 2>&1
+  done
+  cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+  unset ZE_AFFINITY_MASK
+}
+run_w () {
+  local W=$1
+  export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+         CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+  cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+  local RB=${OUTDIR}/w${W}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=${W} NVT_STEPS=10 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  local t0=$SECONDS
+  set +e
+  ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1 \
+      UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  local rc=$?; set -e
+  local LOOP=$(grep -oE 'Loop time of [0-9.]+ .* for 10 steps' ${RD}/log.lammps 2>/dev/null|grep -oE '[0-9.]+'|head -1)
+  local PE0=$(python3 -c "
+import re
+t=open('${RD}/log.lammps').read(); m=re.search(r'^\s*Step\b.*PotEng.*$',t,re.M); h=m.group(0).split(); pe=h.index('PotEng')
+for ln in t[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(h) and s and s[0]=='0': print(f'{float(s[pe]):.6f}'); break
+")
+  echo "D16SC32K W=${W} exit=${rc} loop=${LOOP}s step0=${PE0}"
+}
+for W in 4 6 8 12; do
+  echo "=== export+run W=${W} chunk=32768 ==="
+  do_export ${W}
+  echo "  ranks: $(ls -d ${ART}/w${W}/r*/model_traced.pt 2>/dev/null|wc -l)/${W}"
+  run_w ${W}
+done
+echo DONE

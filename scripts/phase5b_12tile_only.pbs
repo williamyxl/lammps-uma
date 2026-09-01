@@ -1,0 +1,63 @@
+#!/bin/bash -l
+#PBS -N p5b_12only
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-5b (A) fixed: 12 INDEPENDENT single-rank LAMMPS UMA NVT runs, one per XPU
+# tile (each its own MPI_COMM_WORLD so pair_uma stays single-tile devices 1).
+# Demonstrates using all 12 tiles data-parallel. N=10 (8000 atoms) per tile.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xpu/lmp
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu
+OUTDIR=${LU}/scripts/out/phase5b_12only
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+[ -x "${LMP}" ] || { echo "MISSING ${LMP}"; exit 1; }
+
+NA=10
+OUTDIR="${OUTDIR}" ART="${ART}" N="${NA}" python -u "${LU}/scripts/phase5_make_lammps_inputs.py"
+SRC="${OUTDIR}/nacl_n${NA}"
+
+echo "=== 12 INDEPENDENT lmp NVT, one per tile, N=${NA} ($((8*NA*NA*NA)) atoms each) ==="
+t0=$SECONDS
+for r in $(seq 0 11); do
+  RD="${OUTDIR}/rank${r}"; mkdir -p "${RD}"
+  cp -f "${SRC}/data.nacl" "${RD}/"; cp -f "${SRC}/in.nvt" "${RD}/in.nvt"
+  ( cd "${RD}" && mpiexec -n 1 --ppn 1 \
+      env ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=${r} UMA_EAGER_CKPT=1 \
+          UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+      "${LMP}" -in in.nvt > lmp.log 2>&1 ) &
+done
+wait
+echo "all 12 done wall=$((SECONDS-t0))s"
+
+echo "--- per-tile step-10 thermo ---"
+ok=0
+for r in $(seq 0 11); do
+  ln=$(grep -E "^\s*10\s" "${OUTDIR}/rank${r}/log.lammps" 2>/dev/null | tail -1)
+  if [ -n "${ln}" ]; then ok=$((ok+1)); echo "tile ${r}: ${ln}";
+  else echo "tile ${r}: <FAILED>  $(grep -iE 'error|OUT_OF|Segmentation|NCCL' "${OUTDIR}/rank${r}/lmp.log" 2>/dev/null | head -1)"; fi
+done
+echo "SUCCESS_TILES=${ok}/12"
+echo "DONE phase5b_12only"

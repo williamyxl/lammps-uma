@@ -1,0 +1,100 @@
+#!/bin/bash -l
+#PBS -N p4_eager
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-4 (eager backend): rebuild engine with real graph_parallel.cpp (eager
+# Python-worker path) for XPU, then run uma_parity_cli with UMA_EAGER_CKPT=1 so
+# the single tile runs the EAGER FairChem UMA model with activation
+# checkpointing (the CUDA capacity lever, ~12.7x atoms). Measures the eager
+# per-tile N ceiling + parity vs the ASE oracle.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu
+CLI=${BUILD}/uma_parity_cli
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu     # metadata (cutoff/refs/ckpt path)
+SRC=${LU}/scripts/out/phase3
+OUTDIR=${LU}/scripts/out/phase4
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+# Worker (forked python) needs engine python + hen shim on PYTHONPATH.
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+export CC=$GCC/bin/gcc CXX=$GCC/bin/g++
+TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+SYCL_LIB_DIR=$CONDA_PREFIX/lib
+SYCL_INC_DIR=$CONDA_PREFIX/include
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${SYCL_LIB_DIR}/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+
+echo "=== rebuild engine (eager path) ==="
+rm -rf "${BUILD}" && mkdir -p "${BUILD}"
+cmake -S "${ENG}" -B "${BUILD}" \
+  -D CMAKE_BUILD_TYPE=Release \
+  -D CMAKE_C_COMPILER=$GCC/bin/gcc -D CMAKE_CXX_COMPILER=$GCC/bin/g++ \
+  -D CMAKE_CXX_STANDARD=17 \
+  -D CMAKE_PREFIX_PATH="$TORCH_CMAKE" \
+  -D UMA_ENGINE_USE_XPU=ON -D UMA_ENGINE_USE_CUDA=OFF \
+  -D SYCL_LIBRARY=$SYCL_LIB_DIR/libsycl.so -D SYCL_LIBRARY_DIR=$SYCL_LIB_DIR \
+  -D SYCL_INCLUDE_DIR=$SYCL_INC_DIR -D SYCL_INCLUDE_SYCL_DIR=$SYCL_INC_DIR/sycl \
+  -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" \
+  -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,$SYCL_LIB_DIR -Wl,-rpath,$TORCH_LIB" \
+  2>&1 | tee "${OUTDIR}/cmake.log" | tail -6
+cmake --build "${BUILD}" -j 32 2>&1 | tee "${OUTDIR}/build.log" | tail -10
+[ -x "${CLI}" ] || { echo "BUILD FAILED"; grep -iE "error:" "${OUTDIR}/build.log" | head; exit 1; }
+echo "BUILD OK"
+
+export LD_LIBRARY_PATH="${COMPAT}:${SYCL_LIB_DIR}:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_EAGER_CKPT=1     # route single-tile through eager worker + checkpointing
+
+# stage oracle for compare
+for n in 6 8 10; do
+  s="${SRC}/nacl_n${n}"; [ -d "${s}" ] || continue
+  d="${OUTDIR}/nacl_n${n}"; mkdir -p "${d}"
+  cp -f "${s}/structure.txt" "${s}/oracle_forces.npy" "${d}/" 2>/dev/null
+done
+cp -f "${SRC}/oracle_manifest.json" "${OUTDIR}/" 2>/dev/null
+
+# First a small-N smoke to confirm the eager worker forks + talks protocol on XPU.
+echo "=== eager smoke N=2 (default NaCl) ==="
+"${CLI}" "${ART}" --devices 1 > "${OUTDIR}/smoke_eager_n2.log" 2>&1
+echo "  exit=$? :: $(grep -E 'energy=|device=|backend|eager' "${OUTDIR}/smoke_eager_n2.log" | tr '\n' ' ')"
+grep -iE "error|Traceback|OUT_OF|Segmentation|fairchem_eager" "${OUTDIR}/smoke_eager_n2.log" | head -3
+
+echo "=== eager parity + capacity: N=6,8,10 ==="
+for n in 6 8 10; do
+  d="${OUTDIR}/nacl_n${n}"; st="${d}/structure.txt"
+  [ -f "${st}" ] || { echo "N=${n}: no structure"; continue; }
+  echo "--- N=${n} ---"
+  "${CLI}" "${ART}" "${st}" --devices 1 \
+      --write-forces "${d}/cpp_forces.bin" > "${d}/cpp.log" 2>&1
+  echo "  exit=$? :: $(grep -E 'energy=|fmax=' "${d}/cpp.log" | tr '\n' ' ')"
+  grep -iE "out of memory|OUT_OF_RESOURCES|Segmentation|Traceback" "${d}/cpp.log" | head -1
+done
+
+echo "=== compare vs oracle ==="
+export OUTDIR E_TOL=1e-4 F_TOL=1e-3 MIN_SAMPLE=100
+python -u "${LU}/scripts/phase3_compare.py" || echo "compare exit=$?"
+echo "DONE phase4"

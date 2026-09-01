@@ -1,0 +1,65 @@
+#!/bin/bash -l
+#PBS -N p6_engxccl
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-6 Step 1: compile-check the uma-engine XPU build WITH the graph-parallel
+# edge-parallel TUs (mpi_peer_predictor + peer_context) using host-staged MPI
+# collectives (kTransportMpi). Just builds uma_engine + uma_parity_cli to catch
+# port errors before the full LAMMPS build.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu-gp
+OUTDIR=${LU}/scripts/out/phase6_build
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+export CC=$GCC/bin/gcc CXX=$GCC/bin/g++
+TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+SYCL_LIB_DIR=$CONDA_PREFIX/lib
+SYCL_INC_DIR=$CONDA_PREFIX/include
+
+ICPX=$(which icpx)
+echo "ICPX=$ICPX  ONECCL_ROOT=$CONDA_PREFIX"
+echo "=== configure (XPU + native XCCL/oneCCL) ==="
+rm -rf "${BUILD}" && mkdir -p "${BUILD}"
+cmake -S "${ENG}" -B "${BUILD}" \
+  -D CMAKE_BUILD_TYPE=Release \
+  -D CMAKE_C_COMPILER=$GCC/bin/gcc -D CMAKE_CXX_COMPILER=$GCC/bin/g++ \
+  -D CMAKE_CXX_STANDARD=17 \
+  -D CMAKE_PREFIX_PATH="$TORCH_CMAKE" \
+  -D MPI_CXX_COMPILER=$MPICH/bin/mpicxx -D MPI_C_COMPILER=$MPICH/bin/mpicc \
+  -D UMA_ENGINE_USE_XPU=ON -D UMA_ENGINE_USE_CUDA=OFF \
+  -D UMA_ENGINE_USE_XCCL=ON \
+  -D UMA_ICPX="$ICPX" \
+  -D ONECCL_ROOT="$CONDA_PREFIX" \
+  -D SYCL_LIBRARY=$SYCL_LIB_DIR/libsycl.so -D SYCL_LIBRARY_DIR=$SYCL_LIB_DIR \
+  -D SYCL_INCLUDE_DIR=$SYCL_INC_DIR -D SYCL_INCLUDE_SYCL_DIR=$SYCL_INC_DIR/sycl \
+  -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" \
+  2>&1 | tee "${OUTDIR}/cmake.log" | tail -12
+
+echo "=== build uma_engine + uma_parity_cli ==="
+cmake --build "${BUILD}" -j 32 --target uma_engine uma_parity_cli 2>&1 | tee "${OUTDIR}/build.log" | tail -30
+echo "=== result ==="
+if [ -e "${BUILD}/libuma_engine.a" ] || [ -e "${BUILD}/libuma_engine.so" ]; then
+  echo "ENGINE BUILD OK"
+else
+  echo "ENGINE BUILD FAILED"; grep -iE "error:" "${OUTDIR}/build.log" | head -20
+fi
+echo "DONE phase6_build"

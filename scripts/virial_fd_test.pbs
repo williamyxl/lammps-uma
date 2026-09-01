@@ -1,0 +1,43 @@
+#!/bin/bash -l
+#PBS -N virial_fd
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# P0'.1 step 2 validation: the single-tile strain-autograd virial must match a
+# finite-difference stress. For each strain component eps_ab we compute the analytic
+# virial from LAMMPS pxx/pyy/pzz/... at eps=0 and the FD stress
+#   sigma_ab = -(1/V) dE/deps_ab  ~  -(E(+d) - E(-d)) / (2 d V)
+# by deforming the box (cell and fractional coords) by +/- d. PASS if the analytic
+# and FD stresses agree to STRESS_TOL.
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+# Use the PADDED fast single-tile artifact (edge_pad_cap>0) so strain-induced edge
+# drift is absorbed by the pad. (The unpadded n16_chunk65536_1tile rigidly fixes the
+# edge count and would crash on a deformed geometry.)
+ART=${LU}/scripts/out/n16_fast_1tile
+OUT=${LU}/scripts/out/virial_fd; mkdir -p "${OUT}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+# set -u AFTER activation (the oneAPI setvars script references unset vars).
+set -uo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUT}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_ALLOW_LEGACY_METADATA=1
+export UMA_COMPUTE_VIRIAL=1   # P0'.1 step 2: enable single-tile stress
+
+LMP="${LMP}" ART="${ART}" OUT="${OUT}" \
+  python -u "${LU}/scripts/virial_fd_check.py"
+RC=$?
+echo "virial_fd exit=${RC}"
+exit ${RC}

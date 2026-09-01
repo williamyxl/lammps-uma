@@ -1,0 +1,24 @@
+# Test/lint configuration for the UMA LAMMPS pair style (CODE_QUALITY.md Sprint 4).
+# Tier 0/1 are login-node, no-allocation, torch-free where possible. The pure tests
+# under ci/tests/ also run as plain `python3 ci/tests/test_*.py` (pytest optional).
+
+[tool.pytest.ini_options]
+testpaths = ["ci/tests"]
+python_files = ["test_*.py"]
+markers = [
+    "xpu: requires Aurora XPU (Tier 3, PBS only)",
+    "gpu: requires a GPU",
+    "slow: long-running",
+    "needs_fairchem: requires the fairchem-core package (fxpu env)",
+    "needs_torch: requires torch (fxpu env)",
+    "needs_checkpoint: requires a multi-GB UMA checkpoint artifact",
+]
+
+[tool.ruff]
+# Scope ruff to the code we own; keep it advisory in CI until Sprint 6 cleanup.
+include = ["scripts/*.py", "ci/**/*.py", "src/ML-UMA/uma-engine/python/*.py"]
+line-length = 100
+
+[tool.ruff.lint]
+# Start minimal: real errors only. Sprint 6 (P5'.5) tightens BLE001/print bans.
+select = ["E9", "F63", "F7", "F82"]

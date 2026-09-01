@@ -144,3 +144,11 @@ scripts/**/compat/
 # P3.2: stale standalone engine build trees (regenerate via CMake)
 src/ML-UMA/uma-engine/build-xpu/
 src/ML-UMA/uma-engine/build-xpu-*/
+
+# Tier-2 CPU CI build tree (ci/tier2_cpu_build.sh) — regenerated, never committed
+src/ML-UMA/uma-engine/build-cpu-ci/
+src/ML-UMA/uma-engine/build-cpu-ci.*.log
+src/ML-UMA/uma-engine/build-cpu-ci.*.err
+
+# DD example run scratch (compat shims, logs)
+src/ML-UMA/examples/multinode-dd/run_dd_*/

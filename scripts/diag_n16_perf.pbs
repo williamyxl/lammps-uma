@@ -1,0 +1,65 @@
+#!/bin/bash -l
+#PBS -N d_n16
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+# Diagnose N=16 W=12 NVT: UMA_MP_PERF per-call graph/fwd/bwd/force_ar breakdown,
+# for C2. Also W=6 (best-eff point) for contrast. 3 NVT steps enough for per-call.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=16; NAT=$((8*N*N*N))
+ART1=${LU}/scripts/out/p21/n16_1tile
+ARTG=${LU}/scripts/out/p21/n16
+OUTDIR=${LU}/scripts/out/diag_n16; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+
+run_perf () {
+  local W=$1
+  cp -f "${ARTG}/w${W}/r0/metadata.json" "${ARTG}/metadata.json"
+  local RB=${OUTDIR}/w${W}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ARTG}" N=${N} W=${W} NVT_STEPS=3 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  echo "=== N=16 W=${W} C2 UMA_MP_PERF (3 NVT steps) ==="
+  ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env UMA_MP_PERF=1 \
+      UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1 \
+      UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  echo "--- rank0 per-call ---"; grep "MP_PERF rank=0 " ${RD}/lmp.log 2>/dev/null | tail -4
+  python3 - "${RD}/lmp.log" <<'PYEOF'
+import re,sys,statistics as st
+rows=[]
+for ln in open(sys.argv[1],errors='ignore'):
+    m=re.search(r"ms_graph=([\d.]+) ms_fwd=([\d.]+) ms_bwd=([\d.]+) ms_force_ar=([\d.]+) ms_total=([\d.]+)",ln)
+    if m: rows.append([float(x) for x in m.groups()])
+if rows:
+    nm=["graph","fwd","bwd","force_ar","total"]
+    for i,n in enumerate(nm):
+        v=[r[i] for r in rows]; print(f"  {n:9s} mean={st.mean(v):8.1f} ms")
+    t=st.mean([r[4] for r in rows])
+    print(f"  -> graph%={100*st.mean([r[0] for r in rows])/t:.1f} fwd%={100*st.mean([r[1] for r in rows])/t:.1f} bwd%={100*st.mean([r[2] for r in rows])/t:.1f} ar%={100*st.mean([r[3] for r in rows])/t:.1f}")
+else: print("  (no MP_PERF lines)")
+PYEOF
+}
+run_perf 12
+run_perf 6
+echo DONE

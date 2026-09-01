@@ -1,0 +1,37 @@
+#!/bin/bash -l
+#PBS -N d16_exp
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# Re-export N=16 W=12 at a smaller EDGE_AC_CHUNK (default 32768) to cut P2.1
+# padding waste (87392 real edges/tile pads to 131072 at chunk=65536 = 33% waste).
+# CHUNK env selects the chunk size. Writes scripts/out/diag16/n16_chunk${CHUNK}.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+CHUNK=${CHUNK:-32768}
+ART=${LU}/scripts/out/diag16/n16_chunk${CHUNK}
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=${CHUNK} UMA_EDGE_PAD=1
+echo "=== export N=16 W=12 EDGE_AC_CHUNK=${CHUNK} ==="
+for R in $(seq 0 11); do
+  [ -f "${ART}/w12/r${R}/model_traced.pt" ] && continue
+  OUT="${ART}" N_LIST=16 EXPORT_WORLD=12 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_r${R}.log" 2>&1
+  echo "  r${R}: $([ -f ${ART}/w12/r${R}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'P2.1 edge-cap' ${ART}/exp_r${R}.log | tail -1)"
+done
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+echo "ranks: $(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null|wc -l)/12"
+echo "DONE"

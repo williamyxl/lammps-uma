@@ -1,0 +1,87 @@
+#!/bin/bash -l
+#PBS -N p5b_12t
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-5b: (A) 12-tile data-parallel demo -- 12 independent LAMMPS UMA NVT runs,
+# one per XPU tile (ZE_AFFINITY_MASK 0..11). (B) single-tile max-N-under-NVT test
+# at N=17,18 (single-point ceiling was N=18=46656).
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xpu/lmp
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu
+OUTDIR=${LU}/scripts/out/phase5b
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+
+[ -x "${LMP}" ] || { echo "MISSING ${LMP}"; exit 1; }
+
+# ============ (A) 12-tile data-parallel demo: N=10 (8000 atoms) x 12 ============
+NA=10
+BASEA="${OUTDIR}/dp12_n${NA}"
+OUTDIR="${BASEA}" ART="${ART}" N="${NA}" python -u "${LU}/scripts/phase5_make_lammps_inputs.py"
+# flatten: the generator writes into BASEA/nacl_n${NA}
+mv "${BASEA}/nacl_n${NA}/data.nacl" "${BASEA}/" 2>/dev/null
+IN_A="${BASEA}/nacl_n${NA}/in.nvt"
+
+echo "=== (A) 12-tile data-parallel: 12x INDEPENDENT lmp (each own MPI_COMM_WORLD, 1 tile) ==="
+# Each rank must be its own MPI_COMM_WORLD (nprocs==1) so pair_uma stays single-
+# tile (devices 1); a single mpiexec -n 12 would make comm->nprocs=12 and trip
+# the NCCL edge-parallel path. Launch 12 separate 1-rank jobs, one per tile.
+t0=$SECONDS
+for r in $(seq 0 11); do
+  RD="${BASEA}/rank${r}"; mkdir -p "${RD}"
+  cp -f "${BASEA}/data.nacl" "${RD}/"; cp -f "${IN_A}" "${RD}/in.nvt"
+  ( cd "${RD}" && mpiexec -n 1 --ppn 1 \
+      env ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=${r} UMA_EAGER_CKPT=1 \
+          UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+      "${LMP}" -in in.nvt > lmp.log 2>&1 ) &
+done
+wait
+rc=$?
+echo "12-tile (parallel) done wall=$((SECONDS-t0))s"
+echo "--- per-rank final thermo (step 10) ---"
+for r in $(seq 0 11); do
+  ln=$(grep -E "^\s*10\s" "${BASEA}/rank${r}/log.lammps" 2>/dev/null | tail -1)
+  echo "rank ${r} (tile ${r}): ${ln:-<no step10>}"
+done
+grep -iE "out of memory|OUT_OF|Segmentation|ERROR|Abort" "${BASEA}/mpiexec.log" | head -3
+
+# ============ (B) single-tile max-N under 10-step NVT: N=17, 18 ============
+echo "=== (B) single-tile NVT capacity: N=17,18 ==="
+for NB in 17 18; do
+  BASEB="${OUTDIR}/maxN_n${NB}"
+  OUTDIR="${BASEB}" ART="${ART}" N="${NB}" python -u "${LU}/scripts/phase5_make_lammps_inputs.py"
+  RB="${BASEB}/nacl_n${NB}"
+  echo "--- N=${NB} ($((8*NB*NB*NB)) atoms) ---"
+  t0=$SECONDS
+  ( cd "${RB}" && mpiexec -n 1 --ppn 1 \
+    env ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 UMA_EAGER_CKPT=1 \
+        UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+    "${LMP}" -in in.nvt > lmp.log 2>&1 )
+  rc=$?
+  echo "  N=${NB} exit=${rc} wall=$((SECONDS-t0))s :: $(grep -E '^\s*10\s' "${RB}/log.lammps" 2>/dev/null | tail -1)"
+  grep -iE "out of memory|OUT_OF|Segmentation" "${RB}/lmp.log" | head -1
+done
+
+echo "DONE phase5b"

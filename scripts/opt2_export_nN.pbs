@@ -1,0 +1,39 @@
+#!/bin/bash -l
+#PBS -N opt2_eN
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# opt2 export, parameterized: N (default 38), W=12, EDGE_AC_CHUNK=65536, freeze ON.
+# RANKS env selects which ranks to export this job (default all 0..11) so N=38 can
+# be split across two 1-hour jobs if a single job would exceed the wall.
+# Writes scripts/out/opt2/n${N}_chunk65536.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+N=${N:-38}
+ART=${LU}/scripts/out/opt2/n${N}_chunk${EDGE_AC_CHUNK:-65536}
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=${EDGE_AC_CHUNK:-65536}
+echo "=== opt2 export N=${N} W=12 AC, EDGE_AC_CHUNK=${EDGE_AC_CHUNK:-65536} freeze=ON ranks=[${RANKS:-0..11}] ==="
+for R in ${RANKS:-0 1 2 3 4 5 6 7 8 9 10 11}; do
+  [ -f "${ART}/w12/r${R}/model_traced.pt" ] && { echo "  r${R}: exists, skip"; continue; }
+  OUT="${ART}" N_LIST=${N} EXPORT_WORLD=12 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_r${R}.log" 2>&1
+  echo "  r${R}: $([ -f ${ART}/w12/r${R}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'opt2:|GRAPH-STRUCTURE|Error:' ${ART}/exp_r${R}.log | tail -2 | tr '\n' ' ')"
+done
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+echo "ranks present: $(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null|wc -l)/12"
+echo "top module r0: $(ls -la ${ART}/w12/r0/model_traced.pt 2>/dev/null|awk '{print $5/1048576" MB"}')"
+echo "DONE"

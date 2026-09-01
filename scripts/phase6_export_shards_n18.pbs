@@ -1,0 +1,59 @@
+#!/bin/bash -l
+#PBS -N p6_sh18
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-6 Gate 2 shard export: N=18 (46,656 atoms), W=2,4,8,12. Traces each rank
+# shard on ONE XPU tile. Higher W -> smaller per-shard edge slice. If low-W traces
+# OOM, we still get the high-W shards needed for the 12-tile target.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUT=${LU}/scripts/out/phase6_shards/uma-s-1p2-omat-f64-gp
+mkdir -p "${OUT}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export OUT
+export N_LIST=18
+# W=12 is the primary target (max-N goal is on 12 tiles). Model loaded once per
+# W now; SKIP_EXISTING resumes the 4 shards already done. Other W in a follow-up.
+export W_LIST=${W_LIST:-12}
+export SKIP_EXISTING=1
+export FXPU_WIGNER_PREP_CHUNK=65536
+export FXPU_WIGNER_PREP_CHUNK_MODE=both
+# (h) internal activation checkpointing: chunk edges so per-block SO2 transient
+# is bounded (fixes runtime 12-tile OOM at N=18).
+export ACT_CKPT=1
+export EDGE_AC_CHUNK=16384
+
+# Option (c): no_grad trace cuts peak memory. Process-per-shard for reliability
+# at N=18 (each rank a FRESH python process = clean XPU memory); SKIP_EXISTING
+# resumes. Robust even if one trace is near the edge.
+W=${W_LIST}
+RANKS="${RANKS:-$(seq -s, 0 $((W-1)))}"
+echo "=== export GP shards N=18 W=${W} ranks=${RANKS} (no_grad, process-per-shard) ==="
+IFS=',' read -ra RA <<< "${RANKS}"
+for r in "${RA[@]}"; do
+  echo "--- trace W=${W} r=${r} ---"
+  W_LIST=${W} N_LIST=18 EXPORT_ONLY_RANK=${r} \
+    python -u "${ENG}/python/export_shards_xpu.py" 2>&1 | grep -E "W=|OK |FAIL|SKIP|OUT_OF|out of memory|wigner" | tail -4
+done
+echo "=== shards ==="; ls "${OUT}"/model_mp_w${W}_n46656_r*.pt 2>/dev/null | wc -l
+echo "DONE p6_sh18"

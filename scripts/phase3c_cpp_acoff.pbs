@@ -1,0 +1,72 @@
+#!/bin/bash -l
+#PBS -N p3c_cpp
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-3c: run the C++ engine (memory-lean deployment path) on the AC-OFF,
+# non-merge, shape-generic FP64 traced artifact across N=2..12. Reuses the
+# Phase-3 ASE oracle (already computed). Tests:
+#   (a) is the traced "Expected 1 elements in a list" error gone with AC off?
+#   (b) true single-tile C++ N ceiling (OOM point)
+#   (c) energy+per-atom-force parity vs ASE oracle (|dE|<=1e-6, max|dF|<=1e-5)
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu
+CLI=${BUILD}/uma_parity_cli
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu     # AC-off shape-generic FP64
+SRC=${LU}/scripts/out/phase3                            # structures + oracle (Phase 3)
+OUTDIR=${LU}/scripts/out/phase3c
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+
+if [ ! -x "${CLI}" ]; then echo "MISSING ${CLI}"; exit 1; fi
+if [ ! -f "${ART}/model_traced.pt" ]; then echo "MISSING artifact ${ART}"; exit 1; fi
+
+# Copy oracle structures/forces into phase3c workspace for the comparator.
+for n in 2 3 4 6 8 10; do
+  s="${SRC}/nacl_n${n}"
+  [ -d "${s}" ] || continue
+  d="${OUTDIR}/nacl_n${n}"; mkdir -p "${d}"
+  cp -f "${s}/structure.txt" "${d}/" 2>/dev/null
+  cp -f "${s}/oracle_forces.npy" "${d}/" 2>/dev/null
+done
+cp -f "${SRC}/oracle_manifest.json" "${OUTDIR}/" 2>/dev/null
+
+echo "=== C++ engine on AC-off artifact, N=2..10 ==="
+for n in 2 3 4 6 8 10; do
+  d="${OUTDIR}/nacl_n${n}"; st="${d}/structure.txt"
+  [ -f "${st}" ] || { echo "N=${n}: no structure"; continue; }
+  echo "--- N=${n} ---"
+  "${CLI}" "${ART}" "${st}" --devices 1 --fd --fd-sample 100 \
+      --write-forces "${d}/cpp_forces.bin" > "${d}/cpp.log" 2>&1
+  echo "  exit=$? :: $(grep -E 'energy=|AG_FD' "${d}/cpp.log" | tr '\n' ' ')"
+  grep -iE "Expected .* elements|RuntimeError|Segmentation|OUT_OF_RESOURCES" "${d}/cpp.log" | head -1
+done
+
+echo "=== compare vs oracle ==="
+export OUTDIR E_TOL=1e-6 F_TOL=1e-5 MIN_SAMPLE=100
+python -u "${LU}/scripts/phase3_compare.py" || echo "compare exit=$?"
+echo "DONE phase3c"

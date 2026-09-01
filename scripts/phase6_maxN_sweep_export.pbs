@@ -1,0 +1,42 @@
+#!/bin/bash -l
+#PBS -N p6_msweep
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Pre-fix max-N baseline: export 12 AC+chunk W=12 shards (FP64) at descending N.
+# Whole-module C++ checkpoint (current state). Export only here; runs in a
+# separate job. N list high->low; SKIP_EXISTING resumes.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUT=${LU}/scripts/out/phase6_shards/uma-s-1p2-omat-f64-gp
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export OUT W_LIST=12 SKIP_EXISTING=1 ACT_CKPT=1 EDGE_AC_CHUNK=16384
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+
+NLIST="${NLIST:-16 14 12}"
+for N in ${NLIST}; do
+  echo "=== export W=12 shards N=${N} ==="
+  nat=$((8*N*N*N))
+  # process-per-shard (clean XPU mem per trace)
+  for r in $(seq 0 11); do
+    [ -f "${OUT}/model_mp_w12_n${nat}_r${r}.pt" ] && { echo "r=${r} exists"; continue; }
+    N_LIST=${N} EXPORT_ONLY_RANK=${r} python -u "${ENG}/python/export_shards_xpu.py" 2>&1 \
+      | grep -E "OK model|FAIL|OUT_OF|edge AC" | tail -2
+  done
+  echo "N=${N} shards: $(ls ${OUT}/model_mp_w12_n${nat}_r*.pt 2>/dev/null | wc -l)/12"
+done
+echo "DONE p6_msweep_export"

@@ -1,0 +1,31 @@
+#!/bin/bash -l
+#PBS -N sc16_e1t
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+# N=16 W=1 (single-tile) opt2 export only.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+ART=${LU}/scripts/out/opt2/n16_chunk65536_1tile
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+export EDGE_AC_CHUNK=65536
+echo "=== export N=16 W=1 ==="
+OUT="${ART}" N_LIST=16 EXPORT_WORLD=1 EXPORT_RANK=0 TRACE_DEV=xpu RECONSTRUCT=1 \
+  python -u "${ENG}/python/export_blocks_xpu.py" > "${ART}/exp.log" 2>&1
+rc=$?
+echo "N=16 W=1: $([ -f ${ART}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'opt2:|RECONSTRUCT|Error:' ${ART}/exp.log | tail -2 | tr '\n' ' ')"
+echo "traced size: $(ls -la ${ART}/model_traced.pt 2>/dev/null | awk '{print $5/1048576" MB"}')"
+echo "DONE"

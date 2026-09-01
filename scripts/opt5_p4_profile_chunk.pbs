@@ -1,0 +1,88 @@
+#!/bin/bash -l
+#PBS -N o5p4_prof
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+# opt5 P-4: torch.profiler on the N=32 chunk-0 module (the 25% forward + most of
+# the backward). Loads model_chunk_0.pt, feeds a realistic chunk (Ec=65536 edges,
+# N=262144 nodes, r0 node_offset=0), profiles fwd+bwd on XPU, prints top kernels.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+ART=${LU}/scripts/out/opt2/n32_chunk65536/w12/r0
+OUTDIR=${LU}/scripts/out/opt5p4; mkdir -p "${OUTDIR}"
+python - "$ART" "$OUTDIR" <<'PYEOF'
+import sys, torch, time
+art, outdir = sys.argv[1], sys.argv[2]
+dev = torch.device("xpu:0")
+m = torch.jit.load(f"{art}/model_chunk_0.pt", map_location=dev).eval()
+# Infer x_full feature dims from the block module's norm or a probe. UMA-s-1p2:
+# sphere_channels=128, sph_feature_size=(lmax+1)^2. Try to read from a small block.
+# Fall back to a forward shape probe.
+N = 262144          # total_atoms (r0 gathers full N)
+Ec = 65536          # edge_ac_chunk
+# Build candidate shapes; UMA-s uses lmax=2 -> sph=9 or mmax packing; probe.
+import itertools
+def make_inputs(sph, ch):
+    x = torch.randn(N, sph, ch, dtype=torch.float64, device=dev, requires_grad=True)
+    edv = torch.randn(Ec, 3, dtype=torch.float64, device=dev)
+    ed = (torch.rand(Ec, dtype=torch.float64, device=dev)*5.0+0.5)
+    an = torch.randint(0, 100, (N,), dtype=torch.long, device=dev)
+    ei = torch.randint(0, N, (2, Ec), dtype=torch.long, device=dev)
+    return x, edv, ed, an, ei
+ok=None
+for sph, ch in [(9,128),(16,128),(25,128),(9,256),(16,256),(25,256)]:
+    try:
+        x,edv,ed,an,ei = make_inputs(sph,ch)
+        out = m(x, edv, ed, an, ei, 0, 0)
+        torch.xpu.synchronize()
+        ok=(sph,ch); print(f"[probe] chunk fwd OK with sph={sph} ch={ch} out={tuple(out.shape)}", flush=True)
+        break
+    except Exception as e:
+        print(f"[probe] sph={sph} ch={ch} failed: {str(e)[:80]}", flush=True)
+if ok is None:
+    print("could not infer chunk input shape"); sys.exit(1)
+sph,ch = ok
+x,edv,ed,an,ei = make_inputs(sph,ch)
+# warmup
+for _ in range(2):
+    out = m(x, edv, ed, an, ei, 0, 0); loss = out.double().sum(); loss.backward()
+    x.grad=None; torch.xpu.synchronize()
+# timed fwd/bwd
+t0=time.perf_counter()
+for _ in range(3):
+    out = m(x, edv, ed, an, ei, 0, 0); torch.xpu.synchronize()
+tf=(time.perf_counter()-t0)/3
+t0=time.perf_counter()
+for _ in range(3):
+    out = m(x, edv, ed, an, ei, 0, 0); loss=out.double().sum()
+    loss.backward(); x.grad=None; torch.xpu.synchronize()
+tfb=(time.perf_counter()-t0)/3
+print(f"[timing] chunk fwd={tf*1000:.1f} ms  fwd+bwd={tfb*1000:.1f} ms  bwd~={(tfb-tf)*1000:.1f} ms", flush=True)
+# profile
+from torch.profiler import profile, ProfilerActivity
+acts=[ProfilerActivity.CPU]
+try: acts.append(ProfilerActivity.XPU)
+except Exception: pass
+with profile(activities=acts, record_shapes=False) as prof:
+    out = m(x, edv, ed, an, ei, 0, 0); loss=out.double().sum(); loss.backward()
+    torch.xpu.synchronize()
+key = "xpu_time_total" if any("XPU" in str(a) for a in acts) else "cpu_time_total"
+try:
+    print(prof.key_averages().table(sort_by=key, row_limit=25))
+except Exception:
+    print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=25))
+PYEOF
+echo DONE

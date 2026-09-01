@@ -1,0 +1,58 @@
+#!/bin/bash -l
+#PBS -N t_pc1
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# Path C 1-tile: our LAMMPS pair_style uma, NVT 300K 10 steps, N=6,12,18.
+# Export single-tile AC artifacts (cell-list) + run NVT + first-frame parity vs
+# ASE + AG=FD + walltime.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+OUTDIR=${LU}/scripts/out/test3path/pairuma_1tile; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "LMP MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both EDGE_AC_CHUNK=16384 UMA_EXPORT_CELL_LIST=1
+for N in 6 12 18; do
+  ART=${OUTDIR}/blocks_n${N}; mkdir -p "${ART}"
+  if [ ! -f "${ART}/model_traced.pt" ]; then
+    echo "=== export N=${N} single-tile AC ==="
+    OUT="${ART}" N_LIST=${N} TRACE_DEV=xpu RECONSTRUCT=0 python -u "${ENG}/python/export_blocks_xpu.py" 2>&1 | grep -E "DONE ->|error" | tail -1
+  fi
+  RB=${LU}/scripts/out/test3path/pairuma_1tile/n${N}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=1 NVT_STEPS=10 \
+    python -u "${LU}/scripts/phase6_make_gp_inputs.py"
+  RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  [ -z "${RD}" ] && { echo "N=${N}: input gen FAILED"; continue; }
+  echo "=== run pair_style uma NVT N=${N} (1 tile) ==="
+  t0=$SECONDS
+  ( cd "${RD}" && mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" "${LMP}" -in in.sp > lmp.log 2>&1 )
+  rc=$?; WALL=$((SECONDS-t0))
+  echo "N=${N} 1-tile exit=${rc} wall=${WALL}s :: $(grep -E '^\s*0\s' ${RD}/log.lammps 2>/dev/null|head -1)"
+  echo "=== first-frame parity vs ASE (E + per-atom force >=100) ==="
+  DIR="${RD}" UMA_CKPT_FILE="${UMA_CHECKPOINT}" MIN_SAMPLE=100 E_TOL=1e-6 F_TOL=1e-5 \
+    python -u "${LU}/scripts/phase5_parity.py" 2>&1 | grep -vi index_reduce | grep -E "natoms|dE=|max.dF|gates" | tail -3
+  echo "=== AG=FD (pair_style uma, 10 atoms) N=${N} ==="
+  export LMP_LAUNCH="mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 UMA_CHECKPOINT=${UMA_CHECKPOINT} LD_LIBRARY_PATH=${LD_LIBRARY_PATH} ${LMP} -in \$INFILE > \$LOGFILE 2>&1"
+  DIR="${RD}" W=1 FD_EPS=1e-4 AG_FD_TOL=1e-5 FD_SAMPLE=10 python -u "${LU}/scripts/phase6_agfd.py" 2>&1 | grep -E "AG=FD" | tail -1
+  echo "PAIRUMA1_RESULT N=${N} exit=${rc} wall=${WALL}s"
+done
+echo "DONE"
+EOF
+cd /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts && qsub -q debug-scaling test_pairuma_nvt_1tile.pbs 2>&1

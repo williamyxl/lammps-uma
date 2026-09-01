@@ -1,0 +1,94 @@
+#!/bin/bash -l
+#PBS -N regen_main
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# Regenerate §2/§2a/§3 report numbers on the current rebuilt binary:
+#   12-tile C1+C2 NVT 10-step at N=18,32,34,36,38 (C2 OOM expected N>=36)
+#   1-tile   C1+C2 NVT 10-step at N=6,12  (small, both fit)
+# Emits REGEN lines: N W CFG exit oom wall loop step10_PE step0_PE.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+OUTDIR=${LU}/scripts/out/regen_main; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "LMP MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+
+pe_at () {  # $1=log $2=step
+python3 - "$1" "$2" <<'PYEOF'
+import re,sys
+try: txt=open(sys.argv[1]).read()
+except: sys.exit()
+step=sys.argv[2]
+m=re.search(r"^\s*Step\b.*PotEng.*$",txt,re.M)
+if not m: sys.exit()
+hdr=m.group(0).split(); pe=hdr.index("PotEng")
+for ln in txt[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(hdr) and s and s[0]==step:
+        print(f"{float(s[pe]):.6f}"); break
+PYEOF
+}
+
+run_one () {  # N W CFG ART
+  local N=$1 W=$2 CFG=$3 ART=$4 NAT=$((8*$1*$1*$1))
+  local NR=""; [ "${CFG}" = "C2" ] && NR="UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1"
+  local RB=${OUTDIR}/n${N}_w${W}_${CFG}; mkdir -p "${RB}"
+  [ $W -gt 1 ] && cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json" 2>/dev/null
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=${W} NVT_STEPS=10 \
+    python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  local t0=$SECONDS
+  if [ $W -eq 1 ]; then
+    ( cd "${RD}" && mpiexec -n 1 --ppn 1 env ${NR} UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  else
+    ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env ${NR} UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+        UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  fi
+  local rc=$?; local WALL=$((SECONDS-t0))
+  local LOOP=$(grep -oE 'Loop time of [0-9.]+ .* for 10 steps' ${RD}/log.lammps 2>/dev/null|grep -oE '[0-9.]+'|head -1)
+  local OOM=$(grep -icE "out of memory|OUT_OF|UR_RESULT_ERROR" ${RD}/lmp.log 2>/dev/null)
+  local PE0=$(pe_at "${RD}/log.lammps" 0)
+  local PE10=$(pe_at "${RD}/log.lammps" 10)
+  echo "REGEN N=${N} W=${W} ${CFG} exit=${rc} oom=${OOM} wall=${WALL}s loop=${LOOP}s step0=${PE0} step10=${PE10}"
+}
+
+echo "### regen main (12-tile sweep + 1-tile small N) ###"
+# 12-tile C1+C2
+for N in 18 32 34 36 38; do
+  ART=${LU}/scripts/out/opt2/n${N}_chunk65536
+  run_one ${N} 12 C1 "${ART}"
+  run_one ${N} 12 C2 "${ART}"
+done
+# 1-tile C1+C2 small N
+for N in 6 12; do
+  ART=${LU}/scripts/out/opt2/n${N}_chunk65536_1tile
+  run_one ${N} 1 C1 "${ART}"
+  run_one ${N} 1 C2 "${ART}"
+done
+# 1-tile N=18 C1 (C2 OOMs at 1-tile N=18)
+run_one 18 1 C1 "${LU}/scripts/out/opt2/n18_chunk65536_1tile"
+run_one 18 1 C2 "${LU}/scripts/out/opt2/n18_chunk65536_1tile"
+echo "=== SUMMARY ==="
+grep "^REGEN" ${OUTDIR}/../regen_main.o* 2>/dev/null | tail -40 || true
+echo "DONE"

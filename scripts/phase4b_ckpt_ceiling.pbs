@@ -1,0 +1,90 @@
+#!/bin/bash -l
+#PBS -N p4b_ckpt
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-4B: rebuild engine with C++ activation checkpointing (CheckpointModuleFn
+# wired into single-tile Predictor::predict), then re-run C++ parity on the
+# AC-off shape-generic FP64 artifact across N to measure the new single-tile N
+# ceiling (expect > N=6). Parity vs ASE oracle preserved (checkpointing is
+# bit-exact).
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu
+CLI=${BUILD}/uma_parity_cli
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu     # AC-off shape-generic FP64
+SRC=${LU}/scripts/out/phase3
+OUTDIR=${LU}/scripts/out/phase4b
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
+export CC=$GCC/bin/gcc CXX=$GCC/bin/g++
+TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+SYCL_LIB_DIR=$CONDA_PREFIX/lib
+SYCL_INC_DIR=$CONDA_PREFIX/include
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${SYCL_LIB_DIR}/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+
+echo "=== rebuild engine (with checkpoint) ==="
+rm -rf "${BUILD}" && mkdir -p "${BUILD}"
+cmake -S "${ENG}" -B "${BUILD}" \
+  -D CMAKE_BUILD_TYPE=Release \
+  -D CMAKE_C_COMPILER=$GCC/bin/gcc -D CMAKE_CXX_COMPILER=$GCC/bin/g++ \
+  -D CMAKE_CXX_STANDARD=17 \
+  -D CMAKE_PREFIX_PATH="$TORCH_CMAKE" \
+  -D UMA_ENGINE_USE_XPU=ON -D UMA_ENGINE_USE_CUDA=OFF \
+  -D SYCL_LIBRARY=$SYCL_LIB_DIR/libsycl.so -D SYCL_LIBRARY_DIR=$SYCL_LIB_DIR \
+  -D SYCL_INCLUDE_DIR=$SYCL_INC_DIR -D SYCL_INCLUDE_SYCL_DIR=$SYCL_INC_DIR/sycl \
+  -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" \
+  -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,$SYCL_LIB_DIR -Wl,-rpath,$TORCH_LIB" \
+  2>&1 | tee "${OUTDIR}/cmake.log" | tail -6
+cmake --build "${BUILD}" -j 32 2>&1 | tee "${OUTDIR}/build.log" | tail -8
+[ -x "${CLI}" ] || { echo "BUILD FAILED"; exit 1; }
+echo "BUILD OK"
+
+export LD_LIBRARY_PATH="${COMPAT}:${SYCL_LIB_DIR}:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export UMA_CKPT=1     # enable C++ activation checkpointing
+
+# stage oracle structures + forces
+for n in 2 4 6 8 10; do
+  s="${SRC}/nacl_n${n}"; [ -d "${s}" ] || continue
+  d="${OUTDIR}/nacl_n${n}"; mkdir -p "${d}"
+  cp -f "${s}/structure.txt" "${s}/oracle_forces.npy" "${d}/" 2>/dev/null
+done
+cp -f "${SRC}/oracle_manifest.json" "${OUTDIR}/" 2>/dev/null
+
+echo "=== C++ parity with checkpoint, N=2,4,6,8,10 ==="
+for n in 2 4 6 8 10; do
+  d="${OUTDIR}/nacl_n${n}"; st="${d}/structure.txt"
+  [ -f "${st}" ] || { echo "N=${n}: no structure"; continue; }
+  echo "--- N=${n} ---"
+  "${CLI}" "${ART}" "${st}" --devices 1 --fd --fd-sample 100 \
+      --write-forces "${d}/cpp_forces.bin" > "${d}/cpp.log" 2>&1
+  rc=$?
+  echo "  exit=${rc} :: $(grep -E 'energy=|AG_FD' "${d}/cpp.log" | tr '\n' ' ')"
+  grep -iE "out of memory|OUT_OF_RESOURCES|Expected .* elements|Segmentation" "${d}/cpp.log" | head -1
+done
+
+echo "=== compare vs oracle ==="
+export OUTDIR E_TOL=1e-6 F_TOL=1e-5 MIN_SAMPLE=100
+python -u "${LU}/scripts/phase3_compare.py" || echo "compare exit=$?"
+echo "DONE phase4b"

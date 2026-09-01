@@ -1,0 +1,89 @@
+#!/bin/bash -l
+#PBS -N sc16_run
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# N=16 scaling study: single-point (run 0) force call on W=1,2,4,6,8,12 tiles.
+# Uses single-point to avoid the N-specific chunk-count drift bug that breaks NVT
+# at step>0 for certain N (N=16 hits this; single-point is the standard strong-
+# scaling metric for one complete forward+backward force evaluation).
+# Runs both C1 (full checkpoint) and C2 (opt4: UMA_NO_RECOMPUTE_BLOCK/EDEG) per W.
+# W=1 uses the 1-tile artifact dir; W>1 uses the GP multi-rank dir.
+# Reports wall, step-0 PE, and opt4 gain for each W.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=16; NAT=$((8*N*N*N))
+ART_GP=${LU}/scripts/out/opt2/n16_chunk65536
+ART_1T=${LU}/scripts/out/opt2/n16_chunk65536_1tile
+OUTDIR=${LU}/scripts/out/scaling_n16; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "LMP MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+
+run_w () {
+  local W=$1 CFG=$2
+  local NR_ENV=""; [ "${CFG}" = "C2" ] && NR_ENV="UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1"
+  local ART; [ $W -eq 1 ] && ART="${ART_1T}" || ART="${ART_GP}"
+  local NR_ART=$([ $W -eq 1 ] && ls ${ART}/model_traced.pt 2>/dev/null|wc -l || ls -d ${ART}/w${W}/r*/model_traced.pt 2>/dev/null|wc -l)
+  if [ "${NR_ART}" -lt "${W}" ]; then echo "SCALING W=${W} ${CFG}: artifacts ${NR_ART}/${W} MISSING, skip"; return; fi
+  [ $W -gt 1 ] && cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json" 2>/dev/null
+  local RB=${OUTDIR}/w${W}_${CFG}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=${W} NVT_STEPS=0 \
+    python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null | head -1))
+  local t0=$SECONDS
+  if [ $W -eq 1 ]; then
+    ( cd "${RD}" && mpiexec -n 1 --ppn 1 env ${NR_ENV} \
+        UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  else
+    ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env ${NR_ENV} \
+        UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  fi
+  local rc=$?; local WALL=$((SECONDS-t0))
+  local OOM=$(grep -icE "out of memory|OUT_OF|UR_RESULT_ERROR" ${RD}/lmp.log 2>/dev/null)
+  local PE=$(python3 - "${RD}/log.lammps" 2>/dev/null <<'PYEOF'
+import re,sys
+try: txt=open(sys.argv[1]).read()
+except: sys.exit()
+m=re.search(r"^\s*Step\b.*PotEng.*$",txt,re.M)
+if not m: sys.exit()
+hdr=m.group(0).split(); pe=hdr.index("PotEng")
+for ln in txt[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(hdr) and s and s[0]=="0":
+        print(f"{float(s[pe]):.6f}"); break
+PYEOF
+)
+  echo "SCALING N=${N} W=${W} ${CFG} exit=${rc} oom=${OOM} wall=${WALL}s PE=${PE}"
+}
+
+echo "N=${N} atoms=${NAT}  tiles: 1 2 4 6 8 12"
+for W in 1 2 4 6 8 12; do
+  echo "=== W=${W} ==="
+  run_w ${W} C1
+  run_w ${W} C2
+done
+echo "=== SUMMARY ==="
+grep "^SCALING" "${OUTDIR}"/../sc16_run.o* 2>/dev/null
+echo "DONE"

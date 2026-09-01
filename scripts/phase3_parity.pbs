@@ -1,0 +1,74 @@
+#!/bin/bash -l
+#PBS -N p3_parity
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-3: single-tile parity gate on PERTURBED NaCl.
+#   1) ASE UMA oracle (energy + per-atom forces) on identical coords
+#   2) C++ engine (uma_parity_cli, XPU FP64) energy + forces + AG=FD per N
+#   3) compare: |dE|<=1e-6 eV, per-atom max|dF|<=1e-5 (>=100 atoms), + AG=FD
+# Also probes the per-tile N ceiling and reproduces the large-N traced error.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu
+CLI=${BUILD}/uma_parity_cli
+ART=${LU}/scripts/out/phase1_agfd/traced_shapegeneric_xpu
+OUTDIR=${LU}/scripts/out/phase3
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+
+# Force conda libsycl.9 at runtime.
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export OUTDIR
+
+# N ladder: small (validated) up through the cliff. N=10=8000 atoms.
+export N_LIST="2,3,4,6,8,10"
+
+if [ ! -x "${CLI}" ]; then echo "MISSING ${CLI} (run phase2 build first)"; exit 1; fi
+
+echo "=== 1) ASE UMA oracle + structures ==="
+python -u "${LU}/scripts/phase3_make_nacl_and_oracle.py" || echo "oracle exit=$?"
+
+echo "=== 2) C++ engine per N ==="
+IFS=',' read -ra NS <<< "${N_LIST}"
+for n in "${NS[@]}"; do
+  sdir="${OUTDIR}/nacl_n${n}"
+  st="${sdir}/structure.txt"
+  if [ ! -f "${st}" ]; then echo "N=${n}: no structure (oracle skipped)"; continue; fi
+  echo "--- C++ N=${n} ---"
+  "${CLI}" "${ART}" "${st}" --devices 1 --fd --fd-sample 100 \
+      --write-forces "${sdir}/cpp_forces.bin" > "${sdir}/cpp.log" 2>&1
+  echo "  exit=$? :: $(grep -E 'energy=|AG_FD' "${sdir}/cpp.log" | tr '\n' ' ')"
+  grep -iE "Expected .* elements|RuntimeError|Segmentation|OUT_OF_RESOURCES" "${sdir}/cpp.log" | head -2
+done
+
+echo "=== 3) compare vs oracle ==="
+export E_TOL=1e-6 F_TOL=1e-5 MIN_SAMPLE=100
+python -u "${LU}/scripts/phase3_compare.py" || echo "compare exit=$?"
+
+echo "DONE phase3"

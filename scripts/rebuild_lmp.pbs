@@ -1,0 +1,26 @@
+#!/bin/bash -l
+#PBS -N rebuild
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# Fresh rebuild of build-lmp-xccl/lmp from current committed source, so all
+# regenerated report numbers come from a known, reproducible binary.
+set -euo pipefail  # P3.2: no activation here, so strict mode is safe up front
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+# P1.3/P3.2: capture the build script's real exit (do not let `| tail` mask it, and
+# do not let `set -e` abort before we read PIPESTATUS).
+BUILD_RC=0
+bash "${LU}/scripts/phase6_build_lammps_xccl.sh" 2>&1 | tail -12 || BUILD_RC=${PIPESTATUS[0]}
+echo "build exit=${BUILD_RC}"
+echo "=== binary ==="
+ls -la "${LU}/build-lmp-xccl/lmp"
+echo "=== has opt4 knobs ==="
+strings "${LU}/build-lmp-xccl/lmp" 2>/dev/null | grep -cE "UMA_NO_RECOMPUTE"
+echo "DONE"
+exit ${BUILD_RC}

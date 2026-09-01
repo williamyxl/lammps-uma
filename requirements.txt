@@ -1,0 +1,17 @@
+# Pinned runtime/export environment for the UMA LAMMPS pair style (P5'.1).
+#
+# The Python export layer (src/ML-UMA/uma-engine/python/) monkey-patches ~25
+# fairchem/torch globals and hand-reimplements several fairchem forward bodies, so
+# it is tightly coupled to these exact versions. trace_patch.apply_trace_patches()
+# asserts fairchem-core and torch match (override: UMA_ALLOW_FAIRCHEM_MISMATCH=1).
+#
+# The runtime env is an Aurora XPU conda prefix (fxpu); torch is the Intel XPU
+# build, which is NOT on PyPI — install it from the Intel/oneAPI channel used to
+# create that prefix. The pin below records the validated versions; it is a
+# reproducibility manifest, not a `pip install -r` target for a generic machine.
+#
+# Validated on Aurora (REPORT_2path_nvt_comparison.md, all §14 sprints):
+fairchem-core==2.21.0
+torch==2.13.0        # Intel XPU build: 2.13.0+xpu
+ase
+numpy

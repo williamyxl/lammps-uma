@@ -1,0 +1,51 @@
+#!/bin/bash -l
+#PBS -N n16par4
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+# Per-atom force + energy parity for N=16 W=2,4,6,8 (fast config) vs the ASE-GP
+# force oracles. Single-point. Upgrades §13 rows from energy-only to full PASS.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine; LMP=${LU}/build-lmp-xccl/lmp
+A16=${LU}/scripts/out/n16_fast; ORA=${HEN}/pbs/out/ase_n16_forces_ladder
+N=16; OUTDIR=${LU}/scripts/out/n16par4; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+for W in 2 4 6 8; do
+  OW=$(printf "%02d" ${W})
+  if [ ! -f "${ORA}/forces_w${OW}.npy" ]; then echo "N16PAR W=${W}: ORACLE MISSING"; continue; fi
+  cp -f "${A16}/w${W}/r0/metadata.json" "${A16}/metadata.json"
+  NAT=$((8*N*N*N)); RB=${OUTDIR}/w${W}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${A16}" N=${N} W=${W} NVT_STEPS=0 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  # fast config with the K that fits at this W (adaptive: try 3->0)
+  DONE=0
+  for K in 3 2 1 0; do
+    ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1 UMA_CHUNK_RETAIN_K=${K} UMA_SKIP_MAXNBR_CAP=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+    OOM=$(grep -icE "out of memory|UR_RESULT" ${RD}/lmp.log 2>/dev/null)
+    [ -f "${RD}/forces_step0.dump" ] && [ "$OOM" = "0" ] && { DONE=1; break; }
+  done
+  [ "$DONE" = "0" ] && { echo "N16PAR W=${W}: run FAILED"; continue; }
+  OD=${RB}/oracle; mkdir -p "${OD}"
+  ln -sf "${ORA}/summary_w${OW}.json" "${OD}/summary_w12.json"
+  ln -sf "${ORA}/forces_w${OW}.npy" "${OD}/forces_w12.npy"
+  echo "=== N=16 W=${W} parity ==="
+  LMP_DIR="${RD}" ASE_DIR="${OD}" MIN_SAMPLE=100 E_TOL_PER_ATOM_MEV=1e-3 F_TOL=1e-5 python3 "${LU}/scripts/parity_vs_asegp.py" 2>&1 | grep -E "dE=|max.dF|PARITY"
+done
+echo DONE

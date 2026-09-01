@@ -1,0 +1,91 @@
+#!/bin/bash -l
+#PBS -N p4b_cap
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-4b: eager+checkpointing per-tile capacity sweep on ONE XPU tile.
+# Ascends N (perturbed NaCl) with UMA_EAGER_CKPT=1, single-point E+F each, until
+# OOM. Reports max N (atoms=8*N^3) that fits + per-N energy/fmax/time.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu
+CLI=${BUILD}/uma_parity_cli
+ART=${LU}/scripts/out/phase3b/traced_mergemole_xpu
+OUTDIR=${LU}/scripts/out/phase4b_cap
+mkdir -p "${OUTDIR}"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+COMPAT=${OUTDIR}/compat_libs; mkdir -p "${COMPAT}"
+ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_EAGER_CKPT=1
+
+[ -x "${CLI}" ] || { echo "MISSING ${CLI} (run phase4 build first)"; exit 1; }
+
+# structure generator (perturbed NaCl, hen build) -> parity_cli format
+gen_struct() {  # $1=N  $2=outfile
+python - "$1" "$2" <<'PY'
+import sys, numpy as np
+n=int(sys.argv[1]); out=sys.argv[2]
+a=5.64
+na=np.array([[0,0,0],[0,.5,.5],[.5,0,.5],[.5,.5,0]],float); cl=na+0.5
+Z={'Na':11,'Cl':17}; syms=[]; sc=[]
+for ix in range(n):
+ for iy in range(n):
+  for iz in range(n):
+   o=np.array([ix,iy,iz],float)
+   for f in na: syms.append('Na'); sc.append((f+o)/n)
+   for f in cl: syms.append('Cl'); sc.append((f+o)/n)
+cell=np.eye(3)*(a*n); pos=(np.array(sc)@cell)
+rng=np.random.default_rng(0); pos=pos+rng.normal(0,0.05,pos.shape)
+with open(out,'w') as fh:
+ fh.write(f"{len(syms)}\n")
+ for i,s in enumerate(syms):
+  fh.write(f"{Z[s]} {pos[i,0]:.16e} {pos[i,1]:.16e} {pos[i,2]:.16e}\n")
+ fh.write(" ".join(f"{cell[r,c]:.16e}" for r in range(3) for c in range(3))+"\n")
+print(len(syms))
+PY
+}
+
+echo "=== eager+ckpt capacity sweep (single tile) ==="
+LAST_OK=0
+for n in 10 12 14 16 18 20; do
+  st="${OUTDIR}/nacl_n${n}.txt"
+  nat=$(gen_struct "${n}" "${st}")
+  echo "--- N=${n} atoms=${nat} ---"
+  t0=$SECONDS
+  "${CLI}" "${ART}" "${st}" --devices 1 > "${OUTDIR}/n${n}.log" 2>&1
+  rc=$?
+  dt=$((SECONDS-t0))
+  eline=$(grep -E "energy=|fmax=" "${OUTDIR}/n${n}.log" | tr '\n' ' ')
+  echo "  exit=${rc} time=${dt}s :: ${eline}"
+  if [ ${rc} -ne 0 ]; then
+    grep -iE "out of memory|OUT_OF_RESOURCES|Segmentation" "${OUTDIR}/n${n}.log" | head -1
+    echo "  -> STOP: N=${n} failed (ceiling below this)"
+    break
+  fi
+  LAST_OK=${n}
+done
+echo "MAX_OK_N=${LAST_OK} atoms=$((8*LAST_OK*LAST_OK*LAST_OK))"
+echo "DONE phase4b_cap"

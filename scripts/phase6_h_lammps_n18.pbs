@@ -1,0 +1,59 @@
+#!/bin/bash -l
+#PBS -N p6h_lmp18
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# Prove N=18 single-tile via ACTUAL LAMMPS pair_style uma (pure C++ traced AC),
+# NOT uma_parity_cli, NOT python. Build LAMMPS w/ current engine, run devices 1.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+ART=${LU}/scripts/out/phase6_h_p1b/blocks_n18   # reuse the N=18 traced AC artifact
+OUTDIR=${LU}/scripts/out/phase6_h_lmp18; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+
+echo "=== rebuild LAMMPS with current engine (block_context/predictor edits) ==="
+FORCE_REBUILD=1 bash "${LU}/scripts/phase6_build_lammps_xccl.sh" 2>&1 | tail -8
+[ -x "${LMP}" ] || { echo "LMP BUILD FAILED"; exit 1; }
+echo "LMP BUILD OK; PairUMA present: $(nm ${LMP} 2>/dev/null | grep -c PairUMA)"
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+# IMPORTANT: do NOT set UMA_EAGER_CKPT (that would be the python path). Prove C++.
+unset UMA_EAGER_CKPT
+
+# LAMMPS data + input (N=18, pair_style uma devices 1 precision double), run 0 + dump.
+R=${OUTDIR}/nacl_n18_w1; mkdir -p "${R}"
+OUTDIR="${R}" ART="${ART}" N=18 W=1 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1 || \
+  OUTDIR="${OUTDIR}" ART="${ART}" N=18 W=1 python -u "${LU}/scripts/phase5_make_lammps_inputs.py" >/dev/null 2>&1
+# find the generated rundir/input
+RD=$(dirname $(ls ${R}/*/in.sp ${R}/*/in.nvt ${OUTDIR}/*/in.nvt 2>/dev/null | head -1))
+[ -z "${RD}" ] && { echo "no input generated"; ls -R ${R} ${OUTDIR} | head; exit 1; }
+INF=$(ls ${RD}/in.sp ${RD}/in.nvt 2>/dev/null | head -1)
+echo "rundir=${RD} input=${INF}"
+echo "=== run LAMMPS pair_style uma devices 1, N=18 (mpiexec -n 1, no python) ==="
+( cd "${RD}" && mpiexec -n 1 --ppn 1 \
+    env ZE_AFFINITY_MASK=0 UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+    "${LMP}" -in "$(basename ${INF})" > lmp.log 2>&1 )
+rc=$?
+echo "lmp exit=${rc}"
+echo "-- backend loaded (must be traced AC, no python) --"
+grep -iE "loaded .*block .*chunk|edge_degree|per-chunk|eager|python|worker" ${RD}/lmp.log | grep -vi index_reduce | head
+echo "-- step0 thermo --"
+grep -E "^\s*0\s+[0-9]" ${RD}/log.lammps 2>/dev/null | head -1
+grep -iE "out of memory|OUT_OF|ERROR|Segmentation" ${RD}/lmp.log | head -3
+echo "DONE"

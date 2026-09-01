@@ -1,0 +1,108 @@
+#!/bin/bash -l
+#PBS -N final_pp
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# FINAL perf + parity, latest code (opt5-graph 07:54):
+#   N=16 W=1,2,4,6,8,12 : fast config chunk=32768 + SKIP_MAXNBR_CAP + C2 + RETAIN_K=3
+#   N=32 W=12           : C2 (chunk=65536, no retain -> OOM), SKIP_MAXNBR_CAP
+# For each: NVT-10 Loop/wall + single-point per-atom force parity vs ASE oracle.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+A16=${LU}/scripts/out/n16_fast
+A16_1T=${LU}/scripts/out/n16_fast_1tile
+A32=${LU}/scripts/out/opt2/n32_chunk65536
+ORA16=${HEN}/pbs/out/ase_n16_parity
+ORA16L=${HEN}/pbs/out/ase_n16_forces_ladder   # W=2/4/6/8 per-atom force oracles (G4)
+ORA32=${HEN}/pbs/out/ase12_n32
+OUTDIR=${LU}/scripts/out/final_pp; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+set +e   # a single-config OOM must NOT abort the whole sweep
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+
+pe_at () { python3 -c "
+import re,sys
+try: t=open('$1').read()
+except: print('NA'); sys.exit()
+m=re.search(r'^\s*Step\b.*PotEng.*\$',t,re.M)
+if not m: print('NA'); sys.exit()
+h=m.group(0).split(); pe=h.index('PotEng')
+for ln in t[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(h) and s and s[0]=='$2': print(f'{float(s[pe]):.6f}'); break
+"; }
+
+# args: N W ART NRENV ORACLE_DIR ORA_W
+# NRENV should be the C2 flags; RETAIN_K is appended adaptively (K=3 first, K=0 fallback on OOM).
+one () {
+  local N=$1 W=$2 ART=$3 NRENV=$4 ORA=$5 OW=$6 NAT=$((8*$1*$1*$1))
+  # Optional $7 = space-separated RETAIN_K list to try (default "3 2 1 0"). W=8's
+  # K=3 thrashes memory (report §13: near-OOM, never completes in walltime), so
+  # the caller pins W=8 to "0" to avoid stalling the whole sweep.
+  local KLIST=${7:-"3 2 1 0"}
+  [ $W -gt 1 ] && cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json" 2>/dev/null || true
+  local mpi="mpiexec -n ${W} --ppn ${W}"
+  # ---- NVT-10 timing, adaptive RETAIN_K (KLIST, first that fits) ----
+  local RB=${OUTDIR}/n${N}_w${W}_nvt; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=${W} NVT_STEPS=10 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  local LOOP="" WALL=0 OOM=1 rc=1 KUSED=-1
+  for K in ${KLIST}; do
+    local t0=$SECONDS
+    ( cd "${RD}" && ${mpi} env UMA_ALLOW_LEGACY_METADATA=1 ${NRENV} UMA_CHUNK_RETAIN_K=${K} UMA_SKIP_MAXNBR_CAP=1 \
+        UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+        LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+    rc=$?; WALL=$((SECONDS-t0))
+    OOM=$(grep -icE "out of memory|OUT_OF|UR_RESULT_ERROR" ${RD}/lmp.log 2>/dev/null)
+    LOOP=$(grep -oE 'Loop time of [0-9.]+ .* for 10 steps' ${RD}/log.lammps 2>/dev/null|grep -oE '[0-9.]+'|head -1)
+    if [ "${rc}" = "0" ] && [ "${OOM}" = "0" ] && [ -n "${LOOP}" ]; then KUSED=${K}; break; fi
+  done
+  # ---- single-point parity (use the K that fit; K=0 if none) ----
+  local KP=${KUSED}; [ "${KP}" -lt 0 ] && KP=0
+  local PAR="skip"
+  if [ -n "${ORA}" ]; then
+    local RBP=${OUTDIR}/n${N}_w${W}_sp; mkdir -p "${RBP}"
+    OUTDIR="${RBP}" ART="${ART}" N=${N} W=${W} NVT_STEPS=0 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+    local RDP=$(dirname $(ls ${RBP}/*/in.sp 2>/dev/null|head -1))
+    ( cd "${RDP}" && ${mpi} env UMA_ALLOW_LEGACY_METADATA=1 ${NRENV} UMA_CHUNK_RETAIN_K=${KP} UMA_SKIP_MAXNBR_CAP=1 \
+        UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
+        gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+    local OD=${RBP}/oracle; mkdir -p "${OD}"
+    ln -sf "${ORA}/summary_w${OW}.json" "${OD}/summary_w12.json"
+    ln -sf "${ORA}/forces_w${OW}.npy" "${OD}/forces_w12.npy"
+    PAR=$(LMP_DIR="${RDP}" ASE_DIR="${OD}" MIN_SAMPLE=100 E_TOL_PER_ATOM_MEV=1e-3 F_TOL=1e-5 \
+          python3 "${LU}/scripts/parity_vs_asegp.py" 2>/dev/null | grep -E "dE=|max.dF|PARITY" | tr '\n' ' ')
+  fi
+  echo "FINAL N=${N} W=${W} retainK=${KUSED} exit=${rc} oom=${OOM} loop=${LOOP}s wall=${WALL}s step0=$(pe_at ${RD}/log.lammps 0) step10=$(pe_at ${RD}/log.lammps 10)"
+  echo "  PARITY: ${PAR}"
+}
+
+echo "########## N=16 fast (chunk32768 + C2 + adaptive RETAIN_K + skip-cap) ##########"
+C2="UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1"
+one 16 1  "${A16_1T}" "${C2}" "${ORA16}" "01"
+# G4: full per-atom force parity at EVERY W using the W=2/4/6/8 ladder oracles.
+for W in 2 4 6; do one 16 ${W} "${A16}" "${C2}" "${ORA16L}" "0${W}"; done
+one 16 8 "${A16}" "${C2}" "${ORA16L}" "08" "0"   # pin K=0 (K=3 thrashes at W=8)
+one 16 12 "${A16}" "${C2}" "${ORA16}" "12"
+echo "########## N=32 W=12 (C2, chunk65536, no retain) ##########"
+one 32 12 "${A32}" "${C2}" "${ORA32}" "12"
+echo DONE

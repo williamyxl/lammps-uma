@@ -1,0 +1,58 @@
+#!/bin/bash -l
+#PBS -N p3b_merge
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Phase-3b: re-export shape-generic FP64 traced artifact with merge_mole=True
+# (fuses MOLE experts -> removes the baked segment-list that broke the traced
+# module at large N). Validate: shape-generality + eager AG=FD at N=8 and N=10,
+# and confirm the TRACED module now runs at N=8/10 (traced_error should clear).
+# Saves the new artifact for the C++ engine parity re-run.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+ENG=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/src/ML-UMA/uma-engine
+OUTDIR=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/phase3b
+mkdir -p "${OUTDIR}"
+
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1
+export FAIRCHEM_OFFLINE=1
+export PYTHONUNBUFFERED=1
+
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export UMA_TASK=omat
+export N_MIN=8
+export N_MAX=8
+export FD_EPS=1e-4
+export AG_FD_TOL=1e-5
+export FD_SAMPLE_ATOMS=100
+export TRACE_N=2
+export SHAPE_GENERIC=1
+# Hypothesis: the baked variable-length list is the activation-checkpoint /
+# MOLE segment list. Trace with AC OFF and merge_mole OFF -> single segment at
+# all N -> traced graph runs at large N, and energy stays exact (no merge approx).
+export ACT_CKPT=0
+export MERGE_MOLE=0
+export FXPU_WIGNER_PREP_CHUNK=65536
+export FXPU_WIGNER_PREP_CHUNK_MODE=both
+export KEEP_TRACE_DIR="${OUTDIR}/traced_mergemole_xpu"
+export OUT="${OUTDIR}/spike_n8_10_mergemole.json"
+
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}:${PYTHONPATH:-}"
+python -c "import torch;print('torch',torch.__version__,'ndev',torch.xpu.device_count())"
+
+echo "=== re-export merge_mole + validate N=8,10 (shape-generic, AC on) ==="
+python -u "${ENG}/python/spike_xpu_force_agfd.py" || echo "exit=$?"
+echo "DONE phase3b"

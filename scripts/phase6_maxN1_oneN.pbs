@@ -1,0 +1,49 @@
+#!/bin/bash -l
+#PBS -N p6_mxN1
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# Single-tile max-N: export N-specific AC artifact (cell-list, fast) + run
+# pair_style uma devices 1 with LAMMPS NL (fast). Record wall + OOM. N from env.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=${N:-19}
+ART=${LU}/scripts/out/phase6_maxN1/blocks_n${N}
+OUTDIR=${LU}/scripts/out/phase6_maxN1/n${N}; mkdir -p "${OUTDIR}" "${ART}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both EDGE_AC_CHUNK=16384
+export UMA_EXPORT_CELL_LIST=1
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+NAT=$((8*N*N*N))
+echo "=== export N=${N} (${NAT} atoms) single-tile AC (cell-list) ==="
+if [ ! -f "${ART}/model_traced.pt" ]; then
+  OUT="${ART}" N_LIST=${N} TRACE_DEV=xpu RECONSTRUCT=0 python -u "${ENG}/python/export_blocks_xpu.py" 2>&1 | grep -E "DONE ->|error|Error|OUT_OF" | tail -2
+fi
+[ -f "${ART}/model_traced.pt" ] || { echo "EXPORT FAIL"; exit 1; }
+echo "=== run N=${N} single tile (LAMMPS NL) ==="
+RB=${OUTDIR}/run; mkdir -p "${RB}"
+OUTDIR="${RB}" ART="${ART}" N=${N} W=1 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+t0=$SECONDS
+( cd "${RD}" && mpiexec -n 1 --ppn 1 env ZE_AFFINITY_MASK=0 UMA_CHECKPOINT="${UMA_CHECKPOINT}" LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" "${LMP}" -in in.sp > lmp.log 2>&1 )
+rc=$?; WALL=$((SECONDS-t0))
+echo "N=${N} 1-tile exit=${rc} wall=${WALL}s $(grep -E '^\s*0\s' ${RD}/log.lammps 2>/dev/null|head -1)"
+echo "OOM: $(grep -c 'out of memory\|OUT_OF' ${RD}/lmp.log 2>/dev/null)"
+echo "MAXN1_RESULT N=${N} atoms=${NAT} exit=${rc} wall=${WALL}s"
+echo "DONE"

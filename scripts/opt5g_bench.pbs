@@ -1,0 +1,62 @@
+#!/bin/bash -l
+#PBS -N o5g_bench
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+# opt5-graph fix#1 bench: N=16 W=12 C2 NVT-10 with vs without the graph-phase
+# sync removal (UMA_SKIP_MAXNBR_CAP + on-device pbc + z cache). chunk=32768.
+# Reports Loop, graph sub-phase, parity (step0 must stay -110673.829050).
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=16; NAT=$((8*N*N*N))
+ART=${LU}/scripts/out/diag16/n16_chunk32768
+OUTDIR=${LU}/scripts/out/opt5g; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+cp -f "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+
+run () {
+  local TAG=$1 SKIP=$2
+  local RB=${OUTDIR}/${TAG}; mkdir -p "${RB}"
+  OUTDIR="${RB}" ART="${ART}" N=${N} W=12 NVT_STEPS=10 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+  local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+  local t0=$SECONDS
+  ( cd "${RD}" && mpiexec -n 12 --ppn 12 env UMA_MP_PERF=1 UMA_SKIP_MAXNBR_CAP=${SKIP} \
+      UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1 \
+      UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+      LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+  local WALL=$((SECONDS-t0))
+  local LOOP=$(grep -oE 'Loop time of [0-9.]+ .* for 10 steps' ${RD}/log.lammps 2>/dev/null|grep -oE '[0-9.]+'|head -1)
+  local PE0=$(python3 -c "
+import re; t=open('${RD}/log.lammps').read(); m=re.search(r'^\s*Step\b.*PotEng.*\$',t,re.M); h=m.group(0).split(); pe=h.index('PotEng')
+for ln in t[m.end():].splitlines():
+    s=ln.split()
+    if len(s)>=len(h) and s and s[0]=='0': print(f'{float(s[pe]):.6f}'); break
+")
+  echo "O5G ${TAG} SKIP_CAP=${SKIP} loop=${LOOP}s step0=${PE0}"
+  echo "  steady per-call (rank0): $(grep 'MP_PERF rank=0 ' ${RD}/lmp.log 2>/dev/null | tail -1 | grep -oE 'ms_graph=[0-9.]+ \(ms_pre=[0-9.]+ ms_vesin=[0-9.]+ ms_shardpad=[0-9.]+\)|ms_total=[0-9.]+')"
+}
+echo "### opt5-graph fix#1: N=16 W=12 C2, cap-sync ON vs OFF ###"
+run capON  0
+run capOFF 1
+echo "(baseline chunk32768 loop ~18.4s; ASE real-NVT md 17.4s; step0 ref -110673.829050)"
+echo DONE

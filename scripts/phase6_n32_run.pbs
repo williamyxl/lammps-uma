@@ -1,0 +1,50 @@
+#!/bin/bash -l
+#PBS -N p6_n32run
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+# N=32 12-tile GP+AC run with the C++ cell-list NL (rebuild engine+LAMMPS).
+# Shards already exported (phase6_maxN12/n32_ac/w12/r*). Also A/B the NL at N=8 GP.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+ART=${LU}/scripts/out/phase6_maxN12/n32_ac
+OUTDIR=${LU}/scripts/out/phase6_n32; mkdir -p "${OUTDIR}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+echo "=== rebuild LAMMPS (C++ cell-list NL) ==="
+FORCE_REBUILD=1 bash "${LU}/scripts/phase6_build_lammps_xccl.sh" 2>&1 | tail -6
+[ -x "${LMP}" ] || { echo "LMP BUILD FAILED"; exit 1; }
+echo "LMP OK"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=pmix CCL_ATL_TRANSPORT=mpi CCL_ZE_IPC_EXCHANGE=sockets FI_PROVIDER=cxi
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+NAT=$((8*32*32*32))
+echo "=== run N=32 (${NAT} atoms) on 12 tiles (C++ cell-list NL) ==="
+RB=${OUTDIR}/run; mkdir -p "${RB}"
+OUTDIR="${RB}" ART="${ART}" N=32 W=1 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+t0=$SECONDS
+( cd "${RD}" && mpiexec -n 12 --ppn 12 env UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+rc=$?; WALL=$((SECONDS-t0))
+echo "N=32 W=12 exit=${rc} wall=${WALL}s :: $(grep -E '^\s*0\s' ${RD}/log.lammps 2>/dev/null|head -1)"
+grep -iE "out of memory|OUT_OF|abort|error" ${RD}/lmp.log | grep -vi index_reduce | head -3
+echo "=== parity vs ASE ==="
+DIR="${RD}" UMA_CKPT_FILE="${UMA_CHECKPOINT}" MIN_SAMPLE=100 E_TOL=1e-6 F_TOL=1e-5 \
+  python -u "${LU}/scripts/phase5_parity.py" 2>&1 | grep -vi index_reduce | tail -5
+echo "MAXN12_RESULT N=32 atoms=${NAT} exit=${rc} wall=${WALL}s"
+echo "DONE"

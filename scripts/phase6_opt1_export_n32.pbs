@@ -1,0 +1,34 @@
+#!/bin/bash -l
+#PBS -N o1_exp32
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+ART=${LU}/scripts/out/opt1/n32_chunk${EDGE_AC_CHUNK:-65536}
+mkdir -p "${ART}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=${EDGE_AC_CHUNK:-65536}
+echo "=== export N=32 W=12 AC, EDGE_AC_CHUNK=${EDGE_AC_CHUNK} ==="
+for R in $(seq 0 11); do
+  [ -f "${ART}/w12/r${R}/model_traced.pt" ] && continue
+  OUT="${ART}" N_LIST=32 EXPORT_WORLD=12 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+    python -u "${ENG}/python/export_blocks_xpu.py" >"${ART}/exp_r${R}.log" 2>&1
+  echo "  r${R}: $([ -f ${ART}/w12/r${R}/model_traced.pt ] && echo OK || echo FAIL)"
+done
+[ -f "${ART}/w12/r0/metadata.json" ] && cp "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+echo "ranks: $(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null|wc -l)/12"
+echo "chunk module size: $(ls -la ${ART}/w12/r0/model_chunk_0.pt 2>/dev/null|awk '{print $5/1048576" MB"}')"
+echo "DONE"

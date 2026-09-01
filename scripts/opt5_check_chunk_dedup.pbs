@@ -1,0 +1,45 @@
+#!/bin/bash -l
+#PBS -N o5_dedup_chk
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:20:00
+#PBS -j oe
+#PBS -k doe
+# opt5 P-2 feasibility: are the per-rank model_chunk_*.pt weights identical across
+# ranks (only node_offset/n_local scalars differ)? If yes, dedup is weight-safe.
+module reset 2>/dev/null || true
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+ART=${LU}/scripts/out/opt2/n32_chunk65536/w12
+python - <<'PYEOF'
+import torch, glob, os
+ART=os.environ.get("ART","/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma/scripts/out/opt2/n32_chunk65536/w12")
+def load(r,i): return torch.jit.load(f"{ART}/r{r}/model_chunk_{i}.pt", map_location="cpu")
+# Compare rank 0 vs rank 5 vs rank 11 for chunk 0: state_dict tensors
+def sd(m):
+    d={}
+    for n,p in m.named_parameters(): d[n]=p
+    for n,b in m.named_buffers(): d[n]=b
+    return d
+for i in [0]:
+    a=sd(load(0,i)); b=sd(load(5,i)); c=sd(load(11,i))
+    keys=set(a)|set(b)|set(c)
+    print(f"=== chunk {i}: {len(keys)} tensors ===")
+    n_diff=0; n_same=0; diffs=[]
+    for k in sorted(keys):
+        if k not in a or k not in b or k not in c:
+            print(f"  MISSING {k}"); continue
+        eq05 = torch.equal(a[k], b[k]); eq011 = torch.equal(a[k], c[k])
+        if eq05 and eq011: n_same+=1
+        else:
+            n_diff+=1
+            diffs.append((k, tuple(a[k].shape), a[k].dtype, eq05, eq011))
+    print(f"  identical across r0/r5/r11: {n_same}/{len(keys)}   differing: {n_diff}")
+    for k,sh,dt,e5,e11 in diffs[:20]:
+        print(f"    DIFF {k} shape={sh} dtype={dt} r0==r5:{e5} r0==r11:{e11}")
+PYEOF
+echo DONE

@@ -1,0 +1,57 @@
+#!/bin/bash -l
+#PBS -N p6h_j1N
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:40:00
+#PBS -j oe
+#PBS -k doe
+# Export + run ONE N for Traced+per-chunk-AC single-tile. Set N via env (default 13).
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+BUILD=${ENG}/build-xpu-gp
+CLI=${BUILD}/uma_parity_cli
+OUTDIR=${LU}/scripts/out/phase6_h_jsweep; mkdir -p "${OUTDIR}"
+N=${N:-13}
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both EDGE_AC_CHUNK=16384
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+ART="${OUTDIR}/blocks_n${N}"; mkdir -p "${ART}"
+if [ ! -f "${ART}/model_chunk_0.pt" ]; then
+  echo "=== export N=${N} ==="
+  OUT="${ART}" N_LIST=${N} TRACE_DEV=xpu RECONSTRUCT=0 python -u "${ENG}/python/export_blocks_xpu.py" >"${OUTDIR}/export_n${N}.log" 2>&1
+fi
+[ -f "${ART}/model_chunk_0.pt" ] || { echo "N=${N} EXPORT FAIL"; tail -3 ${OUTDIR}/export_n${N}.log; exit 1; }
+python - "$N" "${OUTDIR}/nacl_n${N}.txt" <<'PY'
+import sys,numpy as np
+n=int(sys.argv[1]); out=sys.argv[2]; a=5.64
+na=np.array([[0,0,0],[0,.5,.5],[.5,0,.5],[.5,.5,0]],float); cl=na+0.5
+Z={'Na':11,'Cl':17}; sy=[]; sc=[]
+for ix in range(n):
+ for iy in range(n):
+  for iz in range(n):
+   o=np.array([ix,iy,iz],float)
+   for f in na: sy.append('Na'); sc.append((f+o)/n)
+   for f in cl: sy.append('Cl'); sc.append((f+o)/n)
+cell=np.eye(3)*(a*n); pos=np.array(sc)@cell
+pos=pos+np.random.default_rng(0).normal(0,0.05,pos.shape)
+open(out,'w').write(f"{len(sy)}\n"+"".join(f"{Z[s]} {pos[i,0]:.16e} {pos[i,1]:.16e} {pos[i,2]:.16e}\n" for i,s in enumerate(sy))+" ".join(f"{cell[r,c]:.16e}" for r in range(3) for c in range(3))+"\n")
+PY
+echo "=== run N=${N} ($((8*N*N*N)) atoms) ==="
+t0=$SECONDS
+"${CLI}" "${ART}" "${OUTDIR}/nacl_n${N}.txt" --devices 1 > "${OUTDIR}/run_n${N}.log" 2>&1
+rc=$?; dt=$((SECONDS-t0))
+echo "N=${N} exit=${rc} wall=${dt}s $(grep -oE 'energy=[-0-9.]+' ${OUTDIR}/run_n${N}.log|head -1) oom=$(grep -c 'out of memory\|OUT_OF' ${OUTDIR}/run_n${N}.log)"
+echo "DONE"

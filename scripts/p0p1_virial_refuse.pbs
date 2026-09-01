@@ -1,0 +1,74 @@
+#!/bin/bash -l
+#PBS -N p0p1_virial
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# P0'.1 runtime regression: pair_style uma must REFUSE when a global virial is
+# requested (barostat / thermo press), and must still run a plain single-point.
+# Reuses the tripwire's validated N=16 W=1 artifact + input generator.
+#   PASS = npt run exits NONZERO with the virial-refusal message AND
+#          the plain single-point exits 0.
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+ART=${LU}/scripts/out/opt2/n16_chunk65536_1tile
+OUTDIR=${LU}/scripts/out/p0p1_virial; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+set -uo pipefail   # NOT -e: we intentionally run a command expected to fail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "LMP MISSING"; exit 1; }
+[ -f "${ART}/model_traced.pt" ] || { echo "artifact MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+
+# Generate the N=16 W=1 single-point input (no press, per the P0'.1 harness fix).
+OUTDIR="${OUTDIR}" ART="${ART}" N=16 W=1 NVT_STEPS=0 \
+  python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${OUTDIR}/nacl_n16_w1/in.sp 2>/dev/null | head -1))
+[ -n "${RD}" ] || { echo "input gen FAILED"; exit 1; }
+
+# (1) plain single-point must SUCCEED.
+echo "### (1) plain single-point (expect exit 0) ###"
+( cd "${RD}" && mpiexec -n 1 --ppn 1 env UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > sp.log 2>&1 )
+SP_RC=$?
+echo "single-point exit=${SP_RC}"
+
+# (2) build an npt variant (barostat -> requests the virial) and run: must FAIL.
+awk '{print} END{
+  print "velocity all create 300.0 4928459 mom yes rot yes dist gaussian";
+  print "fix 1 all npt temp 300.0 300.0 0.1 iso 1.0 1.0 1.0";
+  print "timestep 0.001";
+  print "run 1";
+}' "${RD}/in.sp" > "${RD}/in.npt"
+echo "### (2) npt run (expect NONZERO + virial-refusal msg) ###"
+( cd "${RD}" && mpiexec -n 1 --ppn 1 env UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.npt > npt.log 2>&1 )
+NPT_RC=$?
+echo "npt exit=${NPT_RC}"
+echo "--- npt.log tail ---"; tail -8 "${RD}/npt.log"
+
+# Verdict.
+MSG_OK=0
+grep -q "does not compute the virial" "${RD}/npt.log" && MSG_OK=1
+if [ "${SP_RC}" -eq 0 ] && [ "${NPT_RC}" -ne 0 ] && [ "${MSG_OK}" -eq 1 ]; then
+  echo "P0P1 PASS (sp ran; npt refused with the virial message)"
+  echo "DONE"
+  exit 0
+else
+  echo "P0P1 FAIL (sp_rc=${SP_RC} npt_rc=${NPT_RC} msg_ok=${MSG_OK})"
+  exit 1
+fi

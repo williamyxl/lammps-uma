@@ -1,0 +1,41 @@
+#!/bin/bash -l
+#PBS -N p6_pathd
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:60:00
+#PBS -j oe
+#PBS -k doe
+
+# Path (d): CPU-trace N=18 W=12 shards (unlimited RAM), then move traced module
+# to XPU + re-save so baked buffers are XPU tensors. N-specific names. Probe with
+# ranks 4,5 (the ones that OOM'd tracing on one XPU tile).
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUT=${LU}/scripts/out/phase6_shards/uma-s-1p2-omat-f64-gp
+mkdir -p "${OUT}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export OUT N_LIST=18 W_LIST=12 SKIP_EXISTING=1
+export TRACE_DEV=cpu MOVE_TRACED_TO_XPU=1
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+export OMP_NUM_THREADS=64
+
+echo "=== path(d): CPU-trace N=18 W=12 shards (probe r=4,5) ==="
+for r in 4 5; do
+  echo "--- CPU trace W=12 r=${r} ---"
+  EXPORT_ONLY_RANK=${r} timeout 1500 python -u "${ENG}/python/export_shards_xpu.py" 2>&1 \
+    | grep -E "W=|OK |FAIL|SKIP|Error|wigner|move traced" | tail -4
+done
+echo "=== shards W12 ==="; ls "${OUT}"/model_mp_w12_n46656_r*.pt 2>/dev/null | wc -l
+echo "DONE p6_pathd"

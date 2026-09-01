@@ -1,0 +1,65 @@
+#!/bin/bash -l
+#PBS -N npt_refuse_mn
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# E1 regression test (audit 2026-08-31): under mpirun -n>1 (GP path), a barostat
+# MUST be refused even with UMA_COMPUTE_VIRIAL=1, because the GP path fills no
+# virial[]. Before the E1 fix, init_style read the stale ctor mn_active=false and
+# skipped the refusal -> NPT ran on a zero pair stress. PASS = the 2-tile fix-npt
+# run exits NONZERO with the "multi-node (GP/DD)" refusal message.
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+# Use the W=2 GP artifact (per-rank w2/r{0,1} block modules), not the single-tile
+# one — a 2-tile run needs the GP shards to reach init_style's barostat guard.
+ART=${LU}/scripts/out/n16_fast
+OUT=${LU}/scripts/out/npt_refuse_mn; mkdir -p "${OUT}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -uo pipefail   # NOT -e: we intentionally run a command expected to fail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}:${PYTHONPATH:-}"
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUT}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_ALLOW_LEGACY_METADATA=1
+
+# The GP path prefers metadata num_blocks from ART/metadata.json; point it at the
+# W=2 rank-0 metadata (as final_perf_parity does).
+cp -f "${ART}/w2/r0/metadata.json" "${ART}/metadata.json" 2>/dev/null || true
+
+# Generate an N=16 W=2 GP input, then append a barostat.
+OUTDIR="${OUT}" ART="${ART}" N=16 W=2 NVT_STEPS=0 \
+  python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${OUT}/nacl_n16_w2/in.sp 2>/dev/null | head -1))
+[ -n "${RD}" ] || { echo "input gen FAILED"; exit 1; }
+awk '{print} END{
+  print "velocity all create 300.0 4928459 mom yes rot yes dist gaussian";
+  print "fix 1 all npt temp 300.0 300.0 0.1 iso 1.0 1.0 1.0";
+  print "timestep 0.001"; print "run 1";
+}' "${RD}/in.sp" > "${RD}/in.npt"
+
+echo "### 2-tile fix-npt with UMA_COMPUTE_VIRIAL=1 (expect NONZERO + refusal) ###"
+( cd "${RD}" && mpiexec -n 2 --ppn 2 env UMA_ALLOW_LEGACY_METADATA=1 \
+    UMA_COMPUTE_VIRIAL=1 UMA_CHUNK_RETAIN_K=1 UMA_SKIP_MAXNBR_CAP=1 \
+    UMA_MP_NATOMS=32768 UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.npt > npt_mn.log 2>&1 )
+RC=$?
+echo "npt(2-tile) exit=${RC}"
+tail -8 "${RD}/npt_mn.log"
+MSG_OK=0
+grep -q "multi-node (GP/DD)" "${RD}/npt_mn.log" && MSG_OK=1
+if [ "${RC}" -ne 0 ] && [ "${MSG_OK}" -eq 1 ]; then
+  echo "NPT_REFUSE_MN PASS (GP barostat refused with the multi-node message)"
+  exit 0
+else
+  echo "NPT_REFUSE_MN FAIL (rc=${RC} msg_ok=${MSG_OK}) -- E1 regression!"
+  exit 1
+fi

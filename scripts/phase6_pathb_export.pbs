@@ -1,0 +1,35 @@
+#!/bin/bash -l
+#PBS -N p6_pathb
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+
+# Path (b): export SHAPE-GENERIC GP shards traced at small N=2, N-agnostic names
+# (model_mp_w{W}_r{R}.pt). Tiny trace memory. To be tested at N=4 (Gate 1) then
+# N=18 (Gate 2) reusing the SAME shards.
+
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN_ROOT=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+OUT=${LU}/scripts/out/phase6_shards_generic/uma-s-1p2-omat-f64-gp
+mkdir -p "${OUT}"
+source "${HEN_ROOT}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN_ROOT}/shim:${HEN_ROOT}/patches:${HEN_ROOT}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN_ROOT}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export OUT N_LIST=2 W_LIST=2 GENERIC_NAME=1 SKIP_EXISTING=1
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both
+
+echo "=== path(b): export shape-generic W=2 shards @ N=2 ==="
+python -u "${ENG}/python/export_shards_xpu.py" || echo "exit=$?"
+echo "=== shards ==="; ls -la "${OUT}"/model_mp_w2_r*.pt 2>/dev/null
+echo "DONE p6_pathb"

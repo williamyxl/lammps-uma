@@ -1,0 +1,52 @@
+#!/bin/bash -l
+#PBS -N o5_n16par
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=00:30:00
+#PBS -j oe
+#PBS -k doe
+# Per-atom force + energy parity for the FAST N=16 config (chunk=32768 +
+# UMA_SKIP_MAXNBR_CAP=1 + UMA_NO_RECOMPUTE_BLOCK/EDEG + UMA_CHUNK_RETAIN_K=3),
+# single-point N=16 W=12 vs the ASE N=16 W=12 oracle. Proves the speed win keeps
+# machine-precision parity.
+set +u
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LU}/build-lmp-xccl/lmp
+N=16; NAT=$((8*N*N*N))
+ART=${LU}/scripts/out/diag16/n16_chunk32768
+ORACLE=${HEN}/pbs/out/ase_n16_parity
+OUTDIR=${LU}/scripts/out/opt5_n16par; mkdir -p "${OUTDIR}"
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -f "${ORACLE}/forces_w12.npy" ] || { echo "N=16 W=12 oracle MISSING"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${OUTDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT="${HEN}/uma-cache/uma-s-1p2.pt"
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+cp -f "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+RB=${OUTDIR}/run; mkdir -p "${RB}"
+OUTDIR="${RB}" ART="${ART}" N=${N} W=12 NVT_STEPS=0 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
+RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null|head -1))
+echo "=== N=16 W=12 single-point, FAST config (retain K=3 + skip-cap) ==="
+( cd "${RD}" && mpiexec -n 12 --ppn 12 env UMA_SKIP_MAXNBR_CAP=1 \
+    UMA_NO_RECOMPUTE_BLOCK=1 UMA_NO_RECOMPUTE_EDEG=1 UMA_CHUNK_RETAIN_K=3 \
+    UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
+    LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
+OD=${RB}/oracle; mkdir -p "${OD}"
+ln -sf "${ORACLE}/summary_w12.json" "${OD}/summary_w12.json"
+ln -sf "${ORACLE}/forces_w12.npy"  "${OD}/forces_w12.npy"
+LMP_DIR="${RD}" ASE_DIR="${OD}" MIN_SAMPLE=100 E_TOL_PER_ATOM_MEV=1e-3 F_TOL=1e-5 \
+  python3 "${LU}/scripts/parity_vs_asegp.py"
+echo DONE

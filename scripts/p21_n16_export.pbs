@@ -1,0 +1,47 @@
+#!/bin/bash -l
+#PBS -N p21_e16
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# P2.1: re-export N=16 with edge padding for the NVT-10 scaling study.
+# W=1 (single-tile, RECONSTRUCT=1) + GP worlds 2,4,6,8,12.
+# Writes scripts/out/p21/n16_1tile (W=1) and scripts/out/p21/n16 (GP w{W}).
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+HEN=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen
+LU=/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma
+ENG=${LU}/src/ML-UMA/uma-engine
+source "${HEN}/scripts/activate_fxpu.sh"
+set -euo pipefail  # P3.2: strict mode (after activation)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0 HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CKPT="${HEN}/uma-cache/uma-s-1p2.pt" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=65536 UMA_EDGE_PAD=1
+
+# W=1 single-tile
+ART1=${LU}/scripts/out/p21/n16_1tile; mkdir -p "${ART1}"
+if [ ! -f "${ART1}/model_traced.pt" ]; then
+  echo "=== export N=16 W=1 (padded) ==="
+  OUT="${ART1}" N_LIST=16 EXPORT_WORLD=1 EXPORT_RANK=0 TRACE_DEV=xpu RECONSTRUCT=1 \
+    python -u "${ENG}/python/export_blocks_xpu.py" > "${ART1}/exp.log" 2>&1
+  echo "  W=1: $([ -f ${ART1}/model_traced.pt ] && echo OK || echo FAIL) $(grep -E 'P2.1 edge-cap|RECONSTRUCT|Error:' ${ART1}/exp.log | tail -2 | tr '\n' ' ')"
+fi
+
+# GP worlds
+ARTG=${LU}/scripts/out/p21/n16; mkdir -p "${ARTG}"
+for W in 2 4 6 8 12; do
+  echo "=== export N=16 W=${W} (padded) ==="
+  for R in $(seq 0 $((W-1))); do
+    [ -f "${ARTG}/w${W}/r${R}/model_traced.pt" ] && continue
+    OUT="${ARTG}" N_LIST=16 EXPORT_WORLD=${W} EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+      python -u "${ENG}/python/export_blocks_xpu.py" >"${ARTG}/exp_w${W}_r${R}.log" 2>&1
+  done
+  [ -f "${ARTG}/w${W}/r0/metadata.json" ] && cp "${ARTG}/w${W}/r0/metadata.json" "${ARTG}/metadata.json"
+  echo "  W=${W}: $(ls -d ${ARTG}/w${W}/r*/model_traced.pt 2>/dev/null|wc -l)/${W} $(grep -h 'P2.1 edge-cap' ${ARTG}/exp_w${W}_r0.log 2>/dev/null|tail -1)"
+done
+echo "DONE"
