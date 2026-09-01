@@ -1475,3 +1475,34 @@ Tier-2 3/3 all PASS in the clone (the build blocker is fixed at HEAD).
 **Regression verdict (G3):** every step-0 PE **bit-identical** to §14.13/…/§13, cos =
 1.0, FP64 floor. **No physics change; R2/R4 confirmed behaviour-preserving.**
 Jobs: rebuild 8794084; tripwire 8794642; full suite 8794643.
+
+### 14.15 Audit rev 14/16 response — P0'.5b teardown fix + S7 hygiene batch (2026-09-01)
+
+Post-rework developer self-review (§F.12/§F.15) found a real incompleteness: P0'.5
+had hardened the destructor's GP-peer teardown barrier but **not** the sibling
+`load_predictor()` reload path (still an un-hardened `if(mpi_peer)MPI_Barrier`).
+Extracted a shared `teardown_peer()` (the `MPI_Allreduce(MIN)` have-peer agreement)
+used by both sites (commit `7aaccb12`). Plus the S7 rescinded-deferral batch
+(commit `f993565c`): G15 `UMA_HEN_ROOT` (removed hardcoded user paths from 4 files +
+Tier-0 guard), G7 pointer, G10 testpaths, G11 `uma_gates`, G9 `pack_shards_cpu`
+deletion, G18 loud `lmax>=5` fallback. Only `teardown_peer` + `pack_shards_cpu`
+deletion are compiled changes (teardown-only / header-only); both are
+behaviour-preserving.
+
+**Parity + performance (real 10-step NVT@300 K, FP64), job 8795114 (final binary):**
+
+| N | W | retainK | step-0 PE (eV) | Loop (s) | wall (s) | per-atom max\|dF\| | cos | parity |
+|--:|--:|:--|--:|--:|--:|--:|--:|:--|
+| 16 | 1  | 1 | −110673.829050 | 166.3 | 206 | 5.05e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 2  | 2 | −110673.829050 | 91.2  | 115 | 7.96e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 4  | 2 | −110673.829050 | 48.2  | 64  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 6  | 2 | −110673.829050 | 31.x  | 44  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 8  | 0 | −110673.829050 | 30.3  | 46  | 7.93e-14 | 1.0000000000 | ✅ PASS |
+| 16 | 12 | 3 | −110673.829050 | 12.86 | 33  | 7.95e-14 | 1.0000000000 | ✅ PASS |
+| 32 | 12 | 0 | −885377.060040 | 138.2 | 173 | 1.62e-13 | 1.0000000000 | ✅ PASS |
+
+**Tripwire (job 8795130):** N=16 W=1 + N=32 W=12 PASS, bit-identical (also job 8795048
+on the teardown-only binary). **Regression verdict (G3):** every step-0 PE
+**bit-identical** to §14.14/…/§13, cos = 1.0, FP64 floor. **No physics change.**
+Rebuild 8795092 (`LMP BUILD OK`, `pack_shards_cpu` deletion clean); CI green (9 HARD
+/ 4 REPORT, 33 Tier-1). Jobs: rebuild 8795092; tripwire 8795130; full suite 8795114.
