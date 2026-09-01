@@ -64,6 +64,7 @@ class PairUMA : public Pair {
   // its own method keeps compute() a thin dispatcher.
   void run_compute_single_tile(int eflag, int vflag, int nlocal, bool use_f64);
   void run_compute_gp(int eflag, int vflag, int nlocal, bool use_f64);
+  void teardown_peer();  // P0'.5: collective-safe GP peer delete (dtor + reload)
 
   // --- Multi-node spatial domain decomposition (Phase A, deep halo k=1) ------
   // Distinct from the mn_active GP-over-MPI path above. Under DD each rank owns

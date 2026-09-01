@@ -129,24 +129,7 @@ PairUMA::~PairUMA()
 {
   delete predictor;
   predictor = nullptr;
-  // Collective NCCL/XCCL teardown: every rank must enter the comm destroy
-  // together (~MpiPeerPredictor). The engine's shm barrier can't span processes
-  // on the MPI path, so the ranks must synchronize here.
-  //
-  // P0'.5: the old code did an UNCONDITIONAL `if (mpi_peer) MPI_Barrier(world)`.
-  // If any rank failed to construct its peer (so its `mpi_peer` is null) while
-  // others succeeded, the survivors block on that barrier forever -> a hang at
-  // teardown. Agree across ranks FIRST: only do the collective barrier+destroy if
-  // EVERY rank has a peer. If they disagree, skip the collective path (a mixed
-  // ncclCommDestroy would deadlock/crash anyway) and just delete locally.
-  if (comm->nprocs > 1) {
-    int have_local = (mpi_peer != nullptr) ? 1 : 0;
-    int have_min = have_local;
-    MPI_Allreduce(&have_local, &have_min, 1, MPI_INT, MPI_MIN, world);
-    if (have_min == 1) MPI_Barrier(world);  // all ranks have a peer -> safe
-  }
-  delete mpi_peer;
-  mpi_peer = nullptr;
+  teardown_peer();  // P0'.5: collective-safe GP peer teardown (see helper)
   // P0'.4: install_halo_callbacks() captured `this` into the process-wide
   // HaloContext singleton via std::function. It outlives this PairUMA (a
   // `pair_style` redefinition or a second `run` after redefine leaves a
@@ -491,13 +474,30 @@ void PairUMA::coeff(int narg, char **arg)
 
 /* ---------------------------------------------------------------------- */
 
+// P0'.5 (audit rev 14 / F.12.x): collective-safe teardown of the GP-over-MPI peer.
+// Every rank must enter the peer's comm destroy together, but an UNCONDITIONAL
+// `if (mpi_peer) MPI_Barrier(world)` deadlocks the survivors if any rank failed to
+// build its peer (null on some ranks, non-null on others). Agree across ranks via
+// MPI_Allreduce(MIN) FIRST; only barrier when EVERY rank has a peer. Shared by
+// ~PairUMA and load_predictor() so the two teardown sites cannot drift (the sibling
+// site load_predictor previously still had the un-hardened barrier).
+void PairUMA::teardown_peer()
+{
+  if (comm->nprocs > 1) {
+    int have_local = (mpi_peer != nullptr) ? 1 : 0;
+    int have_min = have_local;
+    MPI_Allreduce(&have_local, &have_min, 1, MPI_INT, MPI_MIN, world);
+    if (have_min == 1) MPI_Barrier(world);  // all ranks have a peer -> safe
+  }
+  delete mpi_peer;
+  mpi_peer = nullptr;
+}
+
 void PairUMA::load_predictor()
 {
   delete predictor;
   predictor = nullptr;
-  if (mpi_peer && comm->nprocs > 1) MPI_Barrier(world);
-  delete mpi_peer;
-  mpi_peer = nullptr;
+  teardown_peer();  // P0'.5: was an un-hardened `if(mpi_peer)MPI_Barrier` here
 
   // Spatial DD: every rank runs the SINGLE-TILE predictor on its own subdomain
   // (owned+ghost). Do NOT build the GP-over-MPI peer even though nprocs>1; DD is
