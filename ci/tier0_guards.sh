@@ -41,6 +41,22 @@ print("  OK: uma_gates table", g.e_tol_per_atom_mev(), g.f_tol(), g.agfd_tol(),
       g.min_sample(), g.fd_eps())
 PY
 
+# ---- HARD 2b: comparators use uma_gates, not local tolerance copies [S9/P1.5]
+# Any scripts/*{compare,parity}*.py that defines a local F_TOL/MIN_SAMPLE must also
+# `import uma_gates` — otherwise editing the single source silently leaves that
+# comparator on stale numbers (the G11 latent defect). Makes P1.5 an enforced
+# invariant, not a one-time migration.
+hdr "HARD: comparators source tolerances from uma_gates [S9/P1.5/G11]"
+tol_bad=0
+for f in scripts/*compare*.py scripts/*parity*.py; do
+  [ -e "$f" ] || continue
+  has_local=$(grep -cE '(^|[^_])(F_TOL|MIN_SAMPLE)[[:space:]]*=|environ(\.get\(|\[)"(F_TOL|MIN_SAMPLE)"' "$f")
+  [ "$has_local" -eq 0 ] && continue
+  grep -q "import uma_gates" "$f" || { say "  FLAG: $f defines local F_TOL/MIN_SAMPLE without importing uma_gates"; tol_bad=$((tol_bad+1)); }
+done
+if [ "$tol_bad" -eq 0 ]; then say "  OK: comparators single-source their tolerances"
+else hard_fail=$((hard_fail+tol_bad)); fi
+
 # ---- HARD 3: mandatory gate driver is fail-closed ---------------------------
 hdr "HARD: mandatory gate n16_ase_parity.pbs uses set -euo pipefail"
 if grep -q "set -euo pipefail" scripts/n16_ase_parity.pbs; then

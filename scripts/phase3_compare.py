@@ -20,10 +20,15 @@ from pathlib import Path
 
 import numpy as np
 
+# S8/G11 (audit rev18): tolerances come from the single source scripts/uma_gates.py
+# (P1.5), not a local copy that can silently diverge when uma_gates.py is edited.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import uma_gates
+
 OUTDIR = Path(os.environ.get("OUTDIR", "./phase3"))
-E_TOL = float(os.environ.get("E_TOL", "1e-6"))
-F_TOL = float(os.environ.get("F_TOL", "1e-5"))
-MIN_SAMPLE = int(os.environ.get("MIN_SAMPLE", "100"))
+E_TOL = float(os.environ.get("E_TOL", "1e-6"))  # this gate uses an absolute eV E-tol
+F_TOL = uma_gates.f_tol()
+MIN_SAMPLE = uma_gates.min_sample()
 
 
 def parse_cpp_energy(log_path: Path):

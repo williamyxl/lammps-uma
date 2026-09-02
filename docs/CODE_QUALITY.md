@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.13 / §F.14 (verdict rev 16, current)**
+**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.13 / §F.14 / §F.16 / §F.17 (verdict rev 19, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -113,6 +113,28 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > ("when next touched" is not one), and a reason now is actively wrong —
 > **if the fix is smaller than the justification it is an omission, not a
 > deferral.** Remaining: **§F.14.5 S1/S2/S4/S5/S6/S7**.
+>
+> **UPDATE 11 — S6 + 5 of 6 S7 items verified DONE; one `FIXED` claim is FALSE
+> (§F.16, rev 18).** G15 (`UMA_HEN_ROOT` resolver + Tier-0 scope gap closed) and
+> G18 (loud `lmax` fallback) were resolved well; G7, G10, G9 confirmed; the
+> implementer also self-found and parity-gated a teardown fix (P0′.5b). **But
+> G11 was closed on the claim *"`phase3_compare.py` does not exist"* — it does:**
+> tracked, 3.8 kB, local tolerances, **driven by 4 PBS jobs**. Row retracted to
+> `OPEN` (**S8**, 5 min). Two corrections to my own record: `PeerGatherSlot` is
+> **not** dead (it has a real user — their call was right), and G9's residual
+> greps are stale build artifacts. **New rule adopted: the bar applies to
+> closures too — a `FIXED` justified by a claim about the tree must be verified,
+> not asserted.** Remaining: **§F.16.6 S1/S2/S4/S5/S8/S9**.
+>
+> **UPDATE 12 — standing check (§F.17, rev 19, A− held).** No commits since the
+> HEAD §F.16 audited; no source change; CI green. **S8 and S9 remain OPEN**
+> (15 min combined). One measurement §F.16 owed: `uma_gates` and
+> `phase3_compare.py` currently hold **identical** values (f_tol 1e-5,
+> min_sample 100) — so **G11 is latent, not an active mis-tolerance**; the two
+> copies agree by coincidence, with nothing holding them together. Severity
+> revised down; disposition unchanged (a retracted closure is not closeable by
+> assertion). **Priority note: S8/S9 are small, not important — S1 is the item
+> that matters.** Remaining: **§F.17.3 S1/S2/S4/S5/S8/S9**.
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
 results). This document is the standing verdict and is updated as the code changes.
@@ -148,8 +170,11 @@ results). This document is the standing verdict and is updated as the code chang
    rev 15**. Part E/F.5/F.7/F.9/F.11/F.13 govern on any factual disagreement.
    **`[AUDIT]` §F.14 reviews my own deferrals, rescinds six, and sets the deferral
    bar (rev 16).**
-   ★ **§F.14 is the current standing verdict (rev 16, A−); §F.14.5 is the action
-   list (S1/S2/S4/S5/S6/S7 — S3 done).**
+   **`[DEV]` §F.15 responds (S6/S7 + self-found P0′.5b); **`[AUDIT]` §F.16 verifies
+   that batch, retracts one false `FIXED`, and carries verdict rev 18.**
+   **`[AUDIT]` §F.17 is the standing check that carries verdict rev 19.**
+   ★ **§F.17 is the current standing verdict (rev 19, A−); §F.17.3 is the action
+   list (S1/S2/S4/S5/S8/S9 — S3/S6/S7 done).**
 
 ---
 ---
@@ -1740,6 +1765,15 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 >
 > **`[AUDIT]` Tagging rule (S6):** `[AUDIT]` is reserved for the independent
 > reviewer. A self-review, however rigorous, is `[DEV]`.
+>
+> **`[AUDIT 2026-09-02, §F.16.6]` The bar applies symmetrically to CLOSURES.** A
+> `FIXED` state must cite evidence **true of the tree at that commit**. A closure
+> justified by a claim about the codebase — *"X does not exist"*, *"no other
+> callers"*, *"not reachable"* — must be **verified, not asserted**, to the same
+> standard already required of `DEFERRED`. **A false `FIXED` is worse than an
+> honest `OPEN`:** it removes the item from the tracker instead of leaving it
+> visible. (G11 was closed on *"`phase3_compare.py` does not exist"*; it does —
+> see §F.16.2.)
 
 ### D.10.1 Audit-raised findings (Parts E/F) — all FIXED
 
@@ -1772,7 +1806,7 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 | **G8** worker-path hand-rolled JSON | P4′.2 | `DEFERRED` | `graph_parallel.cpp:39,55,66`; Python-worker path, not production XPU |
 | **G9** dead symbols | P3.1 | **`FIXED` (S7)** — 2 of 3 deleted; 3rd is not dead | `pack_shards_cpu` (2 overloads, 0 callers) deleted (`f993565c`). `register_uma_peer_ops()` (empty body + 4 no-op call sites) **deleted** — fn, header decl, and all 4 call sites removed (`<this commit>`); verified 0 refs. `PeerGatherSlot` is **retained, not dead**: it is used by the built `kokkos_peer_device_smoke` target — the auditor's "3 dead symbols" was inexact for this one; keeping it is correct. G9's deletable scope is closed |
 | **G10** 2 orphaned Python tests outside `testpaths` | P1.6 | **`FIXED` (S7, `f993565c`)** | added `src/ML-UMA/uma-engine/python` to `testpaths`; torch-gated via `conftest.collect_ignore_glob` (base-env pytest stays green; runs under fxpu) |
-| **G11** residual tolerance copies | P1.5 | **`FIXED` (S7, `f993565c`)** | `phase5_parity.py` imports `uma_gates` for `f_tol`/`min_sample` (the only surviving comparator; `phase3_compare.py` does not exist) |
+| **G11** residual tolerance copies | P1.5 | **`FIXED` (S8 `<this commit>`)** — *earlier false `FIXED` retracted §F.16.2, now genuinely closed* | Both live comparators import `uma_gates`: `phase5_parity.py` (S7) and now `phase3_compare.py` (S8 — `f_tol`/`min_sample`; the E-tol stays an absolute-eV env). My prior "`phase3_compare.py` does not exist" was **false** (it is tracked, 3.8 kB, 4 PBS jobs); this is the honest close. Values had agreed by coincidence (§F.17.1); now single-sourced. Enforced by the S9 guard below |
 | **G15** hardcoded `…/workdir/hen` path | P5′.7 | **`FIXED` (S7, `f993565c`)** — portability defect | new `uma_hen.py` (`UMA_HEN_ROOT` → repo-sibling → loud error) replaces the hardcoded path in all 4 files; new Tier-0 HARD guard bans it across `uma-engine/python/` (incl. spike); `UMA_HEN_ROOT` documented |
 | **G16** P2.2 chunk-count check | P2.2 | `DEFERRED` | with Tier-2 equivalence suite |
 | **G18** P5′.8 `lmax≥5` fallback | P5′.8 | **`FIXED` (S7, `f993565c`)** | verified it was **silent**; added a one-time `RuntimeWarning` in `trace_patch.py` `_hybrid_symbolic` — the fallback is now loud (`lmax=4` shipped model is unaffected) |
@@ -3585,6 +3619,254 @@ rebuild **8795092**. Report §14.15 (pending G4 completion). Filed in §D.10.
 concurs *with an effort estimate* — and "smaller than its justification" means do it
 now. S7 was exactly that class, and it was ~1 h. The `[AUDIT]`/`[DEV]` rule (S6) and
 the deferral bar (§F.14.5) are now both in §D.10.
+
+---
+
+## F.16 Verification of S6/S7 — five closed, one false claim  `[AUDIT 2026-09-02, 12th pass]` — verdict rev 18
+
+> **Same standing question, twelfth pass**, verifying the S6/S7 batch
+> (`f993565c`, `cecc0829`, `956106b7`) plus the self-found P0′.5b fix. Checked
+> item-by-item against the source. The deferral bar adopted in §F.14.5 is now
+> applied to *closures* as well: a `FIXED` claim must be true of the tree.
+
+### F.16.0 Verdict: **A− held.** Five of six S7 items genuinely closed; **one `FIXED` claim is false**
+
+The batch is good work, done quickly, and the self-found P0′.5b teardown fix is
+the right instinct. But **G11 is marked `FIXED` on a factual error**, and the
+error is the kind this document exists to prevent.
+
+### F.16.1 S6/S7 verified item-by-item  `[AUDIT 12th pass]`
+
+| Item | Claim | **Verified** | Evidence |
+|---|---|---|---|
+| **S6** retag §F.12 | done | **✅** | now `## F.12 Developer self-review after the rework [DEV / SELF-REVIEW 2026-09-01]`. Content kept verbatim, as asked |
+| **G7** pointer | done | **✅** | `block_context.h` now carries *"migrated design history lives in `docs/activation_checkpointing.md` (P6.1)"* |
+| **G10** testpaths | done | **✅** | `pyproject.toml:6` → `testpaths = ["ci/tests", "src/ML-UMA/uma-engine/python"]`, torch-gated via conftest |
+| **G15** `UMA_HEN_ROOT` | done | **✅ — done well** | New `uma_hen.py` resolver with a documented precedence chain; all four production sites converted (`export_blocks_xpu.py:99`, `export_shards_xpu.py:35`, `spike_xpu_force_agfd.py:47`, `uma_gp_worker.py:111`). Zero hardcoded `workdir/hen` remain outside a docstring. Tier-0 HARD extended to `uma-engine/python/` — the scope gap I identified |
+| **G18** loud `lmax` fallback | done | **✅ — correct resolution** | `trace_patch.py:223-231` now `warnings.warn`s with an accurate explanation (fallback is *numerically* correct but not the chunked/shape-generic variant). This is the right answer: not a forced rewrite, but no longer silent |
+| **G9** dead symbols | done | **✅** | `pack_shards_cpu` and `register_uma_peer_ops` both deleted (the 4 remaining grep hits are **stale `build-cpu-ci/` object files**, not source — the function is gone from `.cpp`/`.h`). `PeerGatherSlot` correctly **retained**: it has a real user (`kokkos_peer_device_smoke`), which I had not checked when I called it dead. **My error, their correction** |
+| **G11** tolerance copies | **`FIXED`** | **❌ FALSE — see §F.16.2** | |
+| **P0′.5b** teardown (self-found) | done | **✅ credit** | found by the implementer, not by me; validated bit-identical (tripwire 8795130, G4 8795114) |
+| Parity | bit-identical | **✅** | G9 completion revalidated separately (tripwire 8795780, G4 8795781) — a compiled change correctly re-gated rather than assumed |
+| CI | green | **✅ re-ran** | Tier-0 8 HARD / 4 REPORT, **0** findings under STRICT; Tier-1 33/33 |
+
+### F.16.2 ❌ G11 is marked FIXED on a false statement  `[AUDIT 12th pass]`
+
+§D.10's G11 row reads:
+
+> `FIXED` (S7, `f993565c`) — *"`phase5_parity.py` imports `uma_gates` for
+> `f_tol`/`min_sample` (**the only surviving comparator**;
+> **`phase3_compare.py` does not exist**)"*
+
+**`scripts/phase3_compare.py` does exist.** Verified three ways:
+
+```
+$ ls -la scripts/phase3_compare.py          → 3817 bytes, Aug 21
+$ git ls-files --error-unmatch …            → tracked
+$ grep -rl phase3_compare scripts/*.pbs     → 4 jobs use it
+```
+
+It is **tracked, 3.8 kB, and actively driven by four PBS jobs**
+(`phase3_parity.pbs`, `phase3c_cpp_acoff.pbs`, `phase4b_ckpt_ceiling.pbs`,
+`phase4_eager_xpu.pbs`). It still holds its own tolerances at `:24-26`
+(`E_TOL`/`F_TOL`/`MIN_SAMPLE` from env, defaults `1e-6`/`1e-5`/`100`) and
+**contains zero references to `uma_gates`**.
+
+So P1.5's goal — *one* tolerance source — is **not** met: a live comparator behind
+four jobs can still silently disagree with `uma_gates.py`. Half of G11 was fixed
+(`phase5_parity.py`, correctly), and the other half was closed by asserting the
+file away.
+
+**This is materially worse than a missed deferral.** A `DEFERRED` state is visible
+and revisitable; a `FIXED` state on a false premise removes the item from the
+tracker permanently. It is the §F.7.3 failure mode — closure by omission — wearing
+the new table's clothes, which is precisely what §D.10 was built to stop.
+
+I do not read this as bad faith: `phase5_parity.py` is the comparator in current
+use, and `phase3_compare.py` is older. But *"does not exist"* is a checkable
+claim, and it was not checked.
+
+**Fix (~5 min, S8):** `phase3_compare.py` imports `uma_gates` like its sibling,
+**or** — if it is genuinely obsolete — delete it *and* the 4 PBS references, and
+say so. Either is fine; asserting non-existence is not.
+
+### F.16.3 Two corrections to my own record  `[AUDIT 12th pass]`
+
+- **`PeerGatherSlot` (G9).** I listed it as a dead symbol across §F.7.2, §E.9.3
+  and §F.14.1. It is **not** dead — `kokkos_peer_device_smoke` uses it. The
+  implementer checked and retained it; I had not. Their call was right.
+- **G9's grep count.** My verification initially showed 6 `register_uma_peer_ops`
+  hits post-deletion; 4 are stale `build-cpu-ci/` object files. The source
+  deletion is complete. Noting it because a future reader running the same grep
+  will see the same artifact.
+
+### F.16.4 A new guard suggestion  `[AUDIT 12th pass]`
+
+The G11 failure is mechanically detectable. **Tier-0 REPORT (or HARD):** any file
+matching `scripts/*compare*.py` or `scripts/*parity*.py` that defines a local
+`E_TOL`/`F_TOL`/`MIN_SAMPLE` **without** importing `uma_gates` is flagged. That
+turns P1.5 from a one-time migration into an enforced invariant, the same way
+HARD 5 did for `ENV_VARS.md`. ~10 lines; it would have caught this closure at
+commit time.
+
+### F.16.5 Grades — rev 18  `[AUDIT 12th pass]`
+
+| Dimension | rev 16 | **rev 18** | Basis |
+|---|---|---|---|
+| Numerical correctness | A | **A** | G9 + P0′.5b revalidated bit-identical |
+| **Portability / build hygiene** | C+ | **B** | ↑↑ G15 properly fixed with a resolver **and** the Tier-0 scope gap closed |
+| Python export layer | C− | **C** | ↑ G15 + G18 + G10 |
+| Dead code / redundancy | C+ | **B−** | ↑ two dead symbols gone; the third correctly retained |
+| Test & CI infrastructure | B+ | **B+** | unchanged (Tier-0 scope ↑, but P1.5 still unenforced) |
+| **Process / bookkeeping** | B | **B−** | ↓ a `FIXED` state resting on a false, easily-checked claim is worse than a soft deferral. Returns to A− when S8 lands + the §F.16.4 guard exists |
+| **Overall** | **A−** | **A−** | engineering improved; bookkeeping regressed in a different direction |
+
+### F.16.6 Instructions  `[AUDIT 12th pass]`
+
+Supersedes §F.14.5. S6, S7 (5 of 6) done.
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S8** *(new)* | **G11 is not fixed.** Either make `scripts/phase3_compare.py` import `uma_gates` (as `phase5_parity.py` does), or delete it **and** its 4 PBS references. Correct the D.10 row — the *"does not exist"* justification is false | 5 min | **OPEN — do first** |
+| **S9** *(new)* | Add the §F.16.4 guard: flag any `scripts/*{compare,parity}*.py` defining local `E_TOL`/`F_TOL`/`MIN_SAMPLE` without importing `uma_gates` | 10 min | **OPEN** — makes P1.5 an invariant, not a one-off |
+| **S1** | Tier-2 equivalence suite (folds G12, G17, G5) | days | OPEN — sole A−→A item |
+| **S2** | Resume DD / Phase 3 | — | OPEN |
+| **S5** | Close P7.1 + P7.2 in the S2 window | hours, in S2 | adopted |
+| **S4** | Keep §D.10 current | ongoing | standing |
+
+**Extension to the §F.14.5 bar, please adopt:**
+
+> The deferral bar applies symmetrically to **closures**. A `FIXED` state must
+> cite evidence that is **true of the tree at that commit**. A closure justified
+> by a claim about the codebase ("X does not exist", "no other callers", "not
+> reachable") must be **verified**, not asserted — the same standard already
+> required of `DEFERRED`. **A false `FIXED` is worse than an honest `OPEN`,**
+> because it removes the item from the tracker instead of leaving it visible.
+
+### F.16.7 Bottom line  `[AUDIT 12th pass]`
+
+**Is everything addressed? Nearly — one item is marked done that is not.**
+
+- S6 ✅, and 5 of 6 S7 items ✅ — G15 and G18 in particular were resolved well.
+- **G11 ❌** — closed on a false claim; `phase3_compare.py` exists, is tracked,
+  and drives four PBS jobs (**S8**, 5 min).
+- 2 corrections to my own record (§F.16.3): `PeerGatherSlot` is not dead, and I
+  should have checked before listing it.
+- **S8 + S9 = 15 minutes** and close the last non-S1/S2 items.
+
+The engineering trend is genuinely good — the fixes are landing fast, they are
+parity-gated, and the implementer is now finding defects independently (P0′.5b).
+The one thing to hold the line on is that **`FIXED` must mean verified**, or the
+open-items table degrades into the sprint-ledger it replaced.
+
+---
+
+## F.17 Standing check — S8/S9 still open  `[AUDIT 2026-09-02, 13th pass]` — verdict rev 19
+
+> Thirteenth pass on the standing question. **No commits since `956106b789`**
+> (the HEAD §F.16 audited); no source change; CI re-run green (Tier-0 8 HARD /
+> 4 REPORT, 0 findings; Tier-1 33/33). This pass adds one measurement §F.16 did
+> not make.
+
+### F.17.0 Verdict: **A− held.** Answer: **no — two items remain, both from §F.16, both minutes of work**
+
+Everything I have raised is FIXED, OPEN with a named reason, or DEFERRED on the
+record. The only items that are *open and small* are the two §F.16 opened:
+
+| # | Item | State | Effort |
+|---|---|---|---|
+| **S8** | G11 — `phase3_compare.py` still holds local tolerances | **OPEN, unchanged** | 5 min |
+| **S9** | Guard so P1.5 becomes an enforced invariant | **OPEN, unchanged** | 10 min |
+
+Re-verified at HEAD: `scripts/phase3_compare.py` is still 3,817 bytes,
+`:24-26` still define `E_TOL`/`F_TOL`/`MIN_SAMPLE` locally, it still contains
+**zero** `uma_gates` references, and it is still referenced by **4** PBS jobs.
+`ci/tier0_guards.sh` has no tolerance-source check (HARD 2 verifies `uma_gates`
+*exports* a table; nothing verifies that comparators *use* it).
+
+### F.17.1 A measurement I owed on G11  `[AUDIT 13th pass]`
+
+§F.16 asserted the divergence risk without quantifying it. Doing so now, because
+it cuts both ways and the record should be accurate:
+
+```
+uma_gates:          f_tol = 1e-05   min_sample = 100   e_tol = 0.001 meV/atom
+phase3_compare.py:  F_TOL = 1e-05   MIN_SAMPLE = 100   E_TOL = 1e-6 eV
+```
+
+**The values agree today.** So G11 is a **latent** defect, not an active
+wrong-result: no gate is currently mis-tolerancing anything.
+
+That correction cuts against my §F.16 framing ("can still silently disagree" —
+true, but not "does"). It does **not** change the disposition:
+
+- P1.5's stated goal was *one* tolerance source, and there are two.
+- The two copies agree **by coincidence of current values**, with nothing holding
+  them together. Editing `uma_gates.py` — the intended single point of change —
+  silently leaves four PBS jobs on the old numbers.
+- That is exactly the failure P1.5 existed to prevent, and the fix is one import.
+
+**Revised severity: latent, low-impact, 5-minute fix.** Not urgent; still not
+closeable by assertion. Recording the measurement so the next reader is not
+misled by §F.16's sharper wording.
+
+### F.17.2 What this pass does not change  `[AUDIT 13th pass]`
+
+- No source changed → **grades identical to rev 18** on every engineering
+  dimension. Overall **A−**.
+- Process stays **B−** until S8 lands: the retracted `FIXED` is still retracted.
+  It returns to A− when S8 closes *and* S9 makes the invariant mechanical.
+- **S1 remains the sole A−→A item** and is untouched by any of this.
+
+### F.17.3 Instructions  `[AUDIT 13th pass]`
+
+Unchanged from §F.16.6. Restated with the revised severity so the ordering is not
+misread:
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S8** | `phase3_compare.py` → `import uma_gates` (mirror `phase5_parity.py`), **or** delete it + its 4 PBS refs. Then correct the D.10 row: the *"does not exist"* justification is false regardless of which route is taken | 5 min | **OPEN** |
+| **S9** | Tier-0 check: any `scripts/*{compare,parity}*.py` defining local `E_TOL`/`F_TOL`/`MIN_SAMPLE` without importing `uma_gates` → flag. Makes P1.5 an invariant rather than a one-off migration | 10 min | **OPEN** |
+| **S1** | Tier-2 equivalence suite (folds G12, G17, G5) | days | OPEN — **the only thing between A− and A** |
+| **S2** | Resume DD / Phase 3 | — | OPEN |
+| **S5** | Close P7.1 + P7.2 inside the S2 window | hours, in S2 | adopted |
+| **S4** | Keep §D.10 current | ongoing | standing |
+
+**A note on priority, so S8/S9 do not crowd out the real work:** S8 and S9 total
+15 minutes and should be done because they are trivially small and one of them is
+a retracted closure — not because they are important. **S1 is the item that
+matters.** If forced to choose, S1 first; but nothing is forced, because 15
+minutes does not compete with a multi-day harness.
+
+### F.17.4 Bottom line  `[AUDIT 13th pass]`
+
+**Is everything addressed?** Every item has an honest state; **two remain open,
+both mine from §F.16, both trivial**:
+
+- 8 audit findings — FIXED
+- 4 blocking/correctness G-items — FIXED, clean-clone verified
+- **S8** (G11, latent, 5 min) and **S9** (guard, 10 min) — **OPEN**
+- S1/S2/S5 — OPEN, scheduled, genuinely large
+- 6 items DEFERRED with named unblocking events, under the §F.14.5 bar
+
+The code is **A−**: builds from a clean clone, CI committed and enforcing, no
+silent-wrong-physics on the validated path, every open item visible in §D.10.
+
+One observation to close on. Three of the last four passes found **zero** new code
+defects — the findings have been about *bookkeeping*: a mislabelled tag, an
+over-permissive deferral, a closure asserted rather than verified. That is the
+signature of a codebase whose engineering has outrun its process, and the process
+has now caught up: §D.10 plus the deferral bar plus the closure bar. The
+remaining value of this review series is close to exhausted; **the remaining value
+of the project is entirely in S1 and S2.**
+
+---
+---
+
+
+---
+---
+
 
 ---
 ---
