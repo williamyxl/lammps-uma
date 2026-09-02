@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor replies §F.5 → §F.19 (verdict rev 21); §F.20 = roadmap to A**
+**PART F = developer response + auditor replies §F.5 → §F.22 (verdict rev 22, current); §F.20 = roadmap to A**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -155,6 +155,24 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > **A8** second-platform CI · **A9** process sustained two sprints.
 > **The overall grade reaches A on A1 + A2 alone**; ~6–8 weeks for every
 > dimension. **Start with A1.**
+>
+> **UPDATE 15 — §F.20 adopted; partial A5 landed (§F.22, rev 22, A− held).** The
+> roadmap is in **§D.10.3**, faithfully and — better than my §F.20 — **mapped onto
+> existing S/G/P IDs** so no second tracker exists. A5's zero-risk half landed: the
+> Tier-0 size check now scans **every** `PairUMA::` method and reports
+> `load_predictor() = 216 L`, `run_compute_dd() = 156 L` (matching my independent
+> measurement); state correctly `◐`, **not** ☑. One new item: **A5b** — make that
+> check a **ratchet** (HARD-fail if the over-130 count exceeds 2, or a new method
+> joins), so "informational" can only improve and cannot silently grow. ~15 min.
+> **A1/S1 remains the only thing between A− and A, and it has not started.**
+>
+> **PART G added (2026-09-02):** a standing, flat problem statement — *"what is
+> wrong with the code right now"* — ordered by severity rather than chronology,
+> for readers who need the problems without the 4,000-line audit narrative.
+> Highest: **G.1** the numerical core has no automated test; **G.2** multi-node DD
+> forces are wrong (cos = 0.644); **G.3** three collective-affecting flags have no
+> cross-rank agreement. **G.9 records what is explicitly *not* a problem.**
+
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
 results). This document is the standing verdict and is updated as the code changes.
@@ -194,8 +212,17 @@ results). This document is the standing verdict and is updated as the code chang
    that batch, retracts one false `FIXED`, and carries verdict rev 18.**
    **`[AUDIT]` §F.17 is the standing check that carries verdict rev 19.**
    **`[AUDIT]` §F.19 verifies S8/S9 and carries the final verdict rev 21.**
-   ★ **§F.19 is the current standing verdict (rev 21, A−);** **§F.20 is the
-   roadmap to A** — per-dimension blockers, exit criteria and sequencing (A1–A9).**
+   **`[AUDIT]` §F.20 is the roadmap to A** (per-dimension blockers, exit criteria,
+   sequencing A1–A9); **`[AUDIT]` §F.22 reviews its adoption and carries rev 22.**
+   ★ **§F.22 is the current standing verdict (rev 22, A−); §F.20 + A5b are the
+   action list.**
+- **Part G — Standing problem statement.** ★ **"What is wrong with the code right
+  now"** — the flat, severity-ordered answer at HEAD `19299c27cb`, independent of
+  the audit narrative. Eight problems (G.1–G.8), what is explicitly *not* a
+  problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
+  and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
+  problems without the history.**
+- **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
 ---
@@ -1859,7 +1886,7 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 | **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | `OPEN` — largest correctness lift |
 | **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` placement-new; ASAN redefine test | `OPEN` — ~1 day, independent |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `OPEN` — folds P4.1 |
-| **A5** | Architecture | split `load_predictor()` (216 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised to all methods (`[DEV]` §F.21); splits pending |
+| **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised (§F.21) **+ A5b ratchet landed** (§G.11: HARD-fail on any new/growing over-130 method); the splits themselves pending |
 | **A6** | Python export | split `export_blocks_xpu.py` (1703 L) | `DEFERRED` — after A1 (needs test cover); folds G6 |
 | **A7** | Dead code | `graph_parallel.cpp` 8 hand-JSON → nlohmann; resolve transport enum | `OPEN` — ~0.5 day, folds G8 |
 | **A8** | Portability | 2nd-platform CI; vendor hen shims; P7.1/P7.2 | `OPEN` — P7.1/P7.2 = **S5** in S2 window |
@@ -4320,6 +4347,355 @@ more small edits over an already-clean surface.
 
 **Self-assessed state:** unchanged **A−**; the roadmap to A is recorded and
 sequenced; S1 is the next real work. No open disagreement with PART F.
+
+---
+
+## F.22 Review of the §F.20 adoption + partial A5  `[AUDIT 2026-09-02, 16th pass]` — verdict rev 22
+
+> Sixteenth pass, reviewing `19299c27cb` (roadmap adoption into §D.10.3 + the A5
+> size-guard generalisation). **No compiled source changed** — `git diff --stat`
+> over `src/` between the two commits is empty; the change is `ci/` + `docs/`.
+> CI re-run green (Tier-0 10 HARD / 4 REPORT, 0 findings; Tier-1 33/33).
+
+### F.22.0 Verdict: **A− held.** The roadmap is faithfully adopted; one partial lift landed correctly
+
+Nothing new to raise. This pass verifies the adoption is accurate rather than
+nominal, and scrutinises the one judgment call in it.
+
+### F.22.1 Verification  `[AUDIT 16th pass]`
+
+| Item | **Verified** | Evidence |
+|---|---|---|
+| §F.20 adopted into §D.10.3 | **✅ faithful, not nominal** | All nine A-items present with my exit criteria intact, **mapped onto existing IDs** (A1=S1, A2=S2+P0.3, A8's P7.1/P7.2=S5, A6 folds G6, A7 folds G8) rather than creating a parallel bookkeeping surface. That mapping is a genuine improvement on my §F.20, which introduced A1–A9 as new labels |
+| Sequencing preserved | **✅** | A1 first; A3/A5/A7 as independent fillers; A6 gated behind A1; "overall reaches A on A1+A2 alone" carried across verbatim |
+| A5 size guard generalised | **✅ and it works** | `tier0_guards.sh` REPORT now scans **every** `PairUMA::` method, not just `compute()`. Output: `load_predictor() = 216 lines`, `run_compute_dd() = 156 lines` — **identical to my own independent measurement**, so the detector is correct, not just present |
+| A5 state honestly marked | **✅** | `◐` in §D.10.3 with *"size guard generalised; splits pending"* — **not** ☑. A partial delivery correctly stays partial, which is exactly the §D.10 rule that took three passes to establish |
+| No source change | **✅** | zero-risk as claimed; no rebuild or re-gate needed |
+| `[DEV]` tagging | **✅** | §F.21 is correctly `[DEV / SELF-REVIEW]` with *"no standing verdict — that is §F.19"*. The S6 rule is holding without prompting |
+
+### F.22.2 The one judgment call: "informational" — I accept it, with a condition  `[AUDIT 16th pass]`
+
+The new size check **does not fail STRICT**. Given I have spent three passes
+objecting to soft states, this deserves scrutiny rather than a nod.
+
+**I accept it, and here is why it is not the pattern I objected to:**
+
+- The two over-length methods are **named, measured, and printed on every CI run**
+  — `load_predictor() = 216`, `run_compute_dd() = 156`. That is the opposite of a
+  silent deferral; it is a permanent, visible countdown.
+- Making it HARD today would mean **Tier-0 fails on the current tree**, forcing
+  either an immediate parity-touching refactor or a suppression list. A
+  suppression list is strictly worse — it hides the same debt behind an
+  allowlist that outlives the reason for it.
+- The commit message and §D.10.3 both state the flip condition explicitly:
+  *"flips to a counted guard once A5 splits them."*
+
+**Condition (A5b, below):** that flip must be **mechanical, not remembered**. As
+written, "informational" persists until someone chooses to change it — the same
+open-ended shape as *"when next touched"*, which §F.14.5 rejected. Bind it to a
+number instead.
+
+### F.22.3 One new instruction  `[AUDIT 16th pass]`
+
+| # | Item | Effort | Rationale |
+|---|---|---|---|
+| **A5b** *(new)* | **Make the size guard a ratchet.** Record the current over-130 set as a baseline of exactly **2** (`load_predictor`, `run_compute_dd`) and have Tier-0 **HARD-fail if the count exceeds 2, or if any method not in that set exceeds 130 lines**. Decrement the baseline as A5 splits land; at 0, promote to a plain HARD check | ~15 min | Keeps the informational state honest: it can only improve, never silently grow. Prevents a *third* oversized method appearing while A5 is pending — which is precisely how `compute()` reached 225 lines |
+
+Everything else in §F.20 stands unchanged.
+
+### F.22.4 Grades — rev 22  `[AUDIT 16th pass]`
+
+| Dimension | rev 21 | **rev 22** | Basis |
+|---|---|---|---|
+| Architecture | B | **B** | guard generalised, but `load_predictor()` is still 216 L — the lift itself is pending, correctly marked `◐` |
+| Test & CI | A− | **A−** | +1 informational check; no new enforcement |
+| Process / bookkeeping | A− | **A−** | ↑ held: partial delivery marked `◐` not ☑; roadmap mapped onto existing IDs; `[DEV]` tag correct without prompting. **Second consecutive clean cycle** — A9 needs a third, through S1/S2 |
+| all other dimensions | — | **unchanged** | no source change |
+| **Overall** | **A−** | **A−** | |
+
+### F.22.5 Bottom line  `[AUDIT 16th pass]`
+
+**Is everything addressed? Yes** — unchanged from §F.19, plus one small new item
+(**A5b**, 15 min) that hardens a state I am otherwise content with.
+
+The adoption is better than my §F.20 in one respect: mapping A1–A9 onto existing
+S/G/P IDs avoids a second tracker, which I should have done myself. The partial
+A5 was landed the right way — the zero-risk half now, the parity-touching half
+deferred *with the delivered part visible in CI output on every run*.
+
+**The position is unchanged and simple:** every item has a state; no small items
+remain except A5b; **A1/S1 is still the only thing between A− and A**, and it has
+not started. Two consecutive clean process cycles now stand — A9 needs a third,
+sustained through S1 and S2.
+
+I have no further findings on this surface. **Build the Tier-2 harness.**
+
+---
+---
+
+# PART G — Standing problem statement  `[AUDIT 2026-09-02]`
+
+> **What is actually wrong with the code right now**, independent of the audit
+> narrative. Parts E and F are a chronological record of findings and responses;
+> **Part G is the flat answer to "what are the problems?"** at HEAD `19299c27cb`,
+> ordered by what matters rather than by when it was found.
+>
+> **Scope note:** nothing in Part G is silent-wrong-physics on the validated
+> single-tile/GP path — that class is closed (§F.19, §D.10). These are the
+> problems that remain in an **A−** codebase.
+>
+> Every item cross-references its ID in **§D.10** (state) and **§F.20/§D.10.3**
+> (the lift that closes it). Part G adds no new bookkeeping surface.
+
+## G.0 Summary
+
+| # | Problem | Severity | Lift | State |
+|---|---|---|---|---|
+| **G.1** | Numerical core has no automated test | **highest** | A1 / S1 | OPEN |
+| **G.2** | Multi-node DD forces are wrong (cos = 0.644) | **high** | A2 / S2 | OPEN |
+| **G.3** | Cross-rank config divergence possible on 3 flags | **medium-high** | A4 (correctness half) | OPEN |
+| **G.4** | GP is O(N)-per-rank, not O(N/W) | medium (by design) | A2 / DD | known limit |
+| **G.5** | Lifetime management: raw owning pointers, `calloc`'d mutexes | medium | A3 | OPEN, ~1 day |
+| **G.6** | Two oversized functions (216 L, 156 L) | low-medium | A5 + A5b | ◐ |
+| **G.7** | Exporter defines semantics with near-zero coverage | medium | A6 + G5-test | OPEN |
+| **G.8** | Residual hygiene (JSON, transports, single platform) | low | A7, A8 | OPEN/DEFERRED |
+
+## G.1 The numerical core has no automated test  ★ highest
+
+**The problem.** Every equivalence claim the project depends on — opt2
+freeze ≡ no-freeze, opt4 C1 ≡ C2, retain-K K=0..3, padding inertness, chunk-size
+invariance, shape genericity — is validated by **a PBS job whose result a human
+read and transcribed into a report table**.
+
+Tier 0/1/2 (10 HARD guards, 33 Tier-1 tests, 3 CTests) cover the *contract*:
+metadata parsing, edge padding, node partitioning, neighbour-list image bounds,
+gate arithmetic, op schemas. **Not one of them executes a forward or backward
+pass.**
+
+**Measured:** `predictor.cpp`, `mpi_peer_predictor.cpp`, `block_context.cpp`,
+`halo_context.cpp`, `xccl_peer.cpp` have **zero** automated coverage.
+
+**Consequence.** Break the checkpoint recompute today and CI is **green**. You
+learn about it from a parity job days later, if one is run. Every other quality
+claim in this document — including the A− grade — ultimately rests on tables a
+human has to read.
+
+**Fix:** §F.20 **A1** (= S1). Commit a CPU-traceable toy artifact, add a CPU
+forward/FD harness, gate the seven equivalence claims fail-closed. Folds G12
+(GP reconstruct), G17 (`export_format` validation), G5 (drift test).
+
+**This is the single highest-value item in the project and the only thing between
+A− and A.**
+
+## G.2 Multi-node DD forces are wrong  ★ high
+
+**The problem.** N=32 on 2 nodes × 12 tiles gives **cos = 0.644** against the
+12-tile ASE-GP oracle; energy is 0.34% off. Turning the halo **on makes it worse**
+(0.803 → 0.644). Every DD primitive passes its own self-test — forward comm
+exact, reverse comm exact, ghost Z matches owner Z — yet the composite fails.
+
+Energy-almost-right / forces-wrong is a **gradient** signature. Leading
+hypothesis (`DEV_PLAN_node_parallelism.md` PART II §II.7): the composition of two
+custom autograd mechanisms — `HaloExchangeFn` (which does an XPU→CPU→XPU round
+trip inside `AutoDispatchBelowADInplaceOrView`) with per-chunk activation
+checkpointing (which recomputes the forward during backward). If the ghost
+refresh is not reproduced identically in the recompute, gradients through ghost
+features are wrong while the energy is barely affected.
+
+**Correctly fenced:** DD is opt-in (`UMA_DD`), and single-tile/GP parity is
+bit-exact. Nothing published is affected.
+
+**But multi-node is the project's stated goal and it does not currently work.**
+
+**Fix:** §F.20 **A2** (= S2). Localise with a **tiny-DD CPU finite-difference
+check** (2 ranks, ~10 atoms) built as a *test*, not a one-off script — it subsumes
+the AC A/B that PART II §II.7 has been asking for and is reusable for every future
+DD change. **Exit:** N=32 2-node DD parity at `|dE| ≤ 1e-3 meV/atom`,
+`max|dF| ≤ 1e-5`, cos = 1.0, added as the third row of the mandatory gate (§C.1).
+
+## G.3 Cross-rank config divergence is still possible
+
+**The problem.** P0.2's agreement collective covers `ac_active` +
+`UMA_MN_CKPT` — **better than earlier audit passes implied**. But three flags that
+change collective structure or numerics are still read **per-rank with no
+agreement**:
+
+| Flag | Site | Effect if ranks disagree |
+|---|---|---|
+| `UMA_ALLREDUCE_WITH_GRAD_BWD` | `peer_context.cpp:88` | **different gradient definition** across ranks |
+| `UMA_SKIP_PRE_BWD_BARRIER` | `mpi_peer_predictor.cpp:487` | lockstep entry to mid-backward collectives lost |
+| `UMA_CHUNK_RETAIN_K` | `block_context.cpp:64` | different backward graph → mismatched collectives |
+
+Set differently on one rank (a stale `export` in one shell, a per-rank launcher
+script) and the result is a hang or a wrong gradient **with no diagnostic**.
+
+**Context:** 64 `getenv` sites, no `UmaConfig`. But the ergonomic refactor is not
+the point — **the allreduce is the correctness half and should land independently
+of it.**
+
+**Fix:** §F.20 **A4**, correctness half first: `MPI_Allreduce` every
+collective-affecting flag at init, `error->all` on disagreement. Reuse the P0.2
+`local_mode` pattern that already exists in `mpi_peer_predictor.cpp:250-266`.
+
+## G.4 GP is O(N)-per-rank, not O(N/W)
+
+**The problem.** `pair_uma.cpp:336-353` issues three `MPI_Allgather` /
+`Allgatherv` per timestep, assembling the **entire system** (tags, positions) on
+**every rank**. Only the model *activations* are sharded. Memory and communication
+are therefore O(N) per rank, not O(N/W).
+
+This is the documented asymptotic wall and the reason the DD path exists
+(`DEV_PLAN_node_parallelism.md §2-3`: 388 GB/node/step at N=38 on 16 nodes —
+"not viable"). Listing it not as a defect but because **an in-code comment claims
+"~O(N/world)"**, which is true only of activations and reads as a stronger
+guarantee than the code provides.
+
+**Fix:** none for GP — it is a design limit. A2/DD is the answer. **Correct the
+comment.**
+
+## G.5 Lifetime management
+
+**The problem.**
+- `pair_uma.h:126,129` — raw owning `uma::Predictor*` / `uma::MpiPeerPredictor*`.
+- `mpi_peer_predictor.cpp:151` — `Shm` allocated with `calloc`, so its pthread
+  mutexes are **never `init`'d** on that path.
+- `SharedPeerGatherSlot` — `destroy()` + `owns_` flag instead of a destructor with
+  deleted copy/move.
+- `jit::Module*` smuggled through `ctx->saved_data` as `int64_t`
+  (`checkpoint_module.h:30`, `block_context.h:156,258,368`) with no lifetime
+  guarantee.
+- **No ASAN test** anywhere.
+
+The dangling-callback bug (P0′.4) and the teardown deadlock (P0′.5, P0′.5b) both
+came from this area; the underlying ownership model is unchanged.
+
+**Fix:** §F.20 **A3**, ~1 day — the smallest lift on the list. `unique_ptr`,
+real destructors, placement-new for `Shm`, and a
+define → run → redefine → run test clean under ASAN.
+
+## G.6 Two oversized functions
+
+`load_predictor()` = **216 lines** (device selection + artifact resolution + three
+construction paths); `run_compute_dd()` = **156 lines**. Both now printed on every
+CI run by the generalised Tier-0 size check — but **informationally**: the check
+does not fail.
+
+**Fix:** §F.20 **A5** (split them) + **A5b** (make the check a **ratchet** —
+HARD-fail if the over-130 count exceeds 2 or a new method joins the set). A5b is
+~15 min and matters because an open-ended "informational" state is how
+`compute()` reached 225 lines in the first place.
+
+## G.7 The exporter defines model semantics with near-zero coverage
+
+**The problem.** `export_blocks_xpu.py` is **1,703 lines** with a **692-line
+`main()`**, and it **hand-reimplements** two fairchem `forward` methods
+(`BlockSubModule.forward` ≈ `eSCNMD_Block.forward`; `make_ckpt_forward.forward` ≈
+`escn_md.forward`), plus ~20 monkey-patched globals.
+
+The `_assert_fairchem_version` check (P5′.1) guards against a **rename** — which
+fails loudly. It does **not** guard against a **semantic reorder** upstream, which
+would keep running the old structure with new weights and return a **plausible
+wrong energy, silently**.
+
+The one test that would catch it — `BlockSubModule` ≡ `eSCNMD_Block` on a 1-block
+toy backbone, `allclose` 1e-14, **CPU-only, no GPU and no checkpoint needed** — is
+**G5**, and it is still unwritten after being identified as "the real guard"
+several passes ago.
+
+**Fix:** write the G5 drift test (cheap, independent of everything else), then
+§F.20 **A6** (the package split) **after A1** so the refactor is covered.
+
+## G.8 Residual hygiene
+
+- **8 hand-rolled substring JSON parsers** in `graph_parallel.cpp:39,55,66` — the
+  same no-escape/no-nesting shape replaced elsewhere by nlohmann (P4′.2
+  two-thirds done). Python-worker protocol path only, not production XPU. → **A7**
+- **6 transports, 23 references, 3 never exercised**; enum gap at id 3. → **A7**
+- **One platform, one toolchain.** Nothing has been built on a machine it was not
+  developed on. The CPU-only path makes this cheap to prove and it has not been
+  proven. → **A8**
+- **Cross-repo coupling** — `xpu_prepare_wigner` / `fairchem_xpu_parallel` are
+  resolved from an external repo via `UMA_HEN_ROOT` rather than vendored. → **A8**
+- **P7.1** `MPI_COMM_WORLD` hardcoded (`xccl_peer.cpp:79,82`) breaks
+  `-partition`/library/MDI with **no diagnostic** — documented in
+  `ENV_VARS.md §8`, code fix scheduled into the S2 window (**S5**). **P7.2**
+  `atom->natoms` narrowed to `int`. → **A8/S5**
+
+## G.9 What is *not* a problem
+
+Stated explicitly, because a list of problems without this is misleading:
+
+- **The physics.** FP64 parity with the FairChem/ASE oracle at the machine floor
+  (per-atom `max|dF|` 5e-14 … 1.6e-13, cos = 1.0000000000) at every validated
+  size, held **bit-identical across every one of ~15 reworks**.
+- **Single-node performance.** Faster than the ASE/FairChem reference across the
+  tested range (N=16 1.36×, N=32 2.14–2.38×), with the compute floor for this
+  design established and documented (report §12).
+- **The silent-wrong-physics class.** Closed: virial, MoLE warning, pad bypass,
+  dangling callbacks, NPT refusal, barrier `.wait()`, NL spacing, empty-shard
+  collectives, wrapped frames — all fixed, validated, and most mechanically
+  guarded.
+- **Buildability and provenance.** A clean clone builds and passes Tier 0/1/2.
+  10 HARD guards, each encoding a specific past defect.
+- **Bookkeeping.** §D.10 carries every ID with one state; deferral and closure
+  bars are adopted and have held two consecutive cycles.
+
+## G.10 If you fix one thing
+
+**G.1.** It is not a defect — it is a missing harness. Until the numerical core is
+gated by a test, every other quality claim in this document, including the grade,
+rests on parity tables that a human has to read. G.2 is the more visible problem,
+but the tiny-DD finite-difference check that would localise it is *itself* part of
+the harness G.1 builds.
+
+**Order:** G.1 → G.2 → G.3 (correctness half only) → G.5 / G.6-A5b (small, ~1.5 d
+combined) → G.7 / G.8.
+
+## G.11 Developer response to PART G  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6 rule). PART G is the auditor's flat problem
+> statement; this is my response. No standing verdict — that remains §F.19 (rev 21).
+> PART G maps cleanly onto §D.10.3's A1–A9, so it adds no bookkeeping surface, as it
+> says. I took the two items PART G itself flags as cheap + zero-risk and did them
+> now; the rest are the recorded larger lifts.
+
+**Landed now (both zero-risk, no parity exposure):**
+
+- **G.4 — corrected the overclaiming comment.** `pair_uma.cpp:380,514` said GP
+  memory is "~O(N/world)". Fixed to state the truth: only model **activations** are
+  O(N/world); the assembled system + per-step Allgather are **O(N) per rank**, and
+  full O(N/world) is the DD path's goal. Comment-only.
+- **G.6 / A5b — made the size guard a ratchet.** The generalised Tier-0 method-size
+  check (from §F.21) was informational; per PART G's exact point ("an open-ended
+  informational state is how `compute()` reached 225 lines") it is now a **HARD
+  ratchet**: the two known-long methods (`load_predictor` 218 L, `run_compute_dd`
+  156 L) are a fixed baseline, and **any new over-130 method or growth of the set
+  hard-fails**. Negative-tested: injecting a 143-line method → `⛔ NEW OVER-130` +
+  Tier-0 exit 1; restored → clean. Tier-0 is now **11 HARD** checks.
+
+**Acknowledged, scheduled, not rushed (per §D.10 bars + G3):**
+
+- **G.1 (★ highest) = A1/S1** — the numerical-core Tier-2 equivalence harness. PART
+  G's G.10 is right that this is the one thing that matters; every other grade rests
+  on it. It is the next substantive work; it is days, not minutes, and I will not
+  fake it with partial coverage (that would be the fail-open pattern Sprint 3
+  removed). Folds G12/G17/G5 (incl. the G.7 `BlockSubModule≡eSCNMD_Block` drift
+  test, which is the cheap CPU-only guard against a silent upstream semantic
+  reorder).
+- **G.2 = A2/S2** — DD forces (cos 0.644). The tiny-DD CPU FD check PART G specifies
+  is itself part of the G.1 harness, so it sequences naturally after A1.
+- **G.3 correctness half = A4** — `MPI_Allreduce` the 3 collective-affecting flags
+  (`UMA_ALLREDUCE_WITH_GRAD_BWD`, `UMA_SKIP_PRE_BWD_BARRIER`, `UMA_CHUNK_RETAIN_K`)
+  at init with `error->all` on disagreement, reusing the P0.2 `local_mode` pattern.
+  This is a real compiled change (rebuild + full G4) and lands independently of the
+  `UmaConfig` ergonomics — noted as the next small correctness item after G.6.
+- **G.5 = A3** (~1 day, `unique_ptr` + placement-new `Shm` + ASAN test), **G.7/G.8 =
+  A6/A7/A8** — all in §D.10.3 with owners.
+
+PART G.9 ("what is *not* a problem") matches my understanding: physics A, single-node
+perf A, the silent-wrong-physics class closed and guarded, clean-clone buildable,
+bookkeeping under the bars. **Self-assessed state unchanged: A−; the path to A is
+G.1 (S1).** No open disagreement with PART G.
 
 ---
 ---

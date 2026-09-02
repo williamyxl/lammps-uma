@@ -375,10 +375,14 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
   }
 
   mn_force_sorted.assign(static_cast<size_t>(natoms_global) * 3, 0.0);
-  // Edge-parallel, memory-sharded: each rank evaluates its 1/world edge shard
+  // Edge-parallel, ACTIVATION-sharded: each rank evaluates its 1/world edge shard
   // of the FULL tag-ordered system and the NCCL all_reduce inside the peer sums
-  // force contributions across all GPUs. Memory is ~O(N/world), so systems that
-  // do not fit one GPU (e.g. NaCl 8x8x8 = 4096) run across nodes.
+  // force contributions across all GPUs. G.4 (audit): only the model ACTIVATIONS
+  // are ~O(N/world); the assembled system (tags/pos/forces, gathered above) and the
+  // per-step Allgather comm are O(N) PER RANK. That activation saving is what lets
+  // systems too big for one GPU's activation memory run across nodes (e.g. NaCl
+  // 8x8x8 = 4096); it is NOT a full O(N/world) memory/comm decomposition — that is
+  // the DD path's goal.
   if (!mpi_peer)
     error->all(FLERR, "Pair style uma: multi-node peer predictor not initialized");
   result = mpi_peer->predict_host(natoms_global, mn_pos_sorted.data(),
@@ -508,8 +512,10 @@ void PairUMA::load_predictor()
   } else if (comm->nprocs > 1) {
   // ---- multi-node edge-parallel: one MpiPeerPredictor per MPI rank ---------
   // Triggered by nprocs > 1. Each rank owns one GPU and evaluates 1/world of
-  // the graph; NCCL (bootstrapped over MPI) does the force all-reduce. Memory
-  // is ~O(N/world) -> systems too big for one GPU run across nodes.
+  // the graph; NCCL (bootstrapped over MPI) does the force all-reduce. Only model
+  // ACTIVATIONS are ~O(N/world); the assembled system + Allgather comm are O(N)
+  // per rank (G.4). The activation saving lets systems too big for one GPU's
+  // activation memory run across nodes (full O(N/world) is the DD path's goal).
     if (precision != PRECISION_DOUBLE)
       error->all(FLERR, "Pair style uma: multi-node requires precision double");
     try {

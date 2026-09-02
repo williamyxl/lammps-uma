@@ -179,20 +179,40 @@ say "  files with foreign paths (excl. build trees + attic): $fp (target 0)"
   grep -rlE "${FOREIGN}" src/ML-UMA 2>/dev/null \
     | grep -vE "/build-xpu|/build-cpp|/build-lmp|\.o$|\.a$|/attic/" | sed 's/^/    /'; }
 
-# ---- REPORT 4: no PairUMA:: method exceeds 130 lines (E.9.1 + F.20 A5) -------
+# ---- HARD 4c: PairUMA:: method-size ratchet (E.9.1 + F.20-A5/A5b, G.6) ------
 # Started as a compute()-only dispatcher guard (§E.8.3 #3); generalised per §F.20 A5
 # to EVERY PairUMA:: method, so the next monolith (load_predictor = 216 L) is
 # surfaced and a future long method cannot hide a defect. REPORT (advisory threshold);
 # A5's exit criterion is "no function in pair_uma.cpp > 130 lines".
-hdr "REPORT: no PairUMA:: method > 130 lines [E.9.1 / F.20-A5]"
+hdr "HARD: PairUMA:: method-size ratchet, <=130 except A5 baseline [G.6/F.20-A5b]"
 over=$(awk '/^[a-zA-Z].*PairUMA::[a-zA-Z_]+\(/{name=$0; s=NR}
             s&&/^\}/{n=NR-s+1; if(n>130){sub(/\(.*/,"",name); sub(/.*PairUMA::/,"",name); print n" "name} s=0}' \
           src/ML-UMA/pair_uma.cpp 2>/dev/null)
-# INFORMATIONAL only (does not increment report_fail / does not fail STRICT): these
-# are known F.20-A5 lift targets, not debt to block on. Flip to a counted REPORT
-# once A5 lands and the count should stay 0.
-if [ -z "$over" ]; then say "  OK: all PairUMA:: methods <= 130 lines"
-else echo "$over" | while read -r n nm; do say "  OVER-130 (F.20-A5 target, informational): ${nm}() = ${n} lines"; done; fi
+# RATCHET (G.6 / F.20-A5b): the two known over-130 methods (load_predictor,
+# run_compute_dd) are informational A5 lift targets; but a NEW over-130 method, or
+# any GROWTH of the set, HARD-fails — an open-ended "informational" state is how
+# compute() reached 225 lines. Baseline = the exact known set; anything outside it
+# fails. When A5 splits these, lower the baseline (ideally to none).
+UMA_A5_BASELINE="load_predictor run_compute_dd"
+over_n=$(echo "$over" | grep -c .)
+[ -z "$over" ] && over_n=0
+new_over=0
+if [ -n "$over" ]; then
+  while read -r n nm; do
+    [ -z "$nm" ] && continue
+    case " ${UMA_A5_BASELINE} " in
+      *" ${nm} "*) say "  OVER-130 (known A5 target): ${nm}() = ${n} lines" ;;
+      *) say "  ⛔ NEW OVER-130 method (ratchet): ${nm}() = ${n} lines — split it (F.20-A5)"; new_over=$((new_over+1)) ;;
+    esac
+  done <<< "$over"
+fi
+if [ "$new_over" -gt 0 ]; then
+  say "  FAIL: ${new_over} method(s) over 130 lines outside the A5 baseline"; hard_fail=$((hard_fail+new_over))
+elif [ "$over_n" -gt 2 ]; then
+  say "  FAIL: over-130 count grew to ${over_n} (baseline 2) — ratchet tripped"; hard_fail=$((hard_fail+1))
+else
+  say "  OK: over-130 set within the A5 baseline (${over_n}: ${UMA_A5_BASELINE})"
+fi
 
 # ---- REPORT 2: .pbs without set -euo pipefail -------------------------------
 hdr "REPORT: scripts/*.pbs without 'set -euo pipefail' (P1.3/P3.2, Sprint 6)"
