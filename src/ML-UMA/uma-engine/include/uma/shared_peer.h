@@ -144,6 +144,22 @@ class SharedPeerGatherSlot {
     return new SharedPeerGatherSlot(shm, map_bytes, /*owns=*/false);
   }
 
+  // A3/G.5 (audit rev 25): initialise a freshly-allocated (e.g. calloc'd) control
+  // block's pthread sync primitives. A zeroed pthread_mutex_t/cond_t is NOT a
+  // valid initialised object — using or destroying it is UB. Callers that allocate
+  // the Shm themselves (mpi_peer_predictor's XCCL/NCCL path) must call this once
+  // before attach(), so the shm barrier (used on the shm transport, and defensive
+  // on the others) operates on a properly-initialised mutex.
+  static void init_control_block(Shm* shm) { init_sync_primitives_(shm); }
+
+  // Symmetric teardown for a self-allocated control block (see init_control_block):
+  // destroy the pthread primitives before the caller frees the memory.
+  static void destroy_control_block(Shm* shm) {
+    if (!shm) return;
+    pthread_mutex_destroy(&shm->mu);
+    pthread_cond_destroy(&shm->cv);
+  }
+
   size_t map_bytes() const { return map_bytes_; }
   Shm* raw() { return shm_; }
   int transport() const { return shm_ ? shm_->transport : kTransportShm; }

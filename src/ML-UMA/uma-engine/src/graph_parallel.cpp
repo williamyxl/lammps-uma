@@ -18,6 +18,8 @@
 
 #include "uma/libtorch_mp.h"
 
+#include <nlohmann/json.hpp>  // A7/P4'.2: real JSON parser (replaces substring scan)
+
 namespace uma {
 namespace {
 
@@ -36,42 +38,36 @@ bool file_exists(const std::string& path) {
   return static_cast<bool>(in);
 }
 
+// A7/P4'.2 (audit rev 25 §G.8): the worker-protocol messages are now parsed with a
+// real JSON parser (nlohmann) instead of hand-rolled substring scans that had no
+// escape/nesting handling. Signatures unchanged so callers are untouched. A parse
+// failure or a wrong type is treated as "absent" (default / throw for number),
+// matching the previous lenient behavior on this non-production Python-worker path.
 std::string json_get_string(const std::string& json, const std::string& key) {
-  const std::string needle = "\"" + key + "\":";
-  auto pos = json.find(needle);
-  if (pos == std::string::npos) return {};
-  pos = json.find('"', pos + needle.size());
-  if (pos == std::string::npos) return {};
-  ++pos;
-  // Handle escaped quotes minimally (paths rarely need them).
-  auto end = pos;
-  while (end < json.size() && json[end] != '"') {
-    if (json[end] == '\\' && end + 1 < json.size()) end += 2;
-    else ++end;
-  }
-  return json.substr(pos, end - pos);
+  try {
+    auto j = nlohmann::json::parse(json);
+    auto it = j.find(key);
+    if (it != j.end() && it->is_string()) return it->get<std::string>();
+  } catch (const std::exception&) {}
+  return {};
 }
 
 bool json_get_bool(const std::string& json, const std::string& key, bool def) {
-  const std::string needle = "\"" + key + "\":";
-  auto pos = json.find(needle);
-  if (pos == std::string::npos) return def;
-  pos += needle.size();
-  while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
-  if (json.compare(pos, 4, "true") == 0) return true;
-  if (json.compare(pos, 5, "false") == 0) return false;
+  try {
+    auto j = nlohmann::json::parse(json);
+    auto it = j.find(key);
+    if (it != j.end() && it->is_boolean()) return it->get<bool>();
+  } catch (const std::exception&) {}
   return def;
 }
 
 double json_get_number(const std::string& json, const std::string& key) {
-  const std::string needle = "\"" + key + "\":";
-  auto pos = json.find(needle);
-  if (pos == std::string::npos) {
-    throw std::runtime_error("JSON missing key: " + key);
-  }
-  pos += needle.size();
-  while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) ++pos;
-  return std::stod(json.substr(pos));
+  try {
+    auto j = nlohmann::json::parse(json);
+    auto it = j.find(key);
+    if (it != j.end() && it->is_number()) return it->get<double>();
+  } catch (const std::exception&) {}
+  throw std::runtime_error("JSON missing/invalid key: " + key);
 }
 
 std::string dtype_name(torch::ScalarType dtype) {

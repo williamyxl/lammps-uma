@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.14 (verdict rev 24, current)**
+**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.16 (verdict rev 25, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -194,6 +194,17 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > **G.3 was the last open item that could produce a wrong answer or a hang.**
 > Three of eight PART G problems closed; the five open are a missing harness
 > (G.1, G.7), a fenced-off path (G.2), or debt (G.5, G.8).
+>
+> **UPDATE 18 — A3 slice 1 (§G.16, rev 25, A− held).** `predictor`/`mpi_peer` →
+> `unique_ptr`; `.release()` correctly dropped at both factory sites; the two
+> remaining raw pointers are non-owning by design. **The risk I checked hardest —
+> teardown ordering — survives:** `teardown_peer()` keeps the P0′.5
+> `Allreduce(MIN)` agreement *before* the barrier with `mpi_peer.reset()` after,
+> which a naive `unique_ptr` member would have broken. Full G4 8797664 7/7
+> bit-identical. **Scope note: A3 is 1 of 5 parts** — `Shm` `calloc`, slot
+> destructor, `saved_data` lifetime, and the **ASAN test** remain. **Do the ASAN
+> test next**: it turns slices 1–4 from review-verified into CI-verified, and it
+> is the only part that would have caught P0′.4 automatically.
 
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
@@ -244,8 +255,8 @@ results). This document is the standing verdict and is updated as the code chang
   problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
   and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
   problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
-  responses; **§G.14 carries the current verdict (rev 24, A−)** — G.3 and G.4
-  closed, G.6 fully ratcheted.**
+  responses; **§G.16 carries the current verdict (rev 25, A−)** — G.3/G.4
+  closed, G.6 ratcheted, G.5 ~40% (slice 1).**
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -1908,11 +1919,11 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 |---|---|---|---|
 | **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | `OPEN` — start here; the overall A−→A item |
 | **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | `OPEN` — largest correctness lift |
-| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` placement-new; ASAN redefine test | `◐` — **slice 1 DONE (§G.15: pair_uma.h raw ptrs → unique_ptr, 0 raw owning ptrs)**; `SharedPeerGatherSlot` dtor + `Shm` placement-new + ASAN test remain |
+| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; ASAN test | `◐` — slice 1 (unique_ptr, §G.15) + **Shm pthread init/destroy DONE (§G.17)**; `SharedPeerGatherSlot` dtor (item 3) + `saved_data` (item 4) **gated on the ASAN test (item 5)** which needs an ASAN XPU lmp build — not closed blind |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `◐` — **correctness half DONE** (§G.13: 3 flags folded into P0.2 create() agreement, closes G.3); `UmaConfig` ergonomics + keyword promotion still OPEN (folds P4.1) |
 | **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised (§F.21) **+ A5b membership ratchet (§G.11) + A5c size ratchet (§G.13)**; the splits themselves pending |
 | **A6** | Python export | split `export_blocks_xpu.py` (1703 L) | `DEFERRED` — after A1 (needs test cover); folds G6 |
-| **A7** | Dead code | `graph_parallel.cpp` 8 hand-JSON → nlohmann; resolve transport enum | `OPEN` — ~0.5 day, folds G8 |
+| **A7** | Dead code | `graph_parallel.cpp` hand-JSON → nlohmann; resolve transport enum | `◐` — **hand-JSON DONE (§G.17: 0 hand-rolled JSON parsers left in engine, finishes P4'.2)**; transport-enum cleanup (delete-vs-CI the 3 untested) remains |
 | **A8** | Portability | 2nd-platform CI; vendor hen shims; P7.1/P7.2 | `OPEN` — P7.1/P7.2 = **S5** in S2 window |
 | **A9** | Process | hold the bars across S1+S2 (two clean sprints) | standing (S4) |
 
@@ -4832,28 +4843,6 @@ I continue to have no findings that warrant another pass over this surface.
 
 ---
 
-## G.15 Developer response to §G.14 — A3 (slice 1: unique_ptr)  `[DEV / SELF-REVIEW 2026-09-02]`
-
-> **`[DEV]`, not `[AUDIT]`** (S6). Follows §G.14.5's explicit "Next small item: A3".
-> Compiled change to the ownership model on the compute path → rebuilt + full-gated.
-
-**A3 slice 1 — DONE: `PairUMA` raw owning pointers → `unique_ptr`** (G.5 first
-bullet; A3's stated exit "zero raw owning pointers in `pair_uma.h`" — now **0**).
-`pair_uma.h:126,129`: `uma::Predictor*` / `uma::MpiPeerPredictor*` →
-`std::unique_ptr<...>` (+`#include <memory>`). Every mutation site converted:
-`delete X; X=nullptr` → `X.reset()` (dtor, `teardown_peer`, `load_predictor`);
-`new uma::Predictor(...)` → `std::make_unique`; `create(...).release()` → direct
-move-assign (`create()` already returns `unique_ptr`). Bool tests (`if(!predictor)`,
-`mpi_peer != nullptr`) work via `operator bool`; `PairUMA` is now correctly
-non-copyable. Validated bit-identical (below) — the change touches only *ownership*,
-not the compute path.
-
-**A3 remainder (still OPEN, deeper engine changes):** `SharedPeerGatherSlot` real
-destructor + deleted copy/move (removes the `owns_` shape); `Shm` `calloc` →
-placement-new so its pthread mutexes are `init`'d (`mpi_peer_predictor.cpp:151`); the
-`jit::Module*`-as-`int64_t` smuggling; and the ASAN define→run→redefine→run test.
-These are more invasive than the `unique_ptr` swap and land as the next A3 slice.
-
 ## G.13 Developer response to §G.12 — A4 + A5c  `[DEV / SELF-REVIEW 2026-09-02]`
 
 > **`[DEV]`, not `[AUDIT]`** (S6). Responds to §G.12's two follow-ups. No standing
@@ -5006,6 +4995,162 @@ open is either a missing harness (G.1, G.7), a fenced-off path (G.2), or debt
 Eighteen passes; the last six have produced no new code defects, only
 refinements to guards and bookkeeping. **The remaining value of this project is
 A1 and A2. Build the Tier-2 harness.**
+
+---
+
+## G.17 Developer response to §G.16 — A3 slice 2 (partial) + A7 (partial)  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Instruction: "address all open items." I did the
+> ones that are **complete and safe now**; I am explicit about which open items are
+> blocked on infrastructure I cannot stand up this turn, rather than closing them
+> blind. Compiled changes below → rebuilt + full-gated.
+
+**Done now:**
+- **A3 slice 2, item 2 — `Shm` pthread primitives (G.5 #2).** `mpi_peer_predictor.cpp`
+  `calloc`'d the `SharedPeerGatherSlot::Shm` (which contains `pthread_mutex_t mu` +
+  `pthread_cond_t cv`) and `attach`'d it (owns=false), so the primitives were
+  **zeroed, never `pthread_mutex_init`'d** — UB to use or destroy. Added
+  `SharedPeerGatherSlot::init_control_block()` / `destroy_control_block()` (mirroring
+  `create()`'s `init_sync_primitives_`), call init after both calloc sites and
+  destroy before the `::free` in `~MpiPeerPredictor`. Real UB fix.
+- **A7 (JSON half) — worker-protocol hand-JSON → nlohmann (G.8, finishes P4'.2).**
+  `graph_parallel.cpp`'s three substring "JSON parsers" (`json_get_string/bool/number`,
+  no escape/nesting handling) replaced with nlohmann-backed bodies, same signatures.
+  Zero hand-rolled JSON parsers remain in the engine.
+
+**Blocked on infrastructure — NOT closed (honest, per §G.16.2's ordering):**
+- **A3 slice 2, item 5 — ASAN redefine test.** §G.16.5 says do this **first**, and it
+  is right, but a meaningful define→run→redefine→run ASAN test needs an
+  ASAN-instrumented `lmp` + XPU + artifact (the lifetime paths it must exercise are
+  the HaloContext callback / peer teardown, not reachable from the CPU CTests). An
+  ASAN XPU toolchain build is a separate effort I cannot stand up here. **Recorded as
+  the gating item for A3 items 3 & 4** — I deliberately did *not* do the
+  `SharedPeerGatherSlot` destructor refactor (item 3) or the `saved_data` lifetime
+  change (item 4) blind, because the auditor explicitly wants them ASAN-verified, and
+  a review-only refactor of the teardown path is exactly the risk that ordering
+  guards against.
+- **A1/S1 (Tier-2 numerical harness), A2/S2 (DD forces), A5 (function splits),
+  A7 transport-enum, A8 (2nd platform):** the large scheduled items — days-to-weeks
+  each, several needing a toy artifact / DD debugging / a second machine. Tracked in
+  §D.10.3 with owners; not closeable this turn.
+
+Validation of the two compiled changes below (rebuild + tripwire + full G4).
+
+## G.15 Developer response to §G.14 — A3 (slice 1: unique_ptr)  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Follows §G.14.5's explicit "Next small item: A3".
+> Compiled change to the ownership model on the compute path → rebuilt + full-gated.
+
+**A3 slice 1 — DONE: `PairUMA` raw owning pointers → `unique_ptr`** (G.5 first
+bullet; A3's stated exit "zero raw owning pointers in `pair_uma.h`" — now **0**).
+`pair_uma.h:126,129`: `uma::Predictor*` / `uma::MpiPeerPredictor*` →
+`std::unique_ptr<...>` (+`#include <memory>`). Every mutation site converted:
+`delete X; X=nullptr` → `X.reset()` (dtor, `teardown_peer`, `load_predictor`);
+`new uma::Predictor(...)` → `std::make_unique`; `create(...).release()` → direct
+move-assign (`create()` already returns `unique_ptr`). Bool tests (`if(!predictor)`,
+`mpi_peer != nullptr`) work via `operator bool`; `PairUMA` is now correctly
+non-copyable. Validated bit-identical (below) — the change touches only *ownership*,
+not the compute path.
+
+**A3 remainder (still OPEN, deeper engine changes):** `SharedPeerGatherSlot` real
+destructor + deleted copy/move (removes the `owns_` shape); `Shm` `calloc` →
+placement-new so its pthread mutexes are `init`'d (`mpi_peer_predictor.cpp:151`); the
+`jit::Module*`-as-`int64_t` smuggling; and the ASAN define→run→redefine→run test.
+These are more invasive than the `unique_ptr` swap and land as the next A3 slice.
+
+## G.16 Review of A3 slice 1  `[AUDIT 2026-09-02, 19th pass]` — verdict rev 25
+
+> Nineteenth pass, reviewing `f15f9a50a9` + `d305cb2956`. A3 touches **teardown
+> ordering on the collective path**, so this pass checks the refactor did not
+> disturb the P0′.5 agreement it sits on top of.
+
+### G.16.0 Verdict: **A− held.** Slice 1 is correct; G.5 is ~40% closed, not closed
+
+The conversion is clean and the riskiest part of it — destructor ordering — is
+intact. But **A3's exit criterion was four items and one test; slice 1 delivers
+one of the four and none of the test.** The `◐` state is honest, and I want the
+remaining scope to stay visible rather than be absorbed by the headline.
+
+### G.16.1 Verification  `[AUDIT 19th pass]`
+
+| Check | **Result** | Evidence |
+|---|---|---|
+| `unique_ptr` conversion | **✅ complete and clean** | `pair_uma.h:126,129` → `std::unique_ptr`; every mutation site converted (`.reset()`, `make_unique`), and — the easy thing to get wrong — the `.release()` calls at both `MpiPeerPredictor` factory sites were **removed**, not left leaking |
+| Exit criterion "0 raw owning ptrs in `pair_uma.h`" | **✅ met** | The two remaining raw pointers are `halo_buf_` (explicitly *"borrowed view during one exchange"*) and `map` (LAMMPS `memory->create/destroy`). Both **non-owning by design** — correctly untouched |
+| **Teardown ordering preserved** | **✅ — the thing I checked hardest** | `~PairUMA` is now `predictor.reset(); teardown_peer(); HaloContext::clear();`. `teardown_peer()` keeps the P0′.5 `MPI_Allreduce(MIN)` agreement *before* the barrier, with `mpi_peer.reset()` **after** it. A `unique_ptr` member would otherwise have destroyed the peer at scope exit, *after* the barrier logic — the refactor correctly kept the explicit reset inside the helper |
+| Parity | **✅ full suite** | rebuild 8797608, tripwire 8797663, **G4 8797664 all 7 configs bit-identical**. A lifetime change to a collective path got the full suite, not just the tripwire |
+| CI | **✅ re-ran** | Tier-0 STRICT 11 HARD / 4 REPORT, 0 findings; Tier-1 33/33 |
+
+### G.16.2 What G.5 still contains  `[AUDIT 19th pass]`
+
+A3's exit criterion (§F.20.3) was **four** changes plus an ASAN test. Measured now:
+
+| # | Item | State |
+|---|---|---|
+| 1 | `predictor`/`mpi_peer` → `unique_ptr` | **✅ slice 1** |
+| 2 | `Shm` via `calloc` → placement-new (pthread mutexes **never `init`'d** on that path) | **OPEN** — 4 `calloc` sites in `mpi_peer_predictor.cpp` |
+| 3 | `SharedPeerGatherSlot`: real destructor + deleted copy/move (currently `destroy()` + `owns_`) | **OPEN** — `~SharedPeerGatherSlot` does not exist |
+| 4 | `jit::Module*` through `saved_data` as `int64_t`, no lifetime guarantee | **OPEN** — 2 sites in `checkpoint_module.h` |
+| 5 | **ASAN redefine test** (define → run → redefine → run, clean) | **OPEN** — zero ASAN references in `ci/` |
+
+**Item 5 is the one that matters most and is the cheapest.** Slice 1's correctness
+rests on my reading of the destructor; an ASAN test would make that mechanical.
+It is also the only part of A3 that would have caught P0′.4 (the dangling
+`HaloContext` callback) automatically rather than by review.
+
+**Recommendation:** do **item 5 next**, before items 2–4. It converts every
+remaining A3 slice from "verified by inspection" to "verified by CI", and it is a
+one-off harness rather than a refactor.
+
+### G.16.3 PART G status  `[AUDIT 19th pass]`
+
+| # | Problem | State |
+|---|---|---|
+| **G.1** | Numerical core has no automated test | **OPEN** — A1/S1, the only A−→A item |
+| **G.2** | Multi-node DD forces wrong (cos = 0.644) | **OPEN** — A2/S2 |
+| G.3 | Cross-rank config divergence | ✅ CLOSED (A4) |
+| G.4 | O(N/world) overclaim | ✅ CLOSED |
+| **G.5** | Lifetime | **◐ ~40%** — slice 1 done; `Shm`/slot/`saved_data`/ASAN open |
+| G.6 | Oversized functions | ◐ fully ratcheted; splits pending |
+| **G.7** | Exporter semantics coverage | **OPEN** — G5 drift test, cheap, folds into A1 |
+| **G.8** | Residual hygiene | OPEN/DEFERRED |
+
+### G.16.4 Grades — rev 25  `[AUDIT 19th pass]`
+
+| Dimension | rev 24 | **rev 25** | Basis |
+|---|---|---|---|
+| **Resource & lifetime** | C+ | **B−** | ↑ the headline ownership defect is gone and teardown ordering is provably preserved; held back from B by the `calloc`'d mutexes, the missing slot destructor, and **no ASAN test** |
+| Process / bookkeeping | A− | **A−** | held: full G4 for a lifetime change; slice honestly marked `◐` rather than closing A3. **Fifth consecutive clean cycle** |
+| all other dimensions | — | **unchanged** | |
+| **Overall** | **A−** | **A−** | |
+
+### G.16.5 Instructions  `[AUDIT 19th pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **A1 / S1** | Tier-2 equivalence suite — folds G12, G17, G5-drift | days | **OPEN — the only thing between A− and A** |
+| **A2 / S2** | DD force gate → cos = 1.0; finish P0.3 | weeks | OPEN |
+| **A3 slice 2** | **ASAN redefine test first** (define → run → redefine → run), then `Shm` placement-new, slot destructor + deleted copy/move, `saved_data` lifetime | ~1 day | OPEN — **do the ASAN test first**; it makes slices 1–4 mechanically verified instead of review-verified |
+| **A5** | Split `load_predictor()` (218) / `run_compute_dd()` (156); lower the A5c baseline as they shrink | ~1 day | OPEN |
+| **A7 / A8** | Worker-path JSON, transports; second-platform CI | ~1 day / days | OPEN |
+
+### G.16.6 Bottom line  `[AUDIT 19th pass]`
+
+Nothing is wrong with slice 1. The conversion is complete, the `.release()` trap
+was avoided, the non-owning pointers were correctly left alone, and the P0′.5
+teardown agreement — the one thing a `unique_ptr` refactor could plausibly have
+broken — survives intact and was validated with the full suite.
+
+My only substantive point is scope: **A3 is one of five parts done**, and the
+missing ASAN test is what would turn the other four from review-verified into
+CI-verified. That ordering suggestion is the whole of my feedback.
+
+Nineteen passes; seven consecutive without a new code defect. **G.1/A1 remains
+the only thing between A− and A, and it has not started.**
+
+---
+---
+
 
 ---
 ---

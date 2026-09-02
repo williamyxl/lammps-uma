@@ -97,6 +97,8 @@ MpiPeerPredictor::~MpiPeerPredictor() {
     impl_->slot->destroy();  // wrapper only (owns=false)
   }
   if (impl_ && impl_->shm) {
+    // A3/G.5: destroy the pthread primitives we init_control_block'd before free.
+    kp::SharedPeerGatherSlot::destroy_control_block(impl_->shm);
     ::free(impl_->shm);
     impl_->shm = nullptr;
   }
@@ -151,6 +153,9 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   if (!shm) throw std::runtime_error("MpiPeerPredictor: shm calloc failed");
   shm->world = world;
   shm->transport = transport;
+  // A3/G.5: calloc zeroes the pthread mutex/cond but does NOT initialise them;
+  // using/destroying a zeroed pthread_mutex_t is UB. Initialise them properly.
+  kp::SharedPeerGatherSlot::init_control_block(shm);
   self->impl_->shm = shm;
   self->impl_->slot = kp::SharedPeerGatherSlot::attach(shm, bytes);
   PeerContext::instance().reset_shared(self->impl_->slot);
@@ -167,6 +172,8 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   if (!shm) throw std::runtime_error("MpiPeerPredictor: shm calloc failed");
   shm->world = world;
   shm->transport = transport;
+  // A3/G.5: initialise the calloc'd pthread sync primitives (see XCCL branch).
+  kp::SharedPeerGatherSlot::init_control_block(shm);
   self->impl_->shm = shm;
   self->impl_->slot = kp::SharedPeerGatherSlot::attach(shm, bytes);
   PeerContext::instance().reset_shared(self->impl_->slot);
