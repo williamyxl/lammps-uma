@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.13 / §F.14 / §F.16 / §F.17 (verdict rev 19, current); dev responses incl. §F.18 (S8/S9)**
+**PART F = developer response + auditor replies §F.5 → §F.19 (verdict rev 21); §F.20 = roadmap to A**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -135,6 +135,26 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > revised down; disposition unchanged (a retracted closure is not closeable by
 > assertion). **Priority note: S8/S9 are small, not important — S1 is the item
 > that matters.** Remaining: **§F.17.3 S1/S2/S4/S5/S8/S9**.
+>
+> **UPDATE 13 — ✅ S8/S9 done and verified; every small item is closed (§F.19,
+> rev 21, A−).** G11 genuinely fixed (`phase3_compare.py` imports `uma_gates`;
+> the false *"does not exist"* justification retracted in the row itself), and
+> **S9's guard was verified by injecting the original defect** — it flagged the
+> file and Tier-0 exited 1. Tier-0 is now **10 HARD** + 4 REPORT. Process returns
+> to **A−**. **Nothing I have raised across 14 passes is unaddressed or
+> unstated**: 3 OPEN items fold into S1, 2 into S2/S5, 3 DEFERRED with named
+> unblocking events. **No small items remain — only S1 (the sole A−→A item) and
+> S2.** See **§F.19.4**.
+>
+> **UPDATE 14 — §F.20: roadmap to A (all dimensions).** On request, every
+> dimension still below A now has a measured blocker and a testable exit
+> criterion: **A1** Tier-2 suite (=S1) · **A2** DD gate + P0.3 pre-collective
+> agreement (=S2) · **A3** lifetime/`unique_ptr` (~1 d) · **A4** `UmaConfig` +
+> cross-rank flag agreement · **A5** `load_predictor()` 216 L split · **A6**
+> exporter package split (after A1) · **A7** dead code + worker JSON (~0.5 d) ·
+> **A8** second-platform CI · **A9** process sustained two sprints.
+> **The overall grade reaches A on A1 + A2 alone**; ~6–8 weeks for every
+> dimension. **Start with A1.**
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
 results). This document is the standing verdict and is updated as the code changes.
@@ -173,8 +193,9 @@ results). This document is the standing verdict and is updated as the code chang
    **`[DEV]` §F.15 responds (S6/S7 + self-found P0′.5b); **`[AUDIT]` §F.16 verifies
    that batch, retracts one false `FIXED`, and carries verdict rev 18.**
    **`[AUDIT]` §F.17 is the standing check that carries verdict rev 19.**
-   ★ **§F.17 is the current standing verdict (rev 19, A−); §F.17.3 is the action
-   list (S1/S2/S4/S5/S8/S9 — S3/S6/S7 done).**
+   **`[AUDIT]` §F.19 verifies S8/S9 and carries the final verdict rev 21.**
+   ★ **§F.19 is the current standing verdict (rev 21, A−);** **§F.20 is the
+   roadmap to A** — per-dimension blockers, exit criteria and sequencing (A1–A9).**
 
 ---
 ---
@@ -1827,12 +1848,34 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 **P7.2** (`int` narrowing of `natoms`), so the two §A.4 items that never had IDs are
 now trackable and can be closed or deferred on the record.
 
+### D.10.3 Roadmap to A — per-dimension plan of record  `[DEV 2026-09-02, adopts §F.20]`
+
+The independent §F.20 per-dimension roadmap is the forward plan (S4). Each `Ax`
+maps to existing IDs so no new bookkeeping surface is created; sequencing per §F.20.10.
+
+| Ax | Dimension → A | Maps to | State |
+|---|---|---|---|
+| **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | `OPEN` — start here; the overall A−→A item |
+| **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | `OPEN` — largest correctness lift |
+| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` placement-new; ASAN redefine test | `OPEN` — ~1 day, independent |
+| **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `OPEN` — folds P4.1 |
+| **A5** | Architecture | split `load_predictor()` (216 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised to all methods (`[DEV]` §F.21); splits pending |
+| **A6** | Python export | split `export_blocks_xpu.py` (1703 L) | `DEFERRED` — after A1 (needs test cover); folds G6 |
+| **A7** | Dead code | `graph_parallel.cpp` 8 hand-JSON → nlohmann; resolve transport enum | `OPEN` — ~0.5 day, folds G8 |
+| **A8** | Portability | 2nd-platform CI; vendor hen shims; P7.1/P7.2 | `OPEN` — P7.1/P7.2 = **S5** in S2 window |
+| **A9** | Process | hold the bars across S1+S2 (two clean sprints) | standing (S4) |
+
+**Overall reaches A on A1 + A2 alone** (§F.20); the rest lift individual dimensions.
+Landed so far toward the roadmap: A5's size-guard enforcement (informational, `[DEV]`
+§F.21). Everything else re-gated by tripwire + full G4 when it touches compiled code.
+
 ## D.9 Change log
 
 | Date | Sprint/task | Change | Gate jobid |
 |---|---|---|---|
 | 2026-09-01 | **§F.7/rev11 (A−→B+) response** | Completeness audit found the campaign deliverables were **never committed** → HEAD didn't build (missing vendored `nlohmann/json.hpp`) and every guard was unguarded at HEAD. **R1** (commit 5e70aaa): committed 144 deliverables (json.hpp, `ci/`, `docs/`, `scripts/`, env pins); **clean clone verified** — `metadata.cpp.o` compiles + Tier0/1 green; Tier-0 **HARD 6** tracked-files guard. **R2** (G2, commit 3dcb831): CMake `if(UMA_ENGINE_HAS_NCCL AND TARGET ...)` — verified by standalone configure + short-circuit logic. **R3** (G4): `export_shards_xpu.py` fail-loud + Tier-1 `test_exporter_fail_loud.py` (3/3). **R4** (G13/P0′.2(b)): one-time DD MoLE warning + allreduce off per-step path (DD-only, doesn't touch single-tile/GP parity). **R5**: open-items table D.10; G14a/b→P7.1/P7.2. CI green under STRICT (8 HARD/4 REPORT). | 5e70aaa, 3dcb831 |
 | 2026-09-01 | note | XPU rebuild+G4 revalidation of R2/R4 was delayed by a transient build-node activation stall (8794013/60/73); **cleared** — rebuild 8794084 `LMP BUILD OK`. | 8794084 |
+| 2026-09-02 | §F.19/§F.20 response (`[DEV]` §F.21) | §F.19 (S8/S9 verified) acknowledged. §F.20 roadmap-to-A adopted into §D.10.3 (A1–A9 mapped to S1/S2/S5 + per-dimension lifts). Landed A5 enforcement: generalised the Tier-0 size guard to all `PairUMA::` methods (surfaces `load_predictor` 216 L, `run_compute_dd` 156 L, informational). CI green. No compiled change. | — |
 | 2026-09-01 | **§F.9 rev12 (A− restored) + R2/R4 revalidated** | §F.9 independently verified R1–R5 (clean-clone Tier0/1 + Tier-2 3/3). R2/R4 parity revalidation on the rebuilt binary: tripwire 8794642 PASS + full G4 8794643 all 7 configs bit-identical (G3). **S3 done**: documented P7.1 `MPI_COMM_WORLD` limitation in `docs/ENV_VARS.md §8` (commit ad70277). Report §14.14. Remaining: S1 Tier-2 equivalence suite (the A−→A item; folds G12/G17/G5) + S2 resume DD; S4 keep D.10 current. | 8794642, 8794643, ad70277 |
 | 2026-08-29 | — | PART D sprint tracker created from Part A/B/C verdict rev 4; Sprint 6 marked required (non-deferrable). | n/a |
 | 2026-08-29 | — | Multi-node / DD (Phase 3) deferred: P0′.6, P0′.2(b), P5′.4 (DD half), P3.1 DD transports marked ⏸; collective cluster P0.2–P0.4 kept (hardens in-scope GP path). | n/a |
@@ -3914,6 +3957,369 @@ in §D.10 is `FIXED` with verified evidence, `OPEN` with a named reason, or
 A− and A is **S1** (the Tier-2 equivalence suite). I concur with §F.17.4: the
 remaining value is in S1/S2, and I am not manufacturing further findings where there
 are none. No open disagreement with PART F.
+
+---
+
+## F.19 S8/S9 verified — every small item is now closed  `[AUDIT 2026-09-02, 14th pass]` — verdict rev 21
+
+> Fourteenth pass. Verifying S8/S9 (`3857089595`, `90ea21d0b3`). This pass did not
+> take the guard on inspection: **I injected the original defect and confirmed the
+> new guard catches it.**
+
+### F.19.0 Verdict: **A− held.** Answer: **yes — every item I raised is now FIXED, or OPEN/DEFERRED on the record with a named reason**
+
+S8 and S9 were the last small items. Both are genuinely closed, and S9 is
+verified by fail-before/pass-after rather than by reading it.
+
+**Nothing I have raised across fourteen passes is now unaddressed or unstated.**
+What remains is three OPEN validation gaps folded into S1, two OPEN items
+scheduled into S2/S5, and three DEFERRED with named unblocking events — all
+visible in §D.10.
+
+### F.19.1 Verification  `[AUDIT 14th pass]`
+
+| Item | Claim | **Verified** | Evidence |
+|---|---|---|---|
+| **S8** G11 | genuinely fixed | **✅** | `phase3_compare.py:26` `import uma_gates`; `:30-31` `F_TOL = uma_gates.f_tol()`, `MIN_SAMPLE = uma_gates.min_sample()`. Both live comparators now single-source. The E-tol staying an absolute-eV env is **correct and correctly explained** — `uma_gates` exposes a per-atom meV tolerance, a different quantity; forcing it would have been a wrong "fix" |
+| **S8** D.10 row | false claim corrected | **✅** | the *"`phase3_compare.py` does not exist"* justification is retracted in the row itself, not quietly overwritten |
+| **S9** guard | enforces P1.5 | **✅ — verified by injection, not inspection** | HARD 2b (`tier0_guards.sh:44-58`). I removed the `import uma_gates` and restored a local `F_TOL` in `phase3_compare.py`; the guard printed `FLAG: scripts/phase3_compare.py defines local F_TOL/MIN_SAMPLE without importing uma_gates` and Tier-0 **exited 1**. Restored; tree clean. **This is a real fail-before/pass-after test of the guard itself** |
+| Tier-0 | grown | **✅** | **10 HARD** + 4 REPORT (was 8 HARD at rev 18) |
+| CI | green | **✅ re-ran** | Tier-0 STRICT 0 findings; Tier-1 33/33 |
+| Closure bar | adopted | **✅** | in §D.10's discipline note — a `FIXED` must cite evidence true of the tree |
+
+**On S9's design.** The guard keys on *"defines a local `F_TOL`/`MIN_SAMPLE`
+**and** does not import `uma_gates`"* rather than banning local definitions
+outright. That is the right shape: it permits a comparator to keep an env
+override while still sourcing the canonical default, which is exactly what
+`phase3_compare.py` now does. A blunter guard would have forced the wrong fix.
+
+### F.19.2 Complete final state  `[AUDIT 14th pass]`
+
+| Category | Count | State |
+|---|---|---|
+| Audit-raised findings (E1–E3, Rec 4, E.7.4 #1, E.8.3 #3, E.10.2, E.10.3) | 8 | **FIXED** |
+| §F.7 blocking / correctness G-items (G1, G2, G4, G13) | 4 | **FIXED**, clean-clone verified |
+| §F.14 rescinded deferrals (G7, G9, G10, G11, G15, G18) | 6 | **FIXED** (S7 + S8) |
+| Provenance / process (S6 tag, closure bar, deferral bar, S9 guard) | 4 | **FIXED** |
+| **OPEN**, named, folded into S1 | 3 | G12, G17, G5 — the artifact-validation class |
+| **OPEN**, scheduled into S2/S5 | 2 | P7.1 (documented), P7.2 |
+| **OPEN**, the A−→A item | 1 | S1 Tier-2 equivalence suite |
+| **DEFERRED**, named unblocking event | 3 | G6 (after S1), G8 (with G6), G16 (with S1) + P0′.2(a)/P0′.6 with DD |
+
+**Zero items lack a state. Zero closures rest on an unverified claim.**
+
+### F.19.3 Grades — rev 21  `[AUDIT 14th pass]`
+
+| Dimension | rev 18 | rev 19 | **rev 21** | Basis |
+|---|---|---|---|---|
+| Numerical correctness | A | A | **A** | no source change |
+| Test & CI infrastructure | B+ | B+ | **A−** | ↑ 10 HARD (was 8); P1.5 is now a machine-enforced invariant, and the guard is *itself* tested |
+| **Process / bookkeeping** | B− | B− | **A−** | ↑↑ retracted `FIXED` genuinely re-closed and corrected in place; closure bar adopted; the last two open small items closed within one cycle |
+| Portability / build hygiene | B | B | **B** | unchanged |
+| Python export layer | C | C | **C** | unchanged — G12/G17/G5 await S1 |
+| Dead code / redundancy | B− | B− | **B−** | unchanged |
+| **Overall** | **A−** | **A−** | **A−** | |
+
+Process returns to **A−**: the false-`FIXED` was retracted, re-fixed, corrected in
+the row, *and* backstopped by a guard — the full loop, which is more than the
+original item required.
+
+**Why the overall grade still does not move:** S1. Every dimension that S1 would
+lift (Python export layer, the three artifact-validation gaps, the numerical-core
+equivalence claims) is unchanged, because S1 has not started. **A− → A is one
+piece of work and always has been.**
+
+### F.19.4 Instructions  `[AUDIT 14th pass]`
+
+**All small items are closed. Only substantial work remains.**
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S1** | **Tier-2 equivalence suite.** Commit a CPU-traceable toy artifact; add a CPU forward/FD harness; gate opt2-freeze ≡ no-freeze, opt4 C1≡C2, retain-K K=0..3, padding inertness (`n_pad ∈ {0,1,chunk}` → identical to 1e-14), chunk-size invariance, shape genericity, stale-artifact rejection. **Folds G12** (GP reconstruct), **G17** (`export_format` validated against discovered files), **G5** (`BlockSubModule` ≡ `eSCNMD_Block` drift test). Must **fail closed on skip** (the `UMA_CI_REQUIRE_TIER2` pattern); **add the toy artifact to Tier-0 HARD 6 the moment it is committed** (G1 was exactly a build-critical file created and not committed) | days | **OPEN — the sole A−→A item** |
+| **S2** | Resume DD / Phase 3 (`DEV_PLAN_node_parallelism.md` PART III) | — | OPEN |
+| **S5** | Close P7.1 (`MPI_COMM_WORLD` → `comm->world`) + P7.2 inside the S2 window; promote the `ENV_VARS.md §8` entry from limitation to fixed | hours, in S2 | adopted |
+| **S4** | Keep §D.10 current — one row + state per new finding before its sprint closes | ongoing | standing |
+
+No S10. There is nothing small left to raise.
+
+### F.19.5 Closing assessment of the review series  `[AUDIT 14th pass]`
+
+Fourteen passes, 8 findings, 4 recommendations, 18 completeness items, 9
+follow-up steps. Current state: **everything FIXED, or OPEN/DEFERRED with a named
+reason and an owner.**
+
+The arc is worth recording because it is not the usual one. The first audit found
+three silent-wrong-physics defects in code that was already producing correct
+published numbers. The middle passes found that the *fixes* were real but the
+*bookkeeping* was not — a partially-delivered item marked ☑, a regression
+introduced by a fix, a repository whose CI harness was never committed. The last
+four passes found **no new code defects at all**; every finding was procedural.
+
+That progression is the useful signal. The engineering was strong throughout and
+is now genuinely well-guarded: **10 Tier-0 HARD checks, each encoding a specific
+past defect; 33 Tier-1 tests; 3 Tier-2 CTests; a clean clone that builds and
+passes all of them.** The process caught up last, which is the normal order, and
+it caught up properly — §D.10 with the deferral bar and the closure bar is a
+mechanism, not a promise.
+
+**The review has reached the point of diminishing returns.** Further passes over
+this surface will keep finding bookkeeping nits and no defects. **The remaining
+value of the project is entirely in S1 and S2**, and I would stop auditing and
+start building the Tier-2 harness.
+
+Final standing verdict: **A−**. One harness from A.
+
+---
+
+## F.20 Roadmap to A — per-dimension exit criteria  `[AUDIT 2026-09-02, 15th pass]`
+
+> **Requested: instructions to push *all* items to A.** §F.19 named S1 as the sole
+> A−→A item for the *overall* grade. This section goes further: it takes **every
+> dimension still below A**, measures what is actually holding it there, and gives
+> a concrete, testable exit criterion. Nothing below is a defect — these are
+> deliberate lifts.
+>
+> **Standing constraints (unchanged, G3/G5):** no step may change the validated
+> step-0 energies (N=16 W=1 `−110673.829050`; N=32 W=12 `−885377.060040`) or the
+> per-atom FP64 force floor. Every compiled change re-runs tripwire + full G4.
+> Every closure carries `file:line` + evidence true of the tree (§D.10 bars).
+
+### F.20.0 Where the grade actually sits
+
+Measured at HEAD, not assumed:
+
+| Dimension | Now | Measured blocker |
+|---|---|---|
+| Numerical correctness | **A** | — |
+| Test & CI infrastructure | **A−** | Tier 2 = 3 CTests; **zero coverage of the forward/backward numerics** |
+| Process / bookkeeping | **A−** | sustained one cycle; needs to hold across S1/S2 |
+| Distributed correctness | **B** | `grep -c "try {"` in `mpi_peer_predictor.cpp` = **0**; DD force gate cos = 0.644 |
+| Architecture | **B** | `load_predictor()` = **216 lines**, 3 construction paths |
+| Portability / build hygiene | **B** | `Install.sh` OK, CMake OK; no second-platform proof |
+| Dead code / redundancy | **B−** | `graph_parallel.cpp` 8 hand-JSON calls; 23 `kTransport` refs / 6 transports, 3 untested |
+| Resource & lifetime | **C+** | `pair_uma.h:126,129` raw owning pointers; `Shm` via `calloc` |
+| Config surface | **C+** | **64** `getenv` sites, no `UmaConfig`, no cross-rank agreement on collective-affecting flags |
+| Python export layer | **C** | `export_blocks_xpu.py` **1,703 lines**, 692-line `main()` |
+| **Overall** | **A−** | |
+
+### F.20.1 A1 — Test & CI: A− → A  *(this is S1; it also lifts Python export)*
+
+**Exit criterion:** the numerical core is gated by a self-contained test, not a
+PBS table.
+
+1. Commit a **CPU-traceable toy artifact** (1 block, `lmax=1`, ~10 atoms,
+   `EDGE_AC_CHUNK=256`, few hundred kB). Requires a CPU trace path in the
+   exporter (`export_blocks_xpu.py:889` currently hard-requires a visible XPU).
+2. **CPU forward + finite-difference force harness** over that artifact.
+3. **Equivalence gates**, each fail-closed on skip (`UMA_CI_REQUIRE_TIER2`
+   pattern): opt2 freeze ≡ no-freeze · opt4 C1 ≡ C2 · retain-K K=0..3 ·
+   padding inertness (`n_pad ∈ {0,1,chunk}` identical to 1e-14) · chunk-size
+   invariance · shape genericity (export N=2, eval N=3/4) · stale-artifact
+   rejection.
+4. **Fold in the three OPEN validation gaps** — G12 (GP reconstruct), G17
+   (`export_format` validated against discovered files), G5
+   (`BlockSubModule` ≡ `eSCNMD_Block` drift test, CPU-only).
+5. **Add the toy artifact to Tier-0 HARD 6** the moment it is committed. G1 was
+   exactly a build-critical file created and never committed.
+
+**Done when:** every equivalence claim currently asserted in a report table has a
+CTest that fails if the claim breaks, runnable on a login node with no allocation.
+
+### F.20.2 A2 — Distributed correctness: B → A
+
+Two independent blockers; both must clear.
+
+- **P0.3 exception safety.** `try {` count is **0**. The whole-body wrapper was
+  correctly reverted (it deadlocked W=4), and the narrow pre-collective
+  `all_reduce(MAX)` on pad-cap overflow is right. **Finish the pattern:** extend
+  pre-collective agreement to the *other* deterministic failure modes (artifact
+  load failure, shape mismatch, device-alloc probe) so a rank fails **before**
+  entering the model's collectives. Mid-collective OOM stays `MPI_Abort` — that is
+  correct and should be documented as the deliberate boundary.
+  **Exit:** a fault-injection test per agreed failure mode → bounded-time
+  collective abort with an actionable message, in CI (Tier 3).
+- **DD force gate (S2).** cos = 0.644 with every primitive individually
+  self-tested. **Exit:** N=32, 2 nodes × 12 tiles vs the 12-tile ASE-GP oracle at
+  `|dE| ≤ 1e-3 meV/atom`, per-atom `max|dF| ≤ 1e-5`, cos = 1.0 — added as the
+  third row of the mandatory per-round gate (§C.1). Localise with the **tiny-DD
+  CPU finite-difference check** (2 ranks, ~10 atoms) built as a *test*, not a
+  script — it subsumes the AC A/B and is reusable.
+
+### F.20.3 A3 — Resource & lifetime: C+ → A
+
+Smallest lift on the list; ~1 day.
+
+- `pair_uma.h:126,129` → `std::unique_ptr<uma::Predictor>` /
+  `std::unique_ptr<uma::MpiPeerPredictor>`; delete copy/move on `PairUMA`.
+- `SharedPeerGatherSlot`: real destructor + deleted copy/move, handed out as
+  `unique_ptr`; removes the `owns_` double-free shape and the divergent teardown.
+- Replace the `calloc`'d `Shm` (`mpi_peer_predictor.cpp:151`) with a placement-new
+  path so its pthread mutexes are actually `init`'d.
+- Replace the `jit::Module*`-as-`int64_t` smuggling through `saved_data`
+  (`checkpoint_module.h:30`, `block_context.h:156,258,368`) with a lifetime-owning
+  handle, or document the invariant and assert it.
+
+**Exit:** define → run → redefine `pair_style` → run, clean under **ASAN**, as a
+CI test; zero raw owning pointers in `pair_uma.h`.
+
+### F.20.4 A4 — Config surface: C+ → A
+
+**64** `getenv` sites, no struct, and — the part that matters — **no cross-rank
+agreement on flags that change collective structure**
+(`UMA_ALLREDUCE_WITH_GRAD_BWD`, `UMA_MN_CKPT`, `UMA_SKIP_PRE_BWD_BARRIER`,
+`UMA_NO_RECOMPUTE*`).
+
+- `struct UmaConfig`, parsed **once** at init, validated, logged as one block.
+- **`MPI_Allreduce` every collective-affecting flag** and `error->all` on
+  disagreement — this is the correctness half and should land even if the
+  ergonomic refactor does not.
+- Promote `UMA_DD`, `UMA_ENGINE_BUILD_GRAPH`, `UMA_DD_EDGE_CAP`,
+  `UMA_GPUS_PER_NODE` to `pair_style` keywords.
+- Tier-0 HARD: no new `getenv` outside `UmaConfig`'s parser.
+
+**Exit:** `getenv` sites outside the parser = 0; a rank-disagreement test aborts
+cleanly; on/off equality tests for every numerics-affecting flag (rides on A1).
+
+### F.20.5 A5 — Architecture: B → A
+
+- `load_predictor()` is **216 lines** with three construction paths — now the
+  largest function, exactly as `compute()` was. Split into
+  `resolve_artifact()` / `select_device()` / `construct_{single,gp,dd}()`.
+- De-duplicate the remaining host marshalling: `from_blob(pos…)` + NL build
+  appears in `predictor.cpp`, `mpi_peer_predictor.cpp`, `libtorch_mp.cpp` — extract
+  one `stage_inputs()`.
+- Extend the REPORT size guard to **every** `PairUMA::` method (≤130 lines).
+
+**Exit:** no function in `pair_uma.cpp` > 130 lines; one marshalling path; guard
+enforces it.
+
+### F.20.6 A6 — Python export layer: C → A
+
+The largest single lift, and **A1 must land first** so the split is covered.
+
+- Split `export_blocks_xpu.py` (1,703 L / 692-L `main()`) into `block_modules.py`,
+  `ckpt_forward.py`, `edge_padding.py`, `artifact_io.py`, `validation.py`,
+  `testsystems.py`, `cli.py` (argparse; env vars become defaults).
+- Collapse `build_nacl` ×7 → one `testsystems.py`.
+- Delete the 5 dead exporters; rename `spike_xpu_force_agfd.py` →
+  `tests/test_force_autograd_vs_fd.py` (it is the most important correctness gate
+  in the tree and its name says "throwaway").
+- Unify the **two edge-padding conventions** (P5′.4) behind one spec with the
+  bit-identity round-trip test.
+
+**Exit:** no module > 400 lines; one `build_nacl`; one padding convention; the
+whole exporter under Tier-1 coverage.
+
+### F.20.7 A7 — Dead code: B− → A  *(~0.5 day)*
+
+- Migrate `graph_parallel.cpp`'s **8** hand-rolled JSON calls to nlohmann
+  (finishes P4′.2).
+- Resolve the transport enum: **6 transports, 23 references, 3 never exercised**.
+  Delete the untested ones or bring them under CI; close the enum gap at id 3.
+- Keep `PeerGatherSlot` — it has a real user; annotate it so it is not re-flagged.
+
+**Exit:** zero hand-rolled JSON parsers; every transport either CI-exercised or gone.
+
+### F.20.8 A8 — Portability: B → A
+
+Everything is verified on **one** machine, one toolchain.
+
+- Prove the CPU build on a second platform (any x86 Linux + CPU LibTorch) in CI.
+- Remove the last cross-repo coupling: vendor `xpu_prepare_wigner` /
+  `fairchem_xpu_parallel` rather than resolving them via `UMA_HEN_ROOT`.
+- `xccl_peer.cpp:79,82` `MPI_COMM_WORLD` → `comm->world` (**P7.1/S5**) and P7.2's
+  `int` narrowing — both already scheduled into the S2 window.
+
+**Exit:** a second-platform CI job green; no external-repo import at runtime.
+
+### F.20.9 A9 — Process: hold A−, reach A
+
+A− was earned in one cycle. **A means sustained across a large change.**
+
+**Exit:** S1 and S2 both land with (a) every new finding entering §D.10 before its
+sprint closes, (b) zero closures resting on an unverified claim, (c) every new
+`UMA_*` knob shipping with doc + validation + echo + on/off test. Two clean
+sprints under the bars, not one.
+
+### F.20.10 Sequencing
+
+```
+A1 (S1, Tier-2 suite)  ── days ──► unblocks A6, feeds A4's equality tests   ★ start here
+A3 (lifetime)          ── 1 day ─► independent, ASAN test
+A7 (dead code)         ── 0.5 d ─► independent
+A5 (load_predictor)    ── 1 day ─► independent
+   ↓
+A2 (S2: DD gate + P0.3) ── weeks ─► the big correctness lift; A8's P7.1/P7.2 ride along
+   ↓
+A4 (UmaConfig)         ── days ──► correctness half (allreduce) can land earlier
+A6 (exporter split)    ── days ──► AFTER A1
+A8 (2nd platform)      ── days
+   ↓
+A9 = sustained through all of the above
+```
+
+**Order rationale:** A1 first because it unblocks A6 and supplies the harness A4
+needs. A3/A5/A7 are independent, small, and can fill gaps. A2 is the largest
+correctness item and carries A8's scheduled pieces. A9 is not a task — it is the
+discipline applied to the others.
+
+**Realistic effort:** A1 ~1 week · A3+A5+A7 ~3 days · A2 several weeks (DD gate
+dominates) · A4 ~3 days · A6 ~1 week · A8 ~3 days. **Overall A is roughly 6–8
+weeks of focused work**, and the overall grade reaches **A on A1 + A2 alone** —
+the rest lift individual dimensions.
+
+### F.20.11 What "A" would mean here
+
+Not perfection. Concretely: **every numerical claim in the reports is enforced by
+a test that fails when the claim breaks; multi-node forces match the oracle;
+no raw owning pointers or unagreed cross-rank flags; no module or function large
+enough to hide a defect; and the whole thing builds and passes on a machine
+nobody developed it on.**
+
+The physics has been A-grade since rev 4. This list is about making the
+*engineering* match it — and the single highest-value item remains **A1/S1**,
+because until the numerical core is gated, every other grade rests on parity
+tables that a human has to read.
+
+## F.21 Developer response to §F.19 / §F.20  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6 rule). No standing verdict — that is §F.19
+> (rev 21, A−). Records acknowledgement of §F.19, adoption of the §F.20 roadmap,
+> and the one concrete, zero-risk piece of A5 I landed now.
+
+**§F.19 (S8/S9 verified) — acknowledged.** The by-injection verification of the S9
+guard (removing the import → FLAG + Tier-0 exit 1; restored → clean) is the right
+standard, and it matches what I negative-tested at commit time. All small items are
+closed; I have nothing to add.
+
+**§F.20 roadmap — adopted into §D.10 (S4).** A1–A9 with their exit criteria are now
+the forward plan of record. Mapping to existing IDs (no new bookkeeping surface):
+A1 = **S1** (folds G12/G17/G5); A2 = **S2** + finishing P0.3; A8's P7.1/P7.2 = **S5**;
+A3/A4/A5/A6/A7 are the per-dimension lifts. I concur with the sequencing: **A1/S1
+first** (it unblocks A6 and supplies A4's equality harness), A3/A5/A7 are the
+independent small fillers.
+
+**Landed now — A5 enforcement (zero-risk, no rebuild).** Rather than rush the
+parity-touching refactors, I operationalised A5's exit criterion (*"no function in
+`pair_uma.cpp` > 130 lines; guard enforces it"*): the Tier-0 REPORT size check,
+previously `compute()`-only, now scans **every** `PairUMA::` method and surfaces the
+two over-length ones informationally — `load_predictor()` (216 L) and
+`run_compute_dd()` (156 L). It is informational (does not fail STRICT) because these
+are deliberate lift targets, not debt; it flips to a counted guard once A5 splits
+them. This puts the next architecture work on the CI radar without touching a
+compiled path.
+
+**On the deliberate lifts I did *not* rush (A3 unique_ptr, A5 split, A6/A7):**
+each is a real refactor with parity or churn exposure (A3 touches the 23 predictor/
+mpi_peer use-sites incl. the compute dispatch; A5 splits `load_predictor`; A6 is a
+1,700-line exporter split). Per §D.10's own bars and G3, I will land them as scoped
+changes each re-gated by tripwire + full G4 — not as a batch to look busy. The
+auditor's own closing guidance (§F.19.5, §F.20.11) is that **the value is in
+A1/S1**, and I agree: the next substantive work is the Tier-2 equivalence suite, not
+more small edits over an already-clean surface.
+
+**Self-assessed state:** unchanged **A−**; the roadmap to A is recorded and
+sequenced; S1 is the next real work. No open disagreement with PART F.
 
 ---
 ---
