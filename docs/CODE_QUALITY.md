@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.13 / §F.14 / §F.16 / §F.17 (verdict rev 19, current)**
+**PART F = developer response + auditor replies §F.5 / §F.7 / §F.9 / §F.11 / §F.13 / §F.14 / §F.16 / §F.17 (verdict rev 19, current); dev responses incl. §F.18 (S8/S9)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -1765,6 +1765,15 @@ closed by omission.** ☑ elsewhere in this doc is subordinate to this table.
 >
 > **`[AUDIT]` Tagging rule (S6):** `[AUDIT]` is reserved for the independent
 > reviewer. A self-review, however rigorous, is `[DEV]`.
+>
+> **`[AUDIT §F.16.6]` Closure bar — adopted (symmetric to the deferral bar).** A
+> `FIXED` state must cite evidence **true of the tree at that commit**. A closure
+> justified by a claim about the codebase — *"X does not exist"*, *"no other
+> callers"*, *"not reachable"* — must be **verified, not asserted**. **A false
+> `FIXED` is worse than an honest `OPEN`**: it removes the item from the tracker
+> instead of leaving it visible (the §F.7.3 failure in the new table's clothes).
+> G11 was closed on a false *"phase3_compare.py does not exist"* (§F.16.2) and
+> corrected under this bar (S8); the S9 Tier-0 guard now enforces it mechanically.
 >
 > **`[AUDIT 2026-09-02, §F.16.6]` The bar applies symmetrically to CLOSURES.** A
 > `FIXED` state must cite evidence **true of the tree at that commit**. A closure
@@ -3860,13 +3869,51 @@ has now caught up: §D.10 plus the deferral bar plus the closure bar. The
 remaining value of this review series is close to exhausted; **the remaining value
 of the project is entirely in S1 and S2.**
 
----
----
+## F.18 Developer response to §F.16/§F.17 (S8/S9) + post-rework self-review  `[DEV / SELF-REVIEW 2026-09-02]`
 
+> **`[DEV]`, not `[AUDIT]`** (S6 rule: `[AUDIT]` is the independent reviewer only;
+> this carries **no standing verdict** — that is §F.17, rev 19, A−). Records the
+> S8/S9 fixes and a fresh code read done on request.
 
----
----
+**On the false `FIXED` (§F.16.2) — accepted without reservation.** I closed G11 by
+asserting "`phase3_compare.py` does not exist." It does — tracked, 3.8 kB, driven by
+4 PBS jobs. That was a checkable claim I did not check, and the auditor is right that
+a false `FIXED` is worse than an honest `OPEN`: it removes the item from the tracker
+instead of leaving it visible. The **closure bar** (§F.16.6: "a `FIXED` state must
+cite evidence true of the tree; claims about the codebase must be verified, not
+asserted") is adopted and now sits in §D.10 next to the deferral bar.
 
+**S8 — DONE (G11 truly closed).** `scripts/phase3_compare.py` now
+`import uma_gates` and takes `f_tol`/`min_sample` from it (the absolute-eV `E_TOL`
+stays local by design for that gate). Both live comparators (`phase5_parity.py`,
+`phase3_compare.py`) are single-sourced. §D.10's G11 row corrected — the false
+"does not exist" replaced with the honest history. Per §F.17.1 the two copies had
+agreed *by coincidence*, so this was latent, not an active mis-tolerance; fixed
+regardless.
+
+**S9 — DONE (P1.5 now an enforced invariant).** New Tier-0 HARD check
+(`tier0_guards.sh`): any `scripts/*{compare,parity}*.py` that defines a local
+`F_TOL`/`MIN_SAMPLE` without `import uma_gates` fails the gate. **Negative-tested:**
+deleting the import from `phase3_compare.py` flags it (hard fail); restored → clean.
+So a future comparator that forks its own tolerances cannot land silently — the same
+mechanical enforcement HARD 5 gave `ENV_VARS.md`.
+
+**Fresh code read (post-rework), for the requested new verdict.** I re-cloned at
+HEAD, verified the clean clone builds + CI is green (10 HARD / 4 REPORT, 33 Tier-1,
+0 findings), and read a core physics path I had not scrutinised: `build_ext_graph()`
+(the LAMMPS-NL → FairChem edge conversion, the default single-tile path). It is
+correct — triclinic is refused up front (`:813`), the integer image recovery
+`lround((x[j]-x[jr])·invL)` is exact for orthorhombic, and `pos[jr]+offset·cell`
+reproduces the ghost displacement (consistent with the 5e-14 FP64 force floor).
+**No new defect found**, consistent with §F.17's observation that the last several
+passes have surfaced bookkeeping, not code.
+
+**Self-assessed state (not a standing grade):** consistent with **A−**. Every item
+in §D.10 is `FIXED` with verified evidence, `OPEN` with a named reason, or
+`DEFERRED` under the bar; S8/S9 close the last small items; the only thing between
+A− and A is **S1** (the Tier-2 equivalence suite). I concur with §F.17.4: the
+remaining value is in S1/S2, and I am not manufacturing further findings where there
+are none. No open disagreement with PART F.
 
 ---
 ---
