@@ -249,23 +249,46 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   // deadlock (a hang, not an error). Agree the mode across ranks FIRST via a peer
   // all_reduce and throw a clear error on disagreement instead of hanging.
   {
+    // A4 (audit rev 23 / G.3): fold the THREE other collective-affecting flags into
+    // the same cross-rank agreement, so a per-rank mismatch (a stale `export` in one
+    // shell, a per-rank launcher) aborts cleanly here instead of hanging or, worse,
+    // computing a different gradient on one rank with no diagnostic:
+    //   UMA_ALLREDUCE_WITH_GRAD_BWD (default ON) -> gradient definition
+    //   UMA_SKIP_PRE_BWD_BARRIER              -> lockstep entry to mid-bwd collectives
+    //   UMA_CHUNK_RETAIN_K (int)              -> backward graph shape
+    // Reuses the P0.2 local_mode/all_reduce(SUM) pattern.
+    const char* ar = std::getenv("UMA_ALLREDUCE_WITH_GRAD_BWD");
+    const bool ar_bwd = !(ar && std::string(ar) == "0");           // default ON
+    const char* sb = std::getenv("UMA_SKIP_PRE_BWD_BARRIER");
+    const bool skip_bar = (sb && sb[0] == '1' && sb[1] == '\0');
+    // Read UMA_CHUNK_RETAIN_K inline (same parse as block_context.cpp::chunk_retain_k)
+    // to avoid a header-linkage dependency on that anon-namespace-adjacent helper.
+    int retain_k = 0;
+    if (const char* rk = std::getenv("UMA_CHUNK_RETAIN_K")) {
+      try { retain_k = std::max(0, std::stoi(rk)); } catch (...) { retain_k = 0; }
+    }
     const int local_mode = (self->impl_->ac_active ? 1 : 0) |
-                           (mn_checkpoint_enabled() ? 2 : 0);
-    auto mode_t = torch::tensor({static_cast<double>(local_mode)},
-                                torch::TensorOptions().dtype(torch::kFloat64)
-                                    .device(self->impl_->device));
-    // all_reduce is SUM; compare against world*local_mode to detect any mismatch.
-    auto sum_t = self->impl_->slot->all_reduce(rank, mode_t);
-    const double sum = sum_t.to(torch::kCPU).item<double>();
-    const double expect = static_cast<double>(world) * static_cast<double>(local_mode);
-    if (std::abs(sum - expect) > 0.5) {
+                           (mn_checkpoint_enabled() ? 2 : 0) |
+                           (ar_bwd ? 4 : 0) |
+                           (skip_bar ? 8 : 0);
+    // all_reduce a 2-vector [mode_bits, retain_k]; SUM must equal world*local.
+    auto agree_t = torch::tensor({static_cast<double>(local_mode),
+                                  static_cast<double>(retain_k)},
+                                 torch::TensorOptions().dtype(torch::kFloat64)
+                                     .device(self->impl_->device));
+    auto sum_t = self->impl_->slot->all_reduce(rank, agree_t).to(torch::kCPU);
+    const double sum_mode = sum_t[0].item<double>();
+    const double sum_k = sum_t[1].item<double>();
+    const bool mode_ok = std::abs(sum_mode - world * (double)local_mode) < 0.5;
+    const bool k_ok = std::abs(sum_k - world * (double)retain_k) < 0.5;
+    if (!mode_ok || !k_ok) {
       throw std::runtime_error(
-          "MpiPeerPredictor: ranks disagree on the backward-graph mode "
-          "(ac_active/checkpoint) — some ranks are missing per-rank AC artifacts "
-          "(w" + std::to_string(world) + "/r*/model_block_0.pt) or have a "
-          "different UMA_MN_CKPT. All ranks must load the same artifact set. "
-          "rank=" + std::to_string(rank) + " local_mode=" +
-          std::to_string(local_mode));
+          "MpiPeerPredictor: ranks disagree on a collective-affecting setting "
+          "(ac_active/UMA_MN_CKPT/UMA_ALLREDUCE_WITH_GRAD_BWD/"
+          "UMA_SKIP_PRE_BWD_BARRIER/UMA_CHUNK_RETAIN_K) — every rank must load the "
+          "same artifact set and export the same UMA_* flags. rank=" +
+          std::to_string(rank) + " local_mode=" + std::to_string(local_mode) +
+          " retain_k=" + std::to_string(retain_k));
     }
   }
 

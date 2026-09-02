@@ -193,25 +193,31 @@ over=$(awk '/^[a-zA-Z].*PairUMA::[a-zA-Z_]+\(/{name=$0; s=NR}
 # any GROWTH of the set, HARD-fails — an open-ended "informational" state is how
 # compute() reached 225 lines. Baseline = the exact known set; anything outside it
 # fails. When A5 splits these, lower the baseline (ideally to none).
-UMA_A5_BASELINE="load_predictor run_compute_dd"
-over_n=$(echo "$over" | grep -c .)
-[ -z "$over" ] && over_n=0
-new_over=0
+# A5c (G.12.2): the ratchet bounds baseline SIZE, not just membership — a baseline
+# method may only SHRINK, never grow (load_predictor drifted 216->218 in one commit
+# under a membership-only ratchet). Baseline = "name:max_lines"; a new over-130
+# method, OR a baseline method exceeding its recorded size, HARD-fails. State can
+# only improve. When A5 splits a method below 130, drop its baseline entry.
+UMA_A5_BASELINE="load_predictor:218 run_compute_dd:156"
+new_over=0; grew=0
 if [ -n "$over" ]; then
   while read -r n nm; do
     [ -z "$nm" ] && continue
-    case " ${UMA_A5_BASELINE} " in
-      *" ${nm} "*) say "  OVER-130 (known A5 target): ${nm}() = ${n} lines" ;;
-      *) say "  ⛔ NEW OVER-130 method (ratchet): ${nm}() = ${n} lines — split it (F.20-A5)"; new_over=$((new_over+1)) ;;
-    esac
+    cap=""; for b in ${UMA_A5_BASELINE}; do
+      [ "${b%%:*}" = "$nm" ] && cap="${b##*:}"; done
+    if [ -z "$cap" ]; then
+      say "  ⛔ NEW OVER-130 method (ratchet): ${nm}() = ${n} lines — split it (F.20-A5)"; new_over=$((new_over+1))
+    elif [ "$n" -gt "$cap" ]; then
+      say "  ⛔ BASELINE GREW (A5c ratchet): ${nm}() = ${n} lines > recorded ${cap} — shrink it, don't grow it"; grew=$((grew+1))
+    else
+      say "  OVER-130 (known A5 target, <= recorded ${cap}): ${nm}() = ${n} lines"
+    fi
   done <<< "$over"
 fi
-if [ "$new_over" -gt 0 ]; then
-  say "  FAIL: ${new_over} method(s) over 130 lines outside the A5 baseline"; hard_fail=$((hard_fail+new_over))
-elif [ "$over_n" -gt 2 ]; then
-  say "  FAIL: over-130 count grew to ${over_n} (baseline 2) — ratchet tripped"; hard_fail=$((hard_fail+1))
+if [ "$((new_over+grew))" -gt 0 ]; then
+  say "  FAIL: ${new_over} new + ${grew} grown over-130 method(s) (A5/A5c ratchet)"; hard_fail=$((hard_fail+new_over+grew))
 else
-  say "  OK: over-130 set within the A5 baseline (${over_n}: ${UMA_A5_BASELINE})"
+  say "  OK: over-130 set within the A5 baseline sizes (${UMA_A5_BASELINE})"
 fi
 
 # ---- REPORT 2: .pbs without set -euo pipefail -------------------------------
