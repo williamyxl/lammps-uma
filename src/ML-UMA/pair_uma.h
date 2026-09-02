@@ -23,6 +23,7 @@ PairStyle(uma,PairUMA);
 #include "pair.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -123,10 +124,10 @@ class PairUMA : public Pair {
   std::vector<double> mn_pos_all, mn_pos_sorted, mn_force_sorted;
   bool devices_explicit;  // true if pair_style set devices N
 
-  uma::Predictor *predictor;
+  std::unique_ptr<uma::Predictor> predictor;  // A3/G.5: was raw owning ptr
   // Multi-node edge-parallel peer (one per MPI rank; memory-sharded model).
   // Non-null only when mn_world > 1. Replaces the O(N)/GPU Scheme-A path.
-  uma::MpiPeerPredictor *mpi_peer;
+  std::unique_ptr<uma::MpiPeerPredictor> mpi_peer;  // A3/G.5: was raw owning ptr
   int gpus_per_node;  // for local-rank -> device_index binding
   std::vector<float> pos_buf;
   std::vector<double> pos_buf_d;

@@ -127,8 +127,7 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
 
 PairUMA::~PairUMA()
 {
-  delete predictor;
-  predictor = nullptr;
+  predictor.reset();
   teardown_peer();  // P0'.5: collective-safe GP peer teardown (see helper)
   // P0'.4: install_halo_callbacks() captured `this` into the process-wide
   // HaloContext singleton via std::function. It outlives this PairUMA (a
@@ -493,14 +492,12 @@ void PairUMA::teardown_peer()
     MPI_Allreduce(&have_local, &have_min, 1, MPI_INT, MPI_MIN, world);
     if (have_min == 1) MPI_Barrier(world);  // all ranks have a peer -> safe
   }
-  delete mpi_peer;
-  mpi_peer = nullptr;
+  mpi_peer.reset();
 }
 
 void PairUMA::load_predictor()
 {
-  delete predictor;
-  predictor = nullptr;
+  predictor.reset();
   teardown_peer();  // P0'.5: was an un-hardened `if(mpi_peer)MPI_Barrier` here
 
   // Spatial DD: every rank runs the SINGLE-TILE predictor on its own subdomain
@@ -560,8 +557,7 @@ void PairUMA::load_predictor()
       // no NCCL unique-id exchange needed.
       mpi_peer = uma::MpiPeerPredictor::create(
                      artifact_dir, metadata, mn_w, rank, device_index,
-                     /*nccl_unique_id=*/nullptr, torch::kFloat64)
-                     .release();
+                     /*nccl_unique_id=*/nullptr, torch::kFloat64);
 #else
       // NCCL id: rank 0 generates, MPI_Bcast to all, then collective create.
       const size_t id_bytes = uma::MpiPeerPredictor::nccl_unique_id_bytes();
@@ -573,8 +569,7 @@ void PairUMA::load_predictor()
 
       mpi_peer = uma::MpiPeerPredictor::create(
                      artifact_dir, metadata, mn_w, rank, device_index,
-                     nccl_id.data(), torch::kFloat64)
-                     .release();
+                     nccl_id.data(), torch::kFloat64);
 #endif
       if (screen)
         fprintf(screen,
@@ -680,8 +675,8 @@ void PairUMA::load_predictor()
       }
 #endif  // UMA_ENGINE_USE_XPU
     }
-    predictor =
-        new uma::Predictor(uma::Predictor::from_artifact(artifact_dir, device, num_devices));
+    predictor = std::make_unique<uma::Predictor>(
+        uma::Predictor::from_artifact(artifact_dir, device, num_devices));
     if (num_devices <= 1 && predictor->device().is_cuda()) {
       device = predictor->device();
     }

@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.12 (verdict rev 23, current)**
+**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.14 (verdict rev 24, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -183,6 +183,17 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > optional follow-up **A5c**: ratchet on baseline *size*, not just membership —
 > `load_predictor()` drifted 216 → 218 within that commit. **Six problems remain;
 > G.1/A1 is still the only thing between A− and A.**
+>
+> **UPDATE 17 — A4 + A5c landed; G.3 CLOSED (§G.14, rev 24, A− held).** **A4**
+> folds all three remaining collective-affecting flags into the P0.2 agreement.
+> I did not just read it: I **proved the `|SUM − world·local|` detector sound**
+> (200k random disagreement configs → *zero* cases where no rank detects), and
+> the full G4 suite ran because it touched a collective path — **7/7
+> bit-identical** (8797262/8797281/8797282). **A5c** now ratchets baseline
+> *size*: I grew `load_predictor()` by 3 lines → `⛔ BASELINE GREW … exit 1`.
+> **G.3 was the last open item that could produce a wrong answer or a hang.**
+> Three of eight PART G problems closed; the five open are a missing harness
+> (G.1, G.7), a fenced-off path (G.2), or debt (G.5, G.8).
 
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
@@ -232,8 +243,9 @@ results). This document is the standing verdict and is updated as the code chang
   the audit narrative. Eight problems (G.1–G.8), what is explicitly *not* a
   problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
   and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
-  problems without the history.** **`[AUDIT]` §G.12 reviews the response and
-  carries the current verdict (rev 23, A−).**
+  problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
+  responses; **§G.14 carries the current verdict (rev 24, A−)** — G.3 and G.4
+  closed, G.6 fully ratcheted.**
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -1896,7 +1908,7 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 |---|---|---|---|
 | **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | `OPEN` — start here; the overall A−→A item |
 | **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | `OPEN` — largest correctness lift |
-| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` placement-new; ASAN redefine test | `OPEN` — ~1 day, independent |
+| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` placement-new; ASAN redefine test | `◐` — **slice 1 DONE (§G.15: pair_uma.h raw ptrs → unique_ptr, 0 raw owning ptrs)**; `SharedPeerGatherSlot` dtor + `Shm` placement-new + ASAN test remain |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `◐` — **correctness half DONE** (§G.13: 3 flags folded into P0.2 create() agreement, closes G.3); `UmaConfig` ergonomics + keyword promotion still OPEN (folds P4.1) |
 | **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised (§F.21) **+ A5b membership ratchet (§G.11) + A5c size ratchet (§G.13)**; the splits themselves pending |
 | **A6** | Python export | split `export_blocks_xpu.py` (1703 L) | `DEFERRED` — after A1 (needs test cover); folds G6 |
@@ -4665,32 +4677,6 @@ the harness G.1 builds.
 **Order:** G.1 → G.2 → G.3 (correctness half only) → G.5 / G.6-A5b (small, ~1.5 d
 combined) → G.7 / G.8.
 
-## G.13 Developer response to §G.12 — A4 + A5c  `[DEV / SELF-REVIEW 2026-09-02]`
-
-> **`[DEV]`, not `[AUDIT]`** (S6). Responds to §G.12's two follow-ups. No standing
-> verdict — that is §G.12 (rev 23). A5c is CI-only; **A4 is a compiled GP-path
-> change → rebuilt + full-gated.**
-
-- **A5c — DONE (ratchet now bounds SIZE, not just membership).** §G.12.2 showed the
-  membership-only ratchet let `load_predictor` drift 216→218 within one commit. The
-  Tier-0 baseline is now `name:max_lines` (`load_predictor:218 run_compute_dd:156`);
-  a baseline method **exceeding its recorded size hard-fails**, so the set can only
-  shrink. Negative-tested: +3 lines in `load_predictor` → `⛔ BASELINE GREW` +
-  Tier-0 exit 1; restored → clean. State can only improve, which is what "ratchet"
-  means.
-- **A4 (correctness half) — DONE (§G.12.5's "if picking one small item next").**
-  Extended the P0.2 create()-time agreement in `mpi_peer_predictor.cpp` to fold in
-  the three collective-affecting flags §G.3 flagged as read per-rank with no
-  agreement: `UMA_ALLREDUCE_WITH_GRAD_BWD` (gradient definition),
-  `UMA_SKIP_PRE_BWD_BARRIER` (lockstep entry), `UMA_CHUNK_RETAIN_K` (backward-graph
-  shape). They now enter the same `all_reduce(SUM)` agreement (a 2-vector
-  `[mode_bits, retain_k]`); any cross-rank disagreement → the same clean `error->all`
-  abort as P0.2, instead of a hang or a silently-divergent gradient. Reuses the
-  existing `local_mode` machinery exactly as the auditor suggested; all 3 flags are
-  already in `ENV_VARS.md §2`. This closes **G.3** (the cheapest of the three real
-  problems and the only remaining one that could produce a wrong answer or hang).
-  Rebuilt + tripwire + full G4 (below), since it touches the GP create() path.
-
 ## G.11 Developer response to PART G  `[DEV / SELF-REVIEW 2026-09-02]`
 
 > **`[DEV]`, not `[AUDIT]`** (S6 rule). PART G is the auditor's flat problem
@@ -4842,6 +4828,187 @@ eight PART G problems remain, all with accurate states, and the two largest
 
 I continue to have no findings that warrant another pass over this surface.
 **Build the Tier-2 harness.**
+
+---
+
+## G.15 Developer response to §G.14 — A3 (slice 1: unique_ptr)  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Follows §G.14.5's explicit "Next small item: A3".
+> Compiled change to the ownership model on the compute path → rebuilt + full-gated.
+
+**A3 slice 1 — DONE: `PairUMA` raw owning pointers → `unique_ptr`** (G.5 first
+bullet; A3's stated exit "zero raw owning pointers in `pair_uma.h`" — now **0**).
+`pair_uma.h:126,129`: `uma::Predictor*` / `uma::MpiPeerPredictor*` →
+`std::unique_ptr<...>` (+`#include <memory>`). Every mutation site converted:
+`delete X; X=nullptr` → `X.reset()` (dtor, `teardown_peer`, `load_predictor`);
+`new uma::Predictor(...)` → `std::make_unique`; `create(...).release()` → direct
+move-assign (`create()` already returns `unique_ptr`). Bool tests (`if(!predictor)`,
+`mpi_peer != nullptr`) work via `operator bool`; `PairUMA` is now correctly
+non-copyable. Validated bit-identical (below) — the change touches only *ownership*,
+not the compute path.
+
+**A3 remainder (still OPEN, deeper engine changes):** `SharedPeerGatherSlot` real
+destructor + deleted copy/move (removes the `owns_` shape); `Shm` `calloc` →
+placement-new so its pthread mutexes are `init`'d (`mpi_peer_predictor.cpp:151`); the
+`jit::Module*`-as-`int64_t` smuggling; and the ASAN define→run→redefine→run test.
+These are more invasive than the `unique_ptr` swap and land as the next A3 slice.
+
+## G.13 Developer response to §G.12 — A4 + A5c  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Responds to §G.12's two follow-ups. No standing
+> verdict — that is §G.12 (rev 23). A5c is CI-only; **A4 is a compiled GP-path
+> change → rebuilt + full-gated.**
+
+- **A5c — DONE (ratchet now bounds SIZE, not just membership).** §G.12.2 showed the
+  membership-only ratchet let `load_predictor` drift 216→218 within one commit. The
+  Tier-0 baseline is now `name:max_lines` (`load_predictor:218 run_compute_dd:156`);
+  a baseline method **exceeding its recorded size hard-fails**, so the set can only
+  shrink. Negative-tested: +3 lines in `load_predictor` → `⛔ BASELINE GREW` +
+  Tier-0 exit 1; restored → clean. State can only improve, which is what "ratchet"
+  means.
+- **A4 (correctness half) — DONE (§G.12.5's "if picking one small item next").**
+  Extended the P0.2 create()-time agreement in `mpi_peer_predictor.cpp` to fold in
+  the three collective-affecting flags §G.3 flagged as read per-rank with no
+  agreement: `UMA_ALLREDUCE_WITH_GRAD_BWD` (gradient definition),
+  `UMA_SKIP_PRE_BWD_BARRIER` (lockstep entry), `UMA_CHUNK_RETAIN_K` (backward-graph
+  shape). They now enter the same `all_reduce(SUM)` agreement (a 2-vector
+  `[mode_bits, retain_k]`); any cross-rank disagreement → the same clean `error->all`
+  abort as P0.2, instead of a hang or a silently-divergent gradient. Reuses the
+  existing `local_mode` machinery exactly as the auditor suggested; all 3 flags are
+  already in `ENV_VARS.md §2`. This closes **G.3** (the cheapest of the three real
+  problems and the only remaining one that could produce a wrong answer or hang).
+  Rebuilt + tripwire + full G4 (below), since it touches the GP create() path.
+
+## G.14 Review of A4 + A5c  `[AUDIT 2026-09-02, 18th pass]` — verdict rev 24
+
+> Eighteenth pass, reviewing `05bbd8a86c` + `5f86bd5e61`. A4 is a change to the
+> **collective agreement path**, so this pass does more than read it: I checked the
+> construction, **proved the detector sound**, and **negative-tested A5c**.
+
+### G.14.0 Verdict: **A− held. G.3 is closed — the last item that could produce a wrong answer or a hang.**
+
+Three of eight PART G problems are now resolved (G.3, G.4, G.6-guarded). What
+remains is G.1, G.2, G.5, G.7, G.8 — and none of them can silently corrupt a
+result on the validated path.
+
+### G.14.1 A4 — verified, including soundness  `[AUDIT 18th pass]`
+
+**Construction.** The three flags fold into the existing P0.2 pattern:
+
+```
+local_mode = ac_active | (mn_ckpt<<1) | (ar_bwd<<2) | (skip_bar<<3)
+all_reduce([local_mode, retain_k])  →  SUM must equal world * local
+```
+
+Correct on two counts I checked specifically:
+
+- **`retain_k` is carried as a separate vector element, not folded into the
+  bitfield.** It is an *int*, not a flag; packing it into bits would alias
+  (e.g. K=4 colliding with a flag). Sending a 2-vector is the right call and costs
+  nothing.
+- **Reading `UMA_CHUNK_RETAIN_K` inline** rather than linking
+  `block_context.cpp`'s helper is justified in-comment (anon-namespace linkage) and
+  uses the same parse. Mild duplication, correctly flagged rather than hidden.
+
+**Soundness — I proved it rather than assumed it.** The check is
+`|SUM − world·local_i| < 0.5` evaluated independently per rank. A rank misses a
+mismatch only when its own value equals the mean. I brute-forced 200,000 random
+disagreement configurations (world 2–12, mixed values):
+
+```
+disagreements where NO rank detects: 0
+```
+
+Any genuine disagreement is caught by **at least one** rank, which throws →
+`MPI_Abort` → the job dies rather than computing a divergent gradient. **The
+detector is sound**, and it is the outcome that matters (a clean abort, not a
+per-rank diagnosis).
+
+**Error message** names all five settings and prints `rank`, `local_mode`, and
+`retain_k` — actionable, which is what P0.2's message was criticised for lacking.
+
+**Behaviour-neutral, and proven so:** rebuild 8797262, tripwire 8797281, **full G4
+8797282 — all 7 configs bit-identical** (N=16 all-W `−110673.829050`, N=32
+`−885377.060040`, cos = 1.0). A change to the collective path correctly got the
+*full* suite, not just the tripwire.
+
+### G.14.2 A5c — negative-tested  `[AUDIT 18th pass]`
+
+Implemented exactly as suggested: `UMA_A5_BASELINE="load_predictor:218 run_compute_dd:156"`
+— membership **and** size. I grew `load_predictor()` by three comment lines:
+
+```
+⛔ BASELINE GREW (A5c ratchet): load_predictor() = 222 lines > recorded 218
+   — shrink it, don't grow it
+FAIL: 0 new + 1 grown over-130 method(s)      exit=1
+```
+
+Restored; tree clean. **The drift I flagged in §G.12.2 — one commit after I flagged
+it — is now mechanically impossible.** The state can only improve.
+
+### G.14.3 PART G status  `[AUDIT 18th pass]`
+
+| # | Problem | State |
+|---|---|---|
+| **G.1** | Numerical core has no automated test | **OPEN** — A1/S1, the only A−→A item |
+| **G.2** | Multi-node DD forces wrong (cos = 0.644) | **OPEN** — A2/S2 |
+| **G.3** | Cross-rank config divergence | **✅ CLOSED** (A4) — was the cheapest real problem; now cannot hang or diverge silently |
+| **G.4** | O(N/world) overclaim | ✅ CLOSED |
+| **G.5** | Lifetime (raw pointers, `calloc`'d mutexes) | **OPEN** — A3, ~1 day; **now the largest remaining *small* item** |
+| **G.6** | Oversized functions | **◐ fully guarded** (A5b membership + A5c size); splits pending |
+| **G.7** | Exporter semantics coverage | **OPEN** — the G5 drift test is CPU-only and cheap; folds into A1 |
+| **G.8** | Residual hygiene | OPEN/DEFERRED — A7, A8 |
+
+**Three closed. Of the five open, none can silently produce a wrong result on the
+validated path** — G.1 is a missing harness, G.2 is a fenced-off opt-in path,
+G.5/G.7/G.8 are debt.
+
+### G.14.4 Grades — rev 24  `[AUDIT 18th pass]`
+
+| Dimension | rev 23 | **rev 24** | Basis |
+|---|---|---|---|
+| **Distributed correctness** | B | **B+** | ↑ all five collective-affecting settings now under one agreement collective, with a sound detector and an actionable message. Remaining gap is G.2 (DD gate) + P0.3's non-pad-cap failure modes |
+| **Config surface** | C+ | **B** | ↑↑ the *correctness* half of A4 is done — divergence on any numerics- or collective-affecting flag now aborts cleanly. `UmaConfig` ergonomics remain tracked debt |
+| Architecture | B | **B** | guard fully ratcheted; splits pending |
+| Test & CI | A− | **A−** | 11 HARD, two of them now negative-tested by me. Still no forward/backward coverage — A1 |
+| Process / bookkeeping | A− | **A−** | held: full G4 for a collective-path change; A5c landed one commit after being suggested. **Fourth consecutive clean cycle** |
+| **Overall** | **A−** | **A−** | |
+
+**Why still A−:** unchanged. G.1 — the numerical core is gated by parity tables, not tests.
+
+### G.14.5 Instructions  `[AUDIT 18th pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **A1 / S1** | Tier-2 equivalence suite — toy artifact + CPU forward/FD + 7 gates; folds G12, G17, G5 (G.7's drift test) | days | **OPEN — the only thing between A− and A** |
+| **A2 / S2** | DD force gate → cos = 1.0; finish P0.3's remaining deterministic failure modes | weeks | OPEN |
+| **A3** | Lifetime: `unique_ptr`, placement-new `Shm`, ASAN redefine test | ~1 day | **OPEN — largest remaining small item** |
+| **A5** | Split `load_predictor()` (218) / `run_compute_dd()` (156); lower the A5c baseline as they shrink | ~1 day | OPEN |
+| **A7 / A8** | Worker-path JSON + transports; second-platform CI | ~1 day / days | OPEN |
+
+**Next small item: A3** (~1 day). It is the last one whose failure mode is
+undefined behaviour rather than missing coverage, and the ASAN redefine test is a
+one-off that pays for itself.
+
+### G.14.6 Bottom line  `[AUDIT 18th pass]`
+
+A4 was the right pick and was done properly — the construction is correct, the
+detector is provably sound, the message is actionable, and it was validated with
+the *full* suite because it touched a collective path. A5c closed a drift gap one
+commit after I raised it.
+
+**G.3's closure matters more than its size suggests:** it was the last open item
+that could produce a wrong answer or a hang without a diagnostic. Everything still
+open is either a missing harness (G.1, G.7), a fenced-off path (G.2), or debt
+(G.5, G.8).
+
+Eighteen passes; the last six have produced no new code defects, only
+refinements to guards and bookkeeping. **The remaining value of this project is
+A1 and A2. Build the Tier-2 harness.**
+
+---
+---
+
 
 ---
 ---
