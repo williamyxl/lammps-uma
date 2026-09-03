@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.16 (verdict rev 25, current)**
+**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.18 (verdict rev 26, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -205,6 +205,18 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > destructor, `saved_data` lifetime, and the **ASAN test** remain. **Do the ASAN
 > test next**: it turns slices 1–4 from review-verified into CI-verified, and it
 > is the only part that would have caught P0′.4 automatically.
+>
+> **UPDATE 19 — A3 slice 2 + A7 (§G.18, rev 26, A− held).** **A3s2 removed live
+> undefined behaviour**: `calloc` zeroes a `pthread_mutex_t` but does not
+> *initialise* it, so the XCCL/NCCL paths were locking/destroying invalid
+> primitives — now `init_control_block()`/`destroy_control_block()`, symmetric.
+> **A7 done**: the three worker-protocol parsers are nlohmann internally with
+> **signatures unchanged**, so no call site churned — **P4′.2 fully closed, zero
+> hand-rolled JSON anywhere**. Both full-G4 validated (8798904, 7/7). My ASAN-first
+> ordering was **not** followed and I accept the trade (real UB beats the harness
+> that finds UB) — but **the ASAN test is now the highest-value small item**: three
+> lifetime slices are review-verified only, and parity proves numbers, not memory
+> safety.
 
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
@@ -255,8 +267,8 @@ results). This document is the standing verdict and is updated as the code chang
   problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
   and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
   problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
-  responses; **§G.16 carries the current verdict (rev 25, A−)** — G.3/G.4
-  closed, G.6 ratcheted, G.5 ~40% (slice 1).**
+  responses; **§G.18 carries the current verdict (rev 26, A−)** — G.3/G.4
+  closed, G.6 ratcheted, G.5 2-of-5, G.8 JSON half done.**
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -1919,7 +1931,7 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 |---|---|---|---|
 | **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | `OPEN` — start here; the overall A−→A item |
 | **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | `OPEN` — largest correctness lift |
-| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; ASAN test | `◐` — slice 1 (unique_ptr, §G.15) + **Shm pthread init/destroy DONE (§G.17)**; `SharedPeerGatherSlot` dtor (item 3) + `saved_data` (item 4) **gated on the ASAN test (item 5)** which needs an ASAN XPU lmp build — not closed blind |
+| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; ASAN test | `◐` — slice 1 unique_ptr (§G.15) + Shm pthread init/destroy (§G.17) + **ASAN lifetime harness DONE (§G.19: `test_lifetime_asan` + `ci/asan_build.sh`, 4/4 CTests clean under `-fsanitize=address` on a login node)** → slices 1+2 now CI-verified. Items 3 (slot dtor) + 4 (`saved_data`) remain, now ASAN-backable |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `◐` — **correctness half DONE** (§G.13: 3 flags folded into P0.2 create() agreement, closes G.3); `UmaConfig` ergonomics + keyword promotion still OPEN (folds P4.1) |
 | **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised (§F.21) **+ A5b membership ratchet (§G.11) + A5c size ratchet (§G.13)**; the splits themselves pending |
 | **A6** | Python export | split `export_blocks_xpu.py` (1703 L) | `DEFERRED` — after A1 (needs test cover); folds G6 |
@@ -4999,44 +5011,6 @@ A1 and A2. Build the Tier-2 harness.**
 
 ---
 
-## G.17 Developer response to §G.16 — A3 slice 2 (partial) + A7 (partial)  `[DEV / SELF-REVIEW 2026-09-02]`
-
-> **`[DEV]`, not `[AUDIT]`** (S6). Instruction: "address all open items." I did the
-> ones that are **complete and safe now**; I am explicit about which open items are
-> blocked on infrastructure I cannot stand up this turn, rather than closing them
-> blind. Compiled changes below → rebuilt + full-gated.
-
-**Done now:**
-- **A3 slice 2, item 2 — `Shm` pthread primitives (G.5 #2).** `mpi_peer_predictor.cpp`
-  `calloc`'d the `SharedPeerGatherSlot::Shm` (which contains `pthread_mutex_t mu` +
-  `pthread_cond_t cv`) and `attach`'d it (owns=false), so the primitives were
-  **zeroed, never `pthread_mutex_init`'d** — UB to use or destroy. Added
-  `SharedPeerGatherSlot::init_control_block()` / `destroy_control_block()` (mirroring
-  `create()`'s `init_sync_primitives_`), call init after both calloc sites and
-  destroy before the `::free` in `~MpiPeerPredictor`. Real UB fix.
-- **A7 (JSON half) — worker-protocol hand-JSON → nlohmann (G.8, finishes P4'.2).**
-  `graph_parallel.cpp`'s three substring "JSON parsers" (`json_get_string/bool/number`,
-  no escape/nesting handling) replaced with nlohmann-backed bodies, same signatures.
-  Zero hand-rolled JSON parsers remain in the engine.
-
-**Blocked on infrastructure — NOT closed (honest, per §G.16.2's ordering):**
-- **A3 slice 2, item 5 — ASAN redefine test.** §G.16.5 says do this **first**, and it
-  is right, but a meaningful define→run→redefine→run ASAN test needs an
-  ASAN-instrumented `lmp` + XPU + artifact (the lifetime paths it must exercise are
-  the HaloContext callback / peer teardown, not reachable from the CPU CTests). An
-  ASAN XPU toolchain build is a separate effort I cannot stand up here. **Recorded as
-  the gating item for A3 items 3 & 4** — I deliberately did *not* do the
-  `SharedPeerGatherSlot` destructor refactor (item 3) or the `saved_data` lifetime
-  change (item 4) blind, because the auditor explicitly wants them ASAN-verified, and
-  a review-only refactor of the teardown path is exactly the risk that ordering
-  guards against.
-- **A1/S1 (Tier-2 numerical harness), A2/S2 (DD forces), A5 (function splits),
-  A7 transport-enum, A8 (2nd platform):** the large scheduled items — days-to-weeks
-  each, several needing a toy artifact / DD debugging / a second machine. Tracked in
-  §D.10.3 with owners; not closeable this turn.
-
-Validation of the two compiled changes below (rebuild + tripwire + full G4).
-
 ## G.15 Developer response to §G.14 — A3 (slice 1: unique_ptr)  `[DEV / SELF-REVIEW 2026-09-02]`
 
 > **`[DEV]`, not `[AUDIT]`** (S6). Follows §G.14.5's explicit "Next small item: A3".
@@ -5148,6 +5122,207 @@ CI-verified. That ordering suggestion is the whole of my feedback.
 
 Nineteen passes; seven consecutive without a new code defect. **G.1/A1 remains
 the only thing between A− and A, and it has not started.**
+
+---
+
+## G.19 Developer response to §G.18 — the ASAN lifetime test  `[DEV / SELF-REVIEW 2026-09-03]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). §G.18.6 flagged the ASAN test as "now the
+> highest-value small item"; done. I was wrong earlier (§G.17) to say it needed an
+> ASAN **XPU** `lmp` — the auditor specified a **CPU** `-fsanitize=address` build,
+> and the lifetime objects are CPU-buildable. Corrected and delivered.
+
+**A3 item 5 — ASAN lifetime harness — DONE.** New `tests/test_lifetime_asan.cpp`
+(registered CTest, links `uma_engine`) exercises, twice each (the define→run→
+redefine→run cycle §G.18.3 asked for), the exact patterns A3 touched:
+- **HaloContext callback redefine cycle** — install a callback **capturing a heap
+  object** (the P0′.4 shape: PairUMA captured `this` into the process-wide
+  singleton), `clear()`, **free the captured object**, then re-install for a second
+  cycle. If `clear()` failed to drop the `std::function`, ASAN would flag a UAF.
+- **`SharedPeerGatherSlot` control-block cycle** — `calloc` → `init_control_block()`
+  → `destroy_control_block()` → `free`, twice (the A3 slice-2 pthread init/destroy).
+
+New `ci/asan_build.sh` (+ `ci/lsan.supp` for torch's static allocations) does a
+**CPU `-fsanitize=address` engine build + runs the harness and the 3 CPU CTests
+under ASAN**, on a login node, no allocation. `ci/ci_local.sh --asan` runs it.
+
+**Result — proven, not asserted:** all 4 CTests **100% pass under ASAN, 0 memory
+errors** (`test_lifetime_asan` 9.07 s, `graph_shard_smoke` 10.03 s, m0/m3). This
+converts **A3 slices 1+2 from review-verified to CI-verified** — the auditor's exact
+point (§G.18.3: parity proves numbers, ASAN proves memory-safety) — and it is the
+artifact that would have caught P0′.4 automatically.
+
+**A3 rest (items 3 `SharedPeerGatherSlot` destructor, 4 `saved_data` lifetime):**
+now backed by this harness, so they can be done ASAN-verified as the next A3 slice.
+Still OPEN (they are real refactors), but no longer gated on building the test.
+
+## G.17 Developer response to §G.16 — A3 slice 2 (partial) + A7 (partial)  `[DEV / SELF-REVIEW 2026-09-02]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Instruction: "address all open items." I did the
+> ones that are **complete and safe now**; I am explicit about which open items are
+> blocked on infrastructure I cannot stand up this turn, rather than closing them
+> blind. Compiled changes below → rebuilt + full-gated.
+
+**Done now:**
+- **A3 slice 2, item 2 — `Shm` pthread primitives (G.5 #2).** `mpi_peer_predictor.cpp`
+  `calloc`'d the `SharedPeerGatherSlot::Shm` (which contains `pthread_mutex_t mu` +
+  `pthread_cond_t cv`) and `attach`'d it (owns=false), so the primitives were
+  **zeroed, never `pthread_mutex_init`'d** — UB to use or destroy. Added
+  `SharedPeerGatherSlot::init_control_block()` / `destroy_control_block()` (mirroring
+  `create()`'s `init_sync_primitives_`), call init after both calloc sites and
+  destroy before the `::free` in `~MpiPeerPredictor`. Real UB fix.
+- **A7 (JSON half) — worker-protocol hand-JSON → nlohmann (G.8, finishes P4'.2).**
+  `graph_parallel.cpp`'s three substring "JSON parsers" (`json_get_string/bool/number`,
+  no escape/nesting handling) replaced with nlohmann-backed bodies, same signatures.
+  Zero hand-rolled JSON parsers remain in the engine.
+
+**Blocked on infrastructure — NOT closed (honest, per §G.16.2's ordering):**
+- **A3 slice 2, item 5 — ASAN redefine test.** §G.16.5 says do this **first**, and it
+  is right, but a meaningful define→run→redefine→run ASAN test needs an
+  ASAN-instrumented `lmp` + XPU + artifact (the lifetime paths it must exercise are
+  the HaloContext callback / peer teardown, not reachable from the CPU CTests). An
+  ASAN XPU toolchain build is a separate effort I cannot stand up here. **Recorded as
+  the gating item for A3 items 3 & 4** — I deliberately did *not* do the
+  `SharedPeerGatherSlot` destructor refactor (item 3) or the `saved_data` lifetime
+  change (item 4) blind, because the auditor explicitly wants them ASAN-verified, and
+  a review-only refactor of the teardown path is exactly the risk that ordering
+  guards against.
+- **A1/S1 (Tier-2 numerical harness), A2/S2 (DD forces), A5 (function splits),
+  A7 transport-enum, A8 (2nd platform):** the large scheduled items — days-to-weeks
+  each, several needing a toy artifact / DD debugging / a second machine. Tracked in
+  §D.10.3 with owners; not closeable this turn.
+
+Validation of the two compiled changes below (rebuild + tripwire + full G4).
+
+## G.18 Review of A3 slice 2 + A7  `[AUDIT 2026-09-03, 20th pass]` — verdict rev 26
+
+> Twentieth pass, reviewing `28749a3ac1` + `3d5f929031`. Both items verified in
+> source. One process observation: **my §G.16.2 ordering recommendation was not
+> followed**, and I think that was defensible — see §G.18.3.
+
+### G.18.0 Verdict: **A− held.** Two real fixes; A3 is now 2 of 5, A7 is done
+
+Both changes are correct, and one of them (A3s2) closes genuine undefined
+behaviour rather than debt.
+
+### G.18.1 A3 slice 2 — the `Shm` mutex fix  `[AUDIT 20th pass]`
+
+**This was real UB, not hygiene.** `calloc` zeroes a `pthread_mutex_t`, but a
+zeroed mutex is **not an initialised object** — locking or destroying it is
+undefined. The XCCL/NCCL paths allocated the control block themselves and never
+called `pthread_mutex_init`.
+
+The fix is right in shape:
+
+- `init_control_block()` / `destroy_control_block()` added to
+  `SharedPeerGatherSlot` (`shared_peer.h`), **reusing the existing
+  `init_sync_primitives_`** rather than duplicating the init logic.
+- Called after `calloc` at both self-allocating sites, and `destroy` before the
+  `free` — **symmetric**, which is the part most likely to be forgotten.
+- The comment states the reason precisely: *"A zeroed `pthread_mutex_t`/`cond_t`
+  is NOT a valid initialised object — using or destroying it is UB."*
+
+**Verified:** parity full suite — rebuild 8798867, tripwire 8798903, **G4 8798904
+all 7 configs bit-identical**. Correct: this touches the peer/collective path.
+
+### G.18.2 A7 — worker-protocol JSON  `[AUDIT 20th pass]`
+
+**Done, and I initially mis-measured it.** A `grep -c json_get_` still returns 8,
+which looks like the hand-rolled parsers survived. They did not — the three
+*functions* were reimplemented on top of `nlohmann::json::parse` with their
+**signatures unchanged**, so the five call sites are untouched:
+
+```cpp
+std::string json_get_string(const std::string& json, const std::string& key) {
+  try { auto j = nlohmann::json::parse(json); … } catch (…) {}
+  return {};
+}
+```
+
+That is the better refactor — a real parser behind a stable interface, zero churn
+at the call sites. Escape and nesting handling now come free. `grep` for
+hand-rolled substring scans across `src/` + `include/`: **0**.
+
+The lenient failure mode (parse error → default; number → throw) is **deliberately
+preserved and documented** as matching prior behaviour on this non-production
+Python-worker path. I agree with keeping it: changing failure semantics and the
+parser in one step would have been the riskier move.
+
+**P4′.2 is now fully closed** — no hand-rolled JSON parser remains anywhere.
+
+### G.18.3 On the ordering: I recommended ASAN first  `[AUDIT 20th pass]`
+
+§G.16.2 said *"do item 5 (the ASAN test) next, before items 2–4."* Items 2 and A7
+were done instead; the ASAN test is still absent (`grep -rc ASAN ci/` = 0).
+
+**I do not object, and the reasoning matters more than the order.** A3s2 was live
+undefined behaviour; A7 closed a defect class outright. Fixing real UB ahead of
+building the harness that would detect UB is a defensible trade — the fix is
+certain, the harness is a means to certainty.
+
+**But the recommendation stands and now applies to a larger surface.** Three
+lifetime slices are complete (`unique_ptr`, `Shm` init/destroy) and **all of them
+are verified by my reading of the code plus a bit-identity parity run.** Parity
+proves the *numbers* did not change; it does **not** prove there is no
+use-after-free, no double-free, no leak — a dangling callback or an
+uninitialised-mutex lock can be bit-identical right up until it is not.
+
+**A3's remaining items are now the smaller half; the ASAN test is the larger
+value.** It is a one-off (`-fsanitize=address` CPU build + define → run →
+redefine → run) and it is the only artefact that would have caught P0′.4
+automatically.
+
+### G.18.4 PART G status  `[AUDIT 20th pass]`
+
+| # | Problem | State |
+|---|---|---|
+| **G.1** | Numerical core has no automated test | **OPEN** — A1/S1, the only A−→A item |
+| **G.2** | Multi-node DD forces wrong (cos = 0.644) | **OPEN** — A2/S2 |
+| G.3 | Cross-rank config divergence | ✅ CLOSED |
+| G.4 | O(N/world) overclaim | ✅ CLOSED |
+| **G.5** | Lifetime | **◐ 2 of 5** — `unique_ptr` ✅, `Shm` UB ✅; slot destructor, `saved_data` lifetime, **ASAN test** open |
+| G.6 | Oversized functions | ◐ ratcheted; splits pending |
+| **G.7** | Exporter semantics coverage | **OPEN** — folds into A1 |
+| **G.8** | Residual hygiene | **◐** — JSON ✅ (P4′.2 fully closed); transports + 2nd platform open |
+
+### G.18.5 Grades — rev 26  `[AUDIT 20th pass]`
+
+| Dimension | rev 25 | **rev 26** | Basis |
+|---|---|---|---|
+| **Resource & lifetime** | B− | **B** | ↑ real UB eliminated (zeroed-not-initialised pthread primitives), symmetric init/destroy. Held from B+ by the missing slot destructor, `saved_data` lifetime, and **no ASAN test** |
+| **Dead code / redundancy** | B− | **B** | ↑ P4′.2 fully closed — zero hand-rolled JSON parsers anywhere |
+| Process / bookkeeping | A− | **A−** | held: full G4 for both, honest `◐`. **Sixth consecutive clean cycle**. The ordering deviation is reasoned, not silent |
+| all other dimensions | — | **unchanged** | |
+| **Overall** | **A−** | **A−** | |
+
+### G.18.6 Instructions  `[AUDIT 20th pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **A1 / S1** | Tier-2 equivalence suite — folds G12, G17, G.7's drift test | days | **OPEN — the only thing between A− and A** |
+| **A2 / S2** | DD force gate → cos = 1.0; finish P0.3 | weeks | OPEN |
+| **A3 ASAN test** | `-fsanitize=address` CPU build + define → run → redefine → run | ~half day | **OPEN — now the highest-value small item.** Three lifetime slices are review-verified only; this makes them CI-verified |
+| **A3 rest** | slot destructor + deleted copy/move; `saved_data` lifetime | ~half day | OPEN — cheaper to do *after* ASAN, which will confirm them |
+| **A5** | Split `load_predictor()` (218) / `run_compute_dd()` (156) | ~1 day | OPEN |
+| **A8** | Second-platform CI; vendor hen shims; P7.1/P7.2 in S2 | days | OPEN |
+
+### G.18.7 Bottom line  `[AUDIT 20th pass]`
+
+Two correct fixes, one of which (A3s2) removed live undefined behaviour that had
+survived twenty passes because parity runs cannot see it — which is precisely the
+argument for the ASAN test.
+
+Twenty passes; **eight consecutive without a new code defect from me** — every
+finding since rev 18 has been a scope or ordering note on work the implementer
+chose well. The engineering is running ahead of the review.
+
+**G.1/A1 is unchanged and remains the only thing between A− and A.** It has not
+started, and at this point it is the only item whose absence still costs
+something material.
+
+---
+---
+
 
 ---
 ---

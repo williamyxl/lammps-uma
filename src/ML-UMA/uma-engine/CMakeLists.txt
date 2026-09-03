@@ -216,6 +216,11 @@ target_link_libraries(graph_shard_smoke PRIVATE uma_engine)
 add_executable(test_m0_device_binding tests/test_m0_device_binding.cpp)
 add_executable(test_m3_gather_scatter tests/test_m3_gather_scatter.cpp)
 
+# A3/G.5 item 5 (audit rev 26): lifetime harness, designed to run under
+# -fsanitize=address (ci/asan_build.sh). Links uma_engine (HaloContext, shared_peer).
+add_executable(test_lifetime_asan tests/test_lifetime_asan.cpp)
+target_link_libraries(test_lifetime_asan PRIVATE uma_engine)
+
 # Multi-node / GP smoke tests + worker are CUDA/NCCL-only (Phase 4 on XPU).
 if(NOT UMA_ENGINE_USE_XPU)
 add_executable(kokkos_peer_smoke tests/kokkos_peer_smoke.cpp)
@@ -246,7 +251,7 @@ if(UMA_ENGINE_HAS_NCCL AND TARGET uma_libtorch_mp_worker)
 endif()
 
 set(UMA_ENGINE_INSTALL_TARGETS uma_engine uma_parity_cli graph_shard_smoke
-    test_m0_device_binding test_m3_gather_scatter)
+    test_m0_device_binding test_m3_gather_scatter test_lifetime_asan)
 if(NOT UMA_ENGINE_USE_XPU)
   list(APPEND UMA_ENGINE_INSTALL_TARGETS kokkos_peer_smoke
        kokkos_peer_device_smoke uma_libtorch_mp_worker)
@@ -266,6 +271,7 @@ enable_testing()
 add_test(NAME graph_shard_smoke COMMAND graph_shard_smoke)
 add_test(NAME test_m0_device_binding COMMAND test_m0_device_binding)
 add_test(NAME test_m3_gather_scatter COMMAND test_m3_gather_scatter)
+add_test(NAME test_lifetime_asan COMMAND test_lifetime_asan)
 if(NOT UMA_ENGINE_USE_XPU)
   add_test(NAME kokkos_peer_smoke COMMAND kokkos_peer_smoke)
 endif()
@@ -277,7 +283,7 @@ if(TORCH_INSTALL_PREFIX)
   if(DEFINED UMA_CTEST_LD_PREFIX)
     set(_uma_ctest_ld "${UMA_CTEST_LD_PREFIX}:${_uma_ctest_ld}")
   endif()
-  set_tests_properties(graph_shard_smoke PROPERTIES
+  set_tests_properties(graph_shard_smoke test_lifetime_asan PROPERTIES
     ENVIRONMENT "LD_LIBRARY_PATH=${_uma_ctest_ld}:$ENV{LD_LIBRARY_PATH}")
 endif()
 install(DIRECTORY include/ DESTINATION include)

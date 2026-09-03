@@ -39,6 +39,14 @@ if [ "${1:-}" = "--tier2" ]; then
   bash ci/tier2_cpu_build.sh || rc=1
 fi
 
+if [ "${1:-}" = "--asan" ]; then
+  echo
+  echo "############ ASAN: CPU engine + lifetime harness (A3) ############"
+  # -fsanitize=address CPU build; runs test_lifetime_asan (P0'.4 dangling-callback
+  # redefine + A3 Shm control-block cycle) + CPU CTests under ASAN. Login node.
+  bash ci/asan_build.sh || rc=1
+fi
+
 if [ "${1:-}" = "--pytest" ]; then
   echo
   echo "############ Tier 1 via pytest (if available) ############"

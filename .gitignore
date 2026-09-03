@@ -152,3 +152,7 @@ src/ML-UMA/uma-engine/build-cpu-ci.*.err
 
 # DD example run scratch (compat shims, logs)
 src/ML-UMA/examples/multinode-dd/run_dd_*/
+
+# ASAN CI build tree (ci/asan_build.sh)
+src/ML-UMA/uma-engine/build-asan-ci/
+src/ML-UMA/uma-engine/build-asan-ci.*

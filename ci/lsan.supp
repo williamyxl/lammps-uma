@@ -1,0 +1,12 @@
+# LeakSanitizer suppressions for the A3 ASAN harness (ci/asan_build.sh).
+# We are checking OUR lifetime code (HaloContext callbacks, SharedPeerGatherSlot
+# control block), not torch/oneAPI one-time static allocations, which LSan cannot
+# unwind cleanly through and which are not what A3 is about.
+leak:libtorch
+leak:libc10
+leak:libsycl
+leak:libintlc
+leak:libur_
+leak:torch::
+leak:c10::
+leak:__cxa_thread_atexit
