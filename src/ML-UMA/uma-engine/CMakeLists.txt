@@ -67,6 +67,14 @@ target_include_directories(uma_engine
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party
 )
 target_link_libraries(uma_engine PUBLIC ${TORCH_LIBRARIES})
+# shared_peer.h / libtorch_mp.cpp use pthread mutex+cond directly, so every
+# consumer of the archive needs libpthread. Link it PUBLIC on the library itself
+# rather than per-executable: the omission was invisible under -fsanitize=address
+# (the sanitizer runtime pulls libpthread in) and under XPU (icpx + oneCCL do the
+# same), and only surfaced when the plain CPU gate started building these
+# targets — it broke uma_parity_cli and test_lifetime_asan identically.
+find_package(Threads REQUIRED)
+target_link_libraries(uma_engine PUBLIC Threads::Threads)
 # Locate uma_gp_worker.py for devices>1 FairChem eager GP backend.
 target_compile_definitions(uma_engine PRIVATE
   "UMA_ENGINE_PYTHON_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/python\"")
@@ -218,8 +226,15 @@ add_executable(test_m3_gather_scatter tests/test_m3_gather_scatter.cpp)
 
 # A3/G.5 item 5 (audit rev 26): lifetime harness, designed to run under
 # -fsanitize=address (ci/asan_build.sh). Links uma_engine (HaloContext, shared_peer).
+# (Threads comes in transitively: uma_engine links Threads::Threads PUBLIC.)
 add_executable(test_lifetime_asan tests/test_lifetime_asan.cpp)
 target_link_libraries(test_lifetime_asan PRIVATE uma_engine)
+
+# A7 (audit rev 26 §G.18.6): transport-table coverage (names/enum-gap/strides) on
+# EVERY backend — the "CI" half of "delete-or-CI the untested transports". Pure
+# header logic, returns 0/1.
+add_executable(test_transport_table tests/test_transport_table.cpp)
+target_link_libraries(test_transport_table PRIVATE uma_engine)
 
 # Multi-node / GP smoke tests + worker are CUDA/NCCL-only (Phase 4 on XPU).
 if(NOT UMA_ENGINE_USE_XPU)
@@ -251,7 +266,8 @@ if(UMA_ENGINE_HAS_NCCL AND TARGET uma_libtorch_mp_worker)
 endif()
 
 set(UMA_ENGINE_INSTALL_TARGETS uma_engine uma_parity_cli graph_shard_smoke
-    test_m0_device_binding test_m3_gather_scatter test_lifetime_asan)
+    test_m0_device_binding test_m3_gather_scatter test_lifetime_asan
+    test_transport_table)
 if(NOT UMA_ENGINE_USE_XPU)
   list(APPEND UMA_ENGINE_INSTALL_TARGETS kokkos_peer_smoke
        kokkos_peer_device_smoke uma_libtorch_mp_worker)
@@ -272,6 +288,7 @@ add_test(NAME graph_shard_smoke COMMAND graph_shard_smoke)
 add_test(NAME test_m0_device_binding COMMAND test_m0_device_binding)
 add_test(NAME test_m3_gather_scatter COMMAND test_m3_gather_scatter)
 add_test(NAME test_lifetime_asan COMMAND test_lifetime_asan)
+add_test(NAME test_transport_table COMMAND test_transport_table)
 if(NOT UMA_ENGINE_USE_XPU)
   add_test(NAME kokkos_peer_smoke COMMAND kokkos_peer_smoke)
 endif()
@@ -283,7 +300,8 @@ if(TORCH_INSTALL_PREFIX)
   if(DEFINED UMA_CTEST_LD_PREFIX)
     set(_uma_ctest_ld "${UMA_CTEST_LD_PREFIX}:${_uma_ctest_ld}")
   endif()
-  set_tests_properties(graph_shard_smoke test_lifetime_asan PROPERTIES
+  set_tests_properties(graph_shard_smoke test_lifetime_asan test_transport_table
+    PROPERTIES
     ENVIRONMENT "LD_LIBRARY_PATH=${_uma_ctest_ld}:$ENV{LD_LIBRARY_PATH}")
 endif()
 install(DIRECTORY include/ DESTINATION include)

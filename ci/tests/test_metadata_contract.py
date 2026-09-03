@@ -30,6 +30,37 @@ def cpp_parse_json_string(js, key):
     return js[start:end]
 
 
+def opt_string(meta, key):
+    """Python replica of metadata.cpp::opt_string (A2/S2 fix, audit rev 26 §G.21.5).
+
+    Contract: a JSON optional string reads as "" when the key is ABSENT, when it
+    is present but NULL, or when it is present but not a string — it must NEVER
+    throw. The bug this guards: nlohmann's j.value(key, default) throws
+    type_error.302 on a present-but-null key, so a provenance field emitted as
+    null (checkpoint_sha256, exporter_git_sha, ...) made the whole artifact
+    unloadable ("type must be string, but is null"). The fresh v2 DD artifact hit
+    exactly this.
+    """
+    v = meta.get(key, None)
+    if v is None or not isinstance(v, str):
+        return ""
+    return v
+
+
+def test_opt_string_null_provenance_reads_empty_not_throw():
+    # The failure mode from the field: an artifact with null provenance strings.
+    m = _good_metadata()
+    m["checkpoint_sha256"] = None      # present but null (the crash trigger)
+    m["exporter_git_sha"] = None
+    m["fairchem_version"] = None
+    # opt_string tolerates all three; a required string is still a real value.
+    assert opt_string(m, "checkpoint_sha256") == ""
+    assert opt_string(m, "exporter_git_sha") == ""
+    assert opt_string(m, "fairchem_version") == ""
+    assert opt_string(m, "model_name") == "uma-s-1p2"      # required, unaffected
+    assert opt_string(m, "absent_key") == ""               # missing -> ""
+
+
 def cpp_parse_json_number(js, key):
     pos = js.find('"' + key + '":')
     if pos < 0:

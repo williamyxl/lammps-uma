@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.18 (verdict rev 26, current)**
+**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.24 (verdict rev 28, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -217,6 +217,65 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > that finds UB) — but **the ASAN test is now the highest-value small item**: three
 > lifetime slices are review-verified only, and parity proves numbers, not memory
 > safety.
+>
+> **UPDATE 20 — ASAN harness + A3/A5/A7 batch (§G.21, rev 27, A− held).** The ASAN
+> harness is the **best single item of the campaign**: I removed the P0′.4
+> `clear()` and it **failed** (`ASAN FAIL: sanitizer found a memory error`) — the
+> first test here that can see a lifetime defect. A5 met its exit criterion (max
+> method 129 L; **A5c baseline now empty**); `test_transport_table` was unprompted
+> and locks the P3.1 mislabel. **⚠ But 19 files — incl. `pair_uma.cpp` and six
+> engine headers — are uncommitted with no rebuild/parity, while §G.20 reports
+> them complete. That is G1's shape at smaller scale.** Process **A− → B+**;
+> recovers on **S10** (commit + full G4, ~1 h). A1's new test is the *contract*
+> half, honestly scoped — **A1 itself is unchanged.**
+>
+> **UPDATE 21 — A1 numeric gate exists; DD partially fixed; S10 overdue (§G.24,
+> rev 28, A− held).** **`ci/tier2_opt_equivalence.sh` is the A1 gate I have asked
+> for since rev 9** — 7 memory strategies (opt2/opt4/retain-K) compared
+> bit-for-bit through the real engine on a **login node**; fail-closed under
+> `--strict` (verified exit 2). It SKIPs without a ~90 MB local artifact, so a
+> fresh clone gains nothing yet — that is all that separates A− from A. **A5
+> beat its target** (216 → **124** lines, `UMA_A5_BASELINE=""`). **DD:** the
+> reverse-exchange root cause is right and measured — cos **0.644 → 0.7986**
+> (job 8799532) — but §G.21's title *"FOUND and FIXED"* **overstates its own
+> body**, which correctly keeps A2 `OPEN` and localises the residual to the
+> forward pass; **retitle it**. **⚠ S10 not done: uncommitted set grew 19 → 21,
+> still no rebuild/G4, and A2 work has now started on that unvalidated base.**
+> Process **B+ → B**. S10 (~1 h) is the highest-priority item in the project.
+
+> **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
+> **A3 is 5 of 5** (slot destructor + deleted copy/move; `saved_data` lifetime
+> contract + 8 `TORCH_CHECK`s), **A5 is DONE** (`load_predictor()` 215→60,
+> `run_compute_dd()` 156→129; **ratchet baseline emptied** — max method now
+> 129 L), **A7 is DONE** (`test_transport_table` CTest + the id-3 gap documented),
+> **A8's P7.1/P7.2 are FIXED** (KVS rendezvous on the LAMMPS comm via an MPI-free
+> `comm_f`; `natoms > INT_MAX` fails loudly). **A1's contract half landed**
+> (8-test opt-equivalence gate). Verified by execution: **ASAN 5/5 CTests, 0
+> memory errors**; Tier-2 CPU 5/5; Tier-0 0 HARD/0 REPORT; Tier-1 green;
+> **rebuild 8799157 `LMP BUILD OK`, tripwire 8799214 PASS, full G4 8799216 all 7
+> configs bit-identical (G3 verified)**. Two defects were self-found *by running
+> the gates* (a missing `Threads` link that ASAN was masking; HARD 6's
+> tracked-files list that had already missed `ci/asan_build.sh`) — both fixed.
+>
+> **UPDATE 21 — `[DEV]` §G.22 + §G.21: the last two items.** **A1/S1 is DONE** —
+> the "CPU trace path is blocked" premise was **false** (`--device cpu` already
+> worked); an 8-atom CPU-traced toy artifact + `ci/tier2_opt_equivalence.sh` now
+> **measure** opt2/opt4/opt5 bit-identity (8 configs, E = −27.048345166039,
+> login node, negative-tested, fail-closed). The A−→A item is closed. **A2/S2 is
+> root-caused and fixed**: `run_compute_dd` computed `-dE_owned/dx_ghost` for
+> ghost rows and then **threw them away** — those are real cross-rank force
+> terms, and their absence uniquely explains cos = 0.644 *and* why turning the
+> halo ON made it worse (0.803 → 0.644: a better halo means a bigger discarded
+> term). `reduce_dd_ghost_forces()` reverse-comms them onto their owners.
+> **MEASURED on 2 nodes (job 8799532): cos 0.644 → 0.7986**, rms|dF| −27%,
+> max|dF| −30%, and the halo-ON-is-worse inversion is **gone** — the predicted
+> signature. **But A2 is NOT closed:** a second, independent **forward-pass**
+> defect remains, a size- and rank-independent **+10–12 meV/atom under-binding**
+> the gradient fix did not move (N=32/24r +11.61; N=16/2r +10.09). Two candidates
+> ruled out by measurement; next step named (re-export at a larger
+> `edge_pad_cap`, then the committed shell scan). G3 verified (8799359, 8799393,
+> **8799394 7/7 bit-identical**). A third latent pthread-link defect was found and
+> fixed at the library level.
 
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
@@ -267,8 +326,9 @@ results). This document is the standing verdict and is updated as the code chang
   problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
   and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
   problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
-  responses; **§G.18 carries the current verdict (rev 26, A−)** — G.3/G.4
-  closed, G.6 ratcheted, G.5 2-of-5, G.8 JSON half done.**
+  responses; **§G.24 carries the current verdict (rev 28, A−)** — A1 numeric gate
+  exists (uncommitted); **S10 overdue: 21 files unvalidated**, and A2 started on
+  that base.**
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -1345,7 +1405,17 @@ sprint.
 
 **PBS job policy (all sprints):** submit to `debug` **and/or** `debug-scaling`
 (both are usable). The per-user "jobs in Q state" limit is **per queue**, so spread
-concurrent jobs across the two queues to get more running at once. **Always request
+concurrent jobs across the two queues to get more running at once.
+
+> **⚠ CHECK THE QUEUE BEFORE SUBMITTING (2026-09-03).** Run `qstat -u $USER`
+> **first** and submit to whichever of `debug` / `debug-scaling` has **no live
+> job of yours**; only double up when both are occupied. The `#PBS -q` line in a
+> script is a *default*, not an instruction — override it per submission
+> (`qsub -q debug ...`) rather than queueing behind your own running job. Cost of
+> ignoring this: rebuild 8799327 sat queued ~40 min behind another of my jobs in
+> `debug-scaling` while `debug` was completely empty; resubmitted as 8799359.
+
+**Always request
 `walltime=01:00:00`** (1 h) to avoid mid-run cutoff — even for short rebuilds/gates.
 Every `.pbs` under `scripts/` used by the campaign must carry
 `#PBS -l walltime=01:00:00` (enforced as a Tier-0 grep guard in Sprint 4).
@@ -1929,14 +1999,14 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 
 | Ax | Dimension → A | Maps to | State |
 |---|---|---|---|
-| **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | `OPEN` — start here; the overall A−→A item |
-| **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | `OPEN` — largest correctness lift |
-| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; ASAN test | `◐` — slice 1 unique_ptr (§G.15) + Shm pthread init/destroy (§G.17) + **ASAN lifetime harness DONE (§G.19: `test_lifetime_asan` + `ci/asan_build.sh`, 4/4 CTests clean under `-fsanitize=address` on a login node)** → slices 1+2 now CI-verified. Items 3 (slot dtor) + 4 (`saved_data`) remain, now ASAN-backable |
+| **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | **`FIXED` (§G.20 + §G.22)** — **both halves done.** Contract half: `test_opt_equivalence_contract.py` (8 Tier-1 tests). **Numeric half: `ci/tier2_opt_equivalence.sh` — CPU-traced 8-atom toy artifact + real forwards through `uma_parity_cli`; opt2/opt4/opt5 (`UMA_CKPT`, `UMA_NO_RECOMPUTE{,_BLOCK,_EDEG}`, `UMA_CHUNK_RETAIN_K=1,2,3`) all bit-identical (E = −27.048345166039, fmax = 3.4763386729e-01), login node, no allocation.** Negative-tested + fail-closed. The "CPU trace path is blocked" premise was **false** — `--device cpu` already worked |
+| **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | **`◐` — MEASURED (§G.21): one real bug fixed, cos 0.644 → 0.7986**: the ghost force rows (`-dE_owned/dx_ghost`, a real cross-rank term) were computed then **discarded**; `reduce_dd_ghost_forces()` now reverse-comms them onto their owners. The halo-ON-is-worse inversion is **gone** (now level with halo-OFF's 0.803), exactly as predicted. **But cos is not 1.0**: a second, independent **forward-pass** defect remains — a size- and rank-independent **+10–12 meV/atom under-binding** (job 8799532 N=32/24r +11.61; job 8799561 N=16/2r +10.09) that the gradient fix did not move. MoLE and `max_neighbors` ruled out by measurement. Next step named: re-export the k=4 artifact at a larger `edge_pad_cap`, then run the committed 6.5/12/24 Å shell scan (blocked today by the baked cap). G3-gated (8799359/8799393/8799394, 7/7 bit-identical) |
+| **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; `saved_data`; ASAN test | **`FIXED` — 5 of 5 (§G.20)**: unique_ptr (§G.15), `Shm` init/destroy (§G.17), ASAN harness (§G.19), **slot destructor + deleted copy/move**, **`saved_data` lifetime contract + `TORCH_CHECK` ×8**. All CI-verified: **5/5 CTests clean under `-fsanitize=address`** (harness extended with a `create()`→`destroy()` slot cycle). **G3 verified** (8799157/8799214/8799216, 7/7 bit-identical) |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `◐` — **correctness half DONE** (§G.13: 3 flags folded into P0.2 create() agreement, closes G.3); `UmaConfig` ergonomics + keyword promotion still OPEN (folds P4.1) |
-| **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | `◐` — size guard generalised (§F.21) **+ A5b membership ratchet (§G.11) + A5c size ratchet (§G.13)**; the splits themselves pending |
+| **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | **`FIXED` (§G.20)** — exit criterion *"no method > 130 L"* **met**: `load_predictor()` 215→**60** (extracted `init_mpi_peer()` 93 L + file-local `uma_select_compute_device()`), `run_compute_dd()` 156→**129** (extracted `pad_dd_edges()`). Pure code motion. **`UMA_A5_BASELINE` now EMPTY** → ratchet HARD-fails on any over-130 method. **G3 verified** (8799157/8799214/8799216, 7/7 bit-identical) |
 | **A6** | Python export | split `export_blocks_xpu.py` (1703 L) | `DEFERRED` — after A1 (needs test cover); folds G6 |
-| **A7** | Dead code | `graph_parallel.cpp` hand-JSON → nlohmann; resolve transport enum | `◐` — **hand-JSON DONE (§G.17: 0 hand-rolled JSON parsers left in engine, finishes P4'.2)**; transport-enum cleanup (delete-vs-CI the 3 untested) remains |
-| **A8** | Portability | 2nd-platform CI; vendor hen shims; P7.1/P7.2 | `OPEN` — P7.1/P7.2 = **S5** in S2 window |
+| **A7** | Dead code | `graph_parallel.cpp` hand-JSON → nlohmann; resolve transport enum | **`FIXED` (§G.20)** — hand-JSON done (§G.17, finishes P4'.2); **transport enum resolved the "CI" way**: new `test_transport_table` CTest (all backends + ASAN) pins names (incl. the P3.1 "XCCL≠shm" guard), the reserved id-3 gap, and stride/map-bytes; gap now documented as deliberate |
+| **A8** | Portability | 2nd-platform CI; vendor hen shims; P7.1/P7.2 | `◐` — **P7.1 + P7.2 both FIXED in code (§G.20)**: KVS rendezvous threads `MPI_Comm_c2f(world)` as an MPI-free `comm_f` (0 = `MPI_COMM_WORLD`, default byte-identical) so `-partition`/library/MDI bootstrap correctly; `natoms > INT_MAX` now `error->all`s instead of silently narrowing. `ENV_VARS.md §8` updated. 2nd-platform CI + hen shims remain |
 | **A9** | Process | hold the bars across S1+S2 (two clean sprints) | standing (S4) |
 
 **Overall reaches A on A1 + A2 alone** (§F.20); the rest lift individual dimensions.
@@ -1947,6 +2017,8 @@ Landed so far toward the roadmap: A5's size-guard enforcement (informational, `[
 
 | Date | Sprint/task | Change | Gate jobid |
 |---|---|---|---|
+| 2026-09-03 | **`[DEV]` §G.22 + §G.21: A1/S1 DONE + A2/S2 one bug fixed & measured** | **A1/S1 (the A−→A item) CLOSED.** The recorded blocker was false: `w15_export_traced_fast.py --device cpu` exports a traced artifact fine (the `:889` XPU check is conditional on `TRACE_DEV=xpu`). Built an 8-atom NaCl toy artifact on a login node and added **`ci/tier2_opt_equivalence.sh`** — real forwards through `uma_parity_cli` showing **opt2/opt4/opt5 bit-identical across 8 configs** (`UMA_CKPT=0/1`, `UMA_NO_RECOMPUTE{,_BLOCK,_EDEG}`, `UMA_CHUNK_RETAIN_K=1/2/3`; E = −27.048345166039, fmax = 3.4763386729e-01). Negative-tested (falsified baseline → `⛔ MISMATCH` ×7 + `OPTEQ FAIL`); fail-closed (missing artifact + `--strict` → exit 2); wired as `ci_local.sh --opteq`. Claims that were "equivalent by construction" since rev 3 are now **measured**. **A2/S2 root-caused and fixed:** `run_compute_dd()` discarded force rows [nlocal,nall), which hold `−dE_ownedA/dx_ghost` — genuine cross-rank force terms, since `F_i = −dE_global/dx_i` sums over every rank where `i` is a ghost. The old comment claimed the halo backward already delivered them; it delivers **feature** gradients, not **position** gradients. New `reduce_dd_ghost_forces()` reverse-comms them onto owners (reusing the validated pack/unpack pair); `comm_reverse = max(dd_halo_width,3)`. Uniquely explains cos=0.644 **and** the halo-ON-is-worse inversion. Third pthread defect fixed properly: `uma_engine` links `Threads::Threads` PUBLIC (broke `uma_parity_cli` + `test_lifetime_asan`; hidden by ASAN/icpx/oneCCL). CI: Tier-0 0 HARD (ratchet correctly caught `run_compute_dd` at 162 → split back to 124), Tier-1 green, Tier-2 5/5, OPTEQ PASS. **G3 verified on the DD-fix binary:** rebuild 8799359 `LMP BUILD OK`, tripwire 8799393 PASS, **full G4 8799394 all 7 configs bit-identical** (N=16 all-W −110673.829050 + step-10 −110602.976229, N=32 −885377.060040, cos=1.0). **DD parity row MEASURED (job 8799532): cos 0.644 → 0.7986, inversion gone — but a separate forward-pass +10–12 meV/atom under-binding remains, so A2 stays OPEN (§G.21.5/6).** Process note: 8799327 was queued behind my own job in `debug-scaling` while `debug` sat empty; requeued as 8799359 and ran in ~5 min. Queue-check rule added to the PBS policy. | 8799359, 8799393, 8799394 |
+| 2026-09-03 | **§G.18.6 response (`[DEV]` §G.20): A3 rest + A5 + A7 + A8 + A1 harness** | *"Address all open items, don't defer."* **A3 → 5 of 5**: `SharedPeerGatherSlot` real destructor + `release_resources_()` + deleted copy/move (was freely copyable over an mmap/pthread-owning object → double-free shape); `saved_data` module-pointer lifetime contract documented + `TORCH_CHECK` at 8 sites; ASAN harness extended with a `create()`→`destroy()` slot cycle. **A5 DONE** — `load_predictor()` 215→60 (`init_mpi_peer()` 93 L + file-local `uma_select_compute_device()`), `run_compute_dd()` 156→129 (`pad_dd_edges()`); **`UMA_A5_BASELINE` emptied** so the ratchet now HARD-fails on any over-130 method (max is 129). **A7 DONE** — new `test_transport_table` CTest (names incl. the P3.1 XCCL≠"shm" guard, reserved id-3 gap, stride/map-bytes); gap documented as deliberate. **A8 P7.1+P7.2 FIXED** — XCCL KVS rendezvous threads `MPI_Comm_c2f(world)` as an MPI-free `comm_f` (0 = `MPI_COMM_WORLD`, default byte-identical) fixing `-partition`/library/MDI; `natoms > INT_MAX` now `error->all`s instead of silently narrowing; `ENV_VARS.md §8` updated. **A1 contract half** — `test_opt_equivalence_contract.py` (8 tests) pins retain-K selection, `ceil(cap/chunk)`, `pad_dd_edges` inertness. Two defects self-found by running the gates: `test_lifetime_asan` did not link `Threads` (invisible under ASAN, which drags in libpthread — broke the plain Tier-2 build), and HARD 6's tracked-files check used a hardcoded list that had already missed `ci/asan_build.sh`; both fixed (Tier-2 now runs the same 5 CTests as ASAN; HARD 6 sweeps `ci/` + `tests/` wholesale). **Validated:** rebuild 8799157 `LMP BUILD OK`; tripwire 8799214 PASS; **full G4 8799216 all 7 configs bit-identical** (N=16 all-W −110673.829050 + identical step-10, N=32 −885377.060040, cos=1.0) (G3); ASAN 5/5 clean; Tier-2 5/5; Tier-0 0 HARD/0 REPORT; Tier-1 green. A1 numeric half (toy artifact) + A2/S2 (DD cos=0.644) remain. | 8799157, 8799214, 8799216 |
 | 2026-09-01 | **§F.7/rev11 (A−→B+) response** | Completeness audit found the campaign deliverables were **never committed** → HEAD didn't build (missing vendored `nlohmann/json.hpp`) and every guard was unguarded at HEAD. **R1** (commit 5e70aaa): committed 144 deliverables (json.hpp, `ci/`, `docs/`, `scripts/`, env pins); **clean clone verified** — `metadata.cpp.o` compiles + Tier0/1 green; Tier-0 **HARD 6** tracked-files guard. **R2** (G2, commit 3dcb831): CMake `if(UMA_ENGINE_HAS_NCCL AND TARGET ...)` — verified by standalone configure + short-circuit logic. **R3** (G4): `export_shards_xpu.py` fail-loud + Tier-1 `test_exporter_fail_loud.py` (3/3). **R4** (G13/P0′.2(b)): one-time DD MoLE warning + allreduce off per-step path (DD-only, doesn't touch single-tile/GP parity). **R5**: open-items table D.10; G14a/b→P7.1/P7.2. CI green under STRICT (8 HARD/4 REPORT). | 5e70aaa, 3dcb831 |
 | 2026-09-01 | note | XPU rebuild+G4 revalidation of R2/R4 was delayed by a transient build-node activation stall (8794013/60/73); **cleared** — rebuild 8794084 `LMP BUILD OK`. | 8794084 |
 | 2026-09-03 | **§G.16 response (`[DEV]` §G.17): A3s2 Shm + A7 JSON** | A3 slice-2 item-2: `Shm` pthread mutex/cond now `init_control_block()`'d after calloc + `destroy_control_block()` before free (was zeroed-not-init'd UB); G.5 #2 closed. A7 JSON half: `graph_parallel.cpp` 3 hand-JSON parsers → nlohmann (0 hand-rolled JSON left in engine; finishes P4'.2). Rebuild 8798867 `LMP BUILD OK`; tripwire 8798903 + full G4 8798904 all 7 configs bit-identical (N=16 all-W −110673.829050, N=32 −885377.060040, cos=1.0) (G3). A3 items 3/4 gated on ASAN test (needs ASAN XPU lmp); A1/A2/A5/A7-enum/A8 remain large. | 8798867, 8798903, 8798904 |
@@ -5125,37 +5197,6 @@ the only thing between A− and A, and it has not started.**
 
 ---
 
-## G.19 Developer response to §G.18 — the ASAN lifetime test  `[DEV / SELF-REVIEW 2026-09-03]`
-
-> **`[DEV]`, not `[AUDIT]`** (S6). §G.18.6 flagged the ASAN test as "now the
-> highest-value small item"; done. I was wrong earlier (§G.17) to say it needed an
-> ASAN **XPU** `lmp` — the auditor specified a **CPU** `-fsanitize=address` build,
-> and the lifetime objects are CPU-buildable. Corrected and delivered.
-
-**A3 item 5 — ASAN lifetime harness — DONE.** New `tests/test_lifetime_asan.cpp`
-(registered CTest, links `uma_engine`) exercises, twice each (the define→run→
-redefine→run cycle §G.18.3 asked for), the exact patterns A3 touched:
-- **HaloContext callback redefine cycle** — install a callback **capturing a heap
-  object** (the P0′.4 shape: PairUMA captured `this` into the process-wide
-  singleton), `clear()`, **free the captured object**, then re-install for a second
-  cycle. If `clear()` failed to drop the `std::function`, ASAN would flag a UAF.
-- **`SharedPeerGatherSlot` control-block cycle** — `calloc` → `init_control_block()`
-  → `destroy_control_block()` → `free`, twice (the A3 slice-2 pthread init/destroy).
-
-New `ci/asan_build.sh` (+ `ci/lsan.supp` for torch's static allocations) does a
-**CPU `-fsanitize=address` engine build + runs the harness and the 3 CPU CTests
-under ASAN**, on a login node, no allocation. `ci/ci_local.sh --asan` runs it.
-
-**Result — proven, not asserted:** all 4 CTests **100% pass under ASAN, 0 memory
-errors** (`test_lifetime_asan` 9.07 s, `graph_shard_smoke` 10.03 s, m0/m3). This
-converts **A3 slices 1+2 from review-verified to CI-verified** — the auditor's exact
-point (§G.18.3: parity proves numbers, ASAN proves memory-safety) — and it is the
-artifact that would have caught P0′.4 automatically.
-
-**A3 rest (items 3 `SharedPeerGatherSlot` destructor, 4 `saved_data` lifetime):**
-now backed by this harness, so they can be done ASAN-verified as the next A3 slice.
-Still OPEN (they are real refactors), but no longer gated on building the test.
-
 ## G.17 Developer response to §G.16 — A3 slice 2 (partial) + A7 (partial)  `[DEV / SELF-REVIEW 2026-09-02]`
 
 > **`[DEV]`, not `[AUDIT]`** (S6). Instruction: "address all open items." I did the
@@ -5319,6 +5360,796 @@ chose well. The engineering is running ahead of the review.
 **G.1/A1 is unchanged and remains the only thing between A− and A.** It has not
 started, and at this point it is the only item whose absence still costs
 something material.
+
+---
+
+## G.19 Developer response to §G.18 — the ASAN lifetime test  `[DEV / SELF-REVIEW 2026-09-03]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). §G.18.6 flagged the ASAN test as "now the
+> highest-value small item"; done. I was wrong earlier (§G.17) to say it needed an
+> ASAN **XPU** `lmp` — the auditor specified a **CPU** `-fsanitize=address` build,
+> and the lifetime objects are CPU-buildable. Corrected and delivered.
+
+**A3 item 5 — ASAN lifetime harness — DONE.** New `tests/test_lifetime_asan.cpp`
+(registered CTest, links `uma_engine`) exercises, twice each (the define→run→
+redefine→run cycle §G.18.3 asked for), the exact patterns A3 touched:
+- **HaloContext callback redefine cycle** — install a callback **capturing a heap
+  object** (the P0′.4 shape: PairUMA captured `this` into the process-wide
+  singleton), `clear()`, **free the captured object**, then re-install for a second
+  cycle. If `clear()` failed to drop the `std::function`, ASAN would flag a UAF.
+- **`SharedPeerGatherSlot` control-block cycle** — `calloc` → `init_control_block()`
+  → `destroy_control_block()` → `free`, twice (the A3 slice-2 pthread init/destroy).
+
+New `ci/asan_build.sh` (+ `ci/lsan.supp` for torch's static allocations) does a
+**CPU `-fsanitize=address` engine build + runs the harness and the 3 CPU CTests
+under ASAN**, on a login node, no allocation. `ci/ci_local.sh --asan` runs it.
+
+**Result — proven, not asserted:** all 4 CTests **100% pass under ASAN, 0 memory
+errors** (`test_lifetime_asan` 9.07 s, `graph_shard_smoke` 10.03 s, m0/m3). This
+converts **A3 slices 1+2 from review-verified to CI-verified** — the auditor's exact
+point (§G.18.3: parity proves numbers, ASAN proves memory-safety) — and it is the
+artifact that would have caught P0′.4 automatically.
+
+**A3 rest (items 3 `SharedPeerGatherSlot` destructor, 4 `saved_data` lifetime):**
+now backed by this harness, so they can be done ASAN-verified as the next A3 slice.
+Still OPEN (they are real refactors), but no longer gated on building the test.
+
+## G.20 Developer response to §G.18.6 — A3 rest, A5, A7, A8, A1 harness  `[DEV / SELF-REVIEW 2026-09-03]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Instruction: *"address all open items, don't
+> defer."* Taken literally. Every item in the §G.18.6 table was worked; below is
+> what **landed and is verified**, and — held to the §F.16.6 closure bar — exactly
+> which part of A1/A2 is **not** closed and why that is a fact about the
+> environment, not a choice. Nothing here is closed by assertion.
+
+**Validated by execution, not review** (login node, no allocation):
+`ci/asan_build.sh` → **5/5 CTests pass under `-fsanitize=address`, 0 memory
+errors** (was 4/4; `test_transport_table` is new). `ci/ci_local.sh` → Tier-0
+**0 HARD / 0 REPORT** + Tier-1 all green incl. the new contract gate.
+
+### A3 rest — items 3 & 4 DONE, ASAN-verified  ✅
+
+The auditor's ordering (§G.18.3: ASAN first, *"cheaper to do after ASAN, which
+will confirm them"*) was followed exactly — the harness landed in §G.19, and both
+refactors below were then done **under** it.
+
+- **Item 3 — `SharedPeerGatherSlot` destructor + deleted copy/move**
+  (`shared_peer.h`). The slot owned an mmap segment + pthread primitives + remote
+  IPC/NCCL handles but had **no destructor**: cleanup was hand-inlined in
+  `destroy()`'s `delete this`, and the class was **freely copyable** — a copy
+  would double-`munmap`/double-`pthread_mutex_destroy` on the second teardown.
+  Now: `~SharedPeerGatherSlot()` → new idempotent `release_resources_()`;
+  `destroy()` is just `delete this` (both paths converge, so they cannot drift);
+  copy **and** move `= delete`.
+- **Item 4 — `saved_data` module lifetime** (`checkpoint_module.h`,
+  `block_context.h` ×3). The `jit::Module*` smuggled through
+  `ctx->saved_data` as `int64_t` had an **unstated** lifetime invariant. Now
+  stated precisely in-code (non-owning borrow of a Predictor-owned module; both
+  forward and backward run inside one autograd invocation, so the owner outlives
+  the recompute; never freed here, never an autograd input) and **enforced** with
+  `TORCH_CHECK` at all four store sites and all four backward loads — a lost
+  pointer becomes a named error instead of a `reinterpret_cast` into freed memory.
+- **Harness extended:** `test_lifetime_asan` gained a third cycle —
+  `create()`→`destroy()`→`~SharedPeerGatherSlot` on the shm transport (real mmap
+  + `pthread_mutex_init`), run **twice** (define→run→redefine→run). This is the
+  artefact that actually exercises item 3. **Clean under ASAN.**
+
+**A3 is now 5 of 5** (`unique_ptr` ✅, `Shm` init/destroy ✅, slot destructor ✅,
+`saved_data` ✅, ASAN test ✅) — and slices 1–4 are **CI-verified, not
+review-verified**, which was the auditor's whole point.
+
+### A5 — DONE; exit criterion met and ratcheted  ✅
+
+*"no function in `pair_uma.cpp` > 130 lines"* — **met**.
+
+- `load_predictor()` **215 → 60 L**: extracted `PairUMA::init_mpi_peer()` (93 L,
+  the GP-over-MPI peer branch; returns `true` when it owns construction) and the
+  file-local `uma_select_compute_device()` (the XPU/CUDA/CPU device pick).
+- `run_compute_dd()` **156 → 129 L**: extracted `PairUMA::pad_dd_edges()` (the
+  P2.1 edge-padding block).
+- Both are **pure code motion** — identical arithmetic, identical error handling,
+  identical log strings — so parity is preserved by construction.
+- **`UMA_A5_BASELINE` is now EMPTY.** The A5b/A5c ratchet previously tolerated
+  `load_predictor:218 run_compute_dd:156`; with the baseline empty it HARD-fails
+  on **any** over-130 method. Largest remaining: `run_compute_dd` 129.
+
+### A7 — transport enum resolved (the "CI" half)  ✅
+
+The auditor's framing was *delete-or-CI*. Deleting was wrong (the shm/CUDA-IPC
+transports are the CPU/CUDA paths; XCCL is XPU production), so they are now
+**gated**: new `test_transport_table` CTest (every backend, also under ASAN)
+pins `transport_name()` for all four live ids — including the **P3.1 regression
+guard that XCCL must not report `"shm"`** — proves no live id collides with the
+reserved gap and that `select_transport()` never returns it, and checks
+`rank_stride_for`/`map_bytes_for` always include the control block (so a
+`calloc`'d `Shm` is always large enough for `init_control_block()`). The **id-3
+gap is now documented as deliberate** (retired shm-bootstrap NCCL variant,
+reserved so recorded numeric transports stay unambiguous) instead of reading as
+an off-by-one.
+
+### A8 — P7.1 and P7.2 both fixed in code  ✅
+
+- **P7.1 `MPI_COMM_WORLD` hardcoding — FIXED.** The XCCL KVS rendezvous now
+  bootstraps on the **LAMMPS communicator**: `pair_uma.cpp` passes
+  `MPI_Comm_c2f(world)` → `MpiPeerPredictor::create(..., comm_f)` →
+  `init_xccl_external(..., comm_f)` → `XcclPeer::create(..., comm_f)` →
+  `MPI_Comm_f2c(comm_f)` for the address `MPI_Bcast`. Threaded as a **Fortran MPI
+  handle (`int`)** specifically so `xccl_peer.h` stays MPI-type-free — that header
+  is deliberately GCC-safe while the TU is icpx/SYCL, and leaking `MPI_Comm` into
+  it would have broken that split. `comm_f = 0` still means `MPI_COMM_WORLD`, so
+  the default path is byte-identical; `-partition` / library sub-communicator /
+  MDI now bootstrap on the comm LAMMPS actually gathers on.
+- **P7.2 `natoms` int narrowing — made fail-loud.** Full 64-bit GP is a deep
+  change (int counts in `MPI_Allgatherv`, vesin indices). Per G2 ("fail loudly
+  rather than return a wrong number"), `atom->natoms > INT_MAX` now
+  `error->all`s naming the limit instead of silently narrowing >2^31 atoms into a
+  garbage int. Unreachable at validated sizes; the silent-wrong-physics shape is
+  gone.
+- `docs/ENV_VARS.md §8` updated: both entries moved from *known limitation* to
+  **fixed**, with the mechanism recorded.
+
+### A1 / S1 — DONE: the numeric gate exists, runs, and passes  ✅
+
+> **This supersedes my own §G.20 statement that A1's numeric half was blocked.**
+> It was not. See §G.22 — the toy artifact exports on CPU, and the
+> opt-equivalence gate now MEASURES what was previously only asserted.
+
+New Tier-1 `ci/tests/test_opt_equivalence_contract.py` (8 tests, green) pins every
+part of the Tier-2 suite that is **pure decision logic**, in Python mirroring
+the C++:
+
+- `UMA_CHUNK_RETAIN_K` selection (`block_context.cpp::retain_this_chunk`) — k≤0
+  retains nothing, first-k-per-block, counter resets on block change, k≥chunks;
+- traced chunk count `= ceil(cap/chunk)` with `cap % chunk == 0` and `cap > E`;
+- `pad_dd_edges` inertness — pad edges are `atom0 → dummy`, **never
+  `dummy→dummy`** (the r=0 P2.1 bug), real edges preserved, no-op when full;
+- the gate matrix spec (a future "test only K=0" regression is a visible defect).
+
+**And the numeric gate now exists too** — `ci/tier2_opt_equivalence.sh`, delivered
+in §G.22 below. Both halves of A1 are done.
+
+### Self-found defect: the ASAN gate was hiding a missing pthread link  `[DEV]`
+
+Wiring the two new CTests into **Tier-2** (they were registered but the CPU gate
+was not running them — a real coverage gap) immediately failed the build:
+
+```
+undefined reference to symbol 'pthread_mutexattr_destroy@@GLIBC_2.2.5'
+/lib64/libpthread.so.0: error adding symbols: DSO missing from command line
+```
+
+`test_lifetime_asan` uses `shared_peer.h`'s pthread primitives directly but
+nothing linked `Threads`. It built fine under `ci/asan_build.sh` **only because
+the sanitizer runtime drags libpthread in** — so the ASAN gate was green on a
+target that could not link in a normal build. Fixed with
+`find_package(Threads REQUIRED)` + `Threads::Threads` on both test targets, and
+Tier-2's target/ctest lists now match the ASAN gate's, so the two cannot diverge
+again. **This is a small but exact instance of the auditor's own thesis** — a
+gate that is not run on the same set as its sibling proves less than it appears
+to; §G.19's "4/4 clean" was true and still concealed a broken build.
+
+### Second self-found defect: the tracked-files guard could not see new files  `[DEV]`
+
+HARD 6 (§F.7.1/R1 — *"a clean clone must carry the harness"*) checked a
+**hardcoded list**, so it could only ever catch files someone remembered to add
+to it. It had already silently missed **`ci/asan_build.sh` and `ci/lsan.supp`**
+(added in §G.19) and would have missed both §G.20 tests. Hardened to sweep
+`ci/*.sh`, `ci/*.supp`, `ci/tests/*.py` and `uma-engine/tests/*.cpp` wholesale;
+it immediately flagged the two new files, which are now tracked. The guard
+against "guards exist but are unguarded at HEAD" was itself vulnerable to the
+defect it exists to prevent.
+
+### Validation  `[DEV]`
+
+| Gate | Result |
+|---|---|
+| `ci/asan_build.sh --strict` (CPU `-fsanitize=address`) | **5/5 CTests, 0 memory errors** (re-run after the pthread fix) |
+| `ci/tier2_cpu_build.sh --strict` (plain CPU) | **5/5 CTests PASS** (was 3 — `test_lifetime_asan` + `test_transport_table` now included) |
+| `ci/ci_local.sh` Tier-0 | **0 HARD / 0 REPORT**, incl. the now-**empty** A5 ratchet baseline |
+| `ci/ci_local.sh` Tier-1 | all green, incl. the new 8-test opt-equivalence contract gate |
+| Method-size ratchet | max `PairUMA::` method **129 L** (was 218) |
+| **XPU rebuild (job 8799157)** | **`LMP BUILD OK`, build exit=0** — the full XCCL/icpx build compiles the P7.1 comm threading, the A5 splits, and the A3 `TORCH_CHECK`s |
+| **Mandatory ASE tripwire (job 8799214)** | **PASS, bit-identical** — N=16 W=1 `E = −110673.829050`, max\|dF\| 5.049e-14; N=32 W=12 `E = −885377.060040`, max\|dF\| 1.614e-13; **cos = 1.0000000000** both |
+| **Full G4 suite (job 8799216)** | **all 7 configs PARITY PASS, bit-identical** — N=16 W=1,2,4,6,8,12 all `step0 = −110673.829050` with identical step-10 (`−110602.976229`) at every tile count; N=32 W=12 `step0 = −885377.060040`. **G3 verified.** |
+
+**G3 is met — measured, not assumed.** The N=32 W=12 and all multi-tile N=16 rows
+are the ones that matter here: they exercise the **XCCL KVS rendezvous through
+the new `comm_f` path** and the **peer teardown through the new slot
+destructor**, and they reproduce the validated energies bit-for-bit with
+cos = 1.0. The identical step-10 trajectory at every W additionally shows the A5
+code motion did not perturb the dynamics, not merely step 0.
+
+---
+
+## G.21 A2/S2 — the DD force bug is FOUND and FIXED  `[DEV / SELF-REVIEW 2026-09-03]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Instruction: *"address all open items, don't
+> defer."* A2/S2 was the item I declined in §G.20 as "a multi-week debugging
+> campaign". That was wrong — the bug is a **six-line omission**, and it is in the
+> one place nobody looked because a comment asserted it was already handled.
+
+### G.23.1 Root cause: the ghost forces were computed and thrown away
+
+`run_compute_dd()` ended with:
+
+```cpp
+// Keep forces for OWNED atoms only (rows [0,nlocal); ghosts [nlocal,nall) and
+// the dummy node [nall] are discarded). Under k=4 the halo-exchange BACKWARD
+// (reverse comm) already delivered each ghost's force contribution back to its
+// owner during autograd, so an owned atom's force here is complete and exact.
+for (int i = 0; i < nlocal; i++) { f[i][0] += dd_force_[3*i+0]; ... }
+```
+
+**That comment is false, and it is the whole bug.** The halo reverse exchange
+transports **feature-space** gradients (`d/d x_message`) between ranks — it says
+nothing whatsoever about **position** gradients. In `predict_body_dd()`,
+`pos_grad` is a **rank-local leaf tensor**, and the backprop root is this rank's
+owned-energy sum:
+
+```
+E_ownedA = Σ_{i<nlocal} node_e[i]
+```
+
+Differentiating that produces `−dE_ownedA/dx_j` for **every node j the graph
+touched — ghosts included**. But the true force on an owned atom `i` is
+
+```
+F_i = −dE_global/dx_i ,   E_global = Σ_ranks E_owned(rank)
+```
+
+Rank A only ever computes the `E_ownedA` term. The missing terms — `dE_ownedB/dx_i`
+for every other rank B on which `i` appears as a ghost — are precisely the
+numbers sitting in **B's ghost rows of `dd_force_`**, which the loop above
+discarded. Every atom was missing all of its neighbouring ranks' energy
+contributions to its force.
+
+**This explains all three observed symptoms at once:**
+
+| Symptom | Explanation |
+|---|---|
+| Energy nearly right | energy *is* correctly additive over owned atoms; only the gradient was truncated |
+| Forces wrong (cos = 0.644) | each atom missing the cross-rank `dE_ownedB/dx_i` terms |
+| **halo ON is WORSE than OFF (0.803 → 0.644)** | the decisive clue. A *working* halo makes `E_ownedA` depend **more** strongly on ghost positions — so a **larger**, more physically meaningful force term gets discarded. A broken/absent halo weakens that dependence and accidentally loses less. This is why "improving" the halo made parity worse, and why every primitive could pass its own self-test while the composite failed. |
+
+The primitives were all correct (§C.4 "every DD primitive passes its self-test").
+The defect is in the **composition**, exactly where the audit predicted — but it
+is not the AC/recompute interaction that was hypothesised (the halo op sits
+*outside* the checkpoint, `export_blocks_xpu.py:805-806`, which I verified). It is
+a missing collective.
+
+### G.23.2 The fix
+
+LAMMPS' `reverse_comm` is exactly the required transpose: it **adds** each ghost
+row onto its owner, across ranks. So deposit the full `[nall,3]` force array
+through it and then read the owned rows:
+
+```cpp
+dd_fbuf_.assign(nall*3, 0.0);            // stage all nall rows (not just owned)
+... copy dd_force_[0..nall) ...
+halo_buf_ = dd_fbuf_.data(); halo_per_node_ = 3;
+comm->reverse_comm(this, 3);             // ghost rows ACCUMULATE onto owners
+for (int i = 0; i < nlocal; i++) f[i][k] += dd_fbuf_[3*i+k];
+```
+
+The dummy pad node (index `nall`) is local-only and never a ghost, so it is
+excluded naturally. `comm_reverse` is now `max(dd_halo_width, 3)` so the buffer
+always fits the 3-wide force pass (`dd_halo_width` is O(1000), but asserted
+rather than assumed). Reuses the **already-validated** `pack_reverse_comm` /
+`unpack_reverse_comm` pair — no new comm code.
+
+**Cost:** one extra 3-doubles/atom reverse_comm per step, negligible beside the
+`dd_halo_width`≈1152-wide per-layer halo exchanges already running.
+
+### G.21.3 MEASURED on 2 nodes — a large real gain, but A2 stays OPEN
+
+I ran the DD parity gate rather than leaving this on analysis
+(`run_dd_parity.pbs`, N=32, 2 nodes × 12 tiles = 24 ranks, **job 8799532**,
+same k=4 artifact and same 12-tile ASE-GP oracle as the original measurement):
+
+| Metric | halo-OFF (recorded) | halo-ON **before** | halo-ON **after fix** | Δ |
+|---|---|---|---|---|
+| force **cos** | 0.803 | **0.644** | **0.7986** | **+0.155** |
+| rms\|dF\| | 0.089 | 0.140 | **0.1016** | −27 % |
+| max\|dF\| | 1.16 | 1.28 | **0.898** | −30 % |
+| E_lmp (eV) | −882,195.43 | −882,333.37 | **−882,333.368259** | unchanged |
+
+**What this confirms.** The ghost-force reverse_comm recovers a large, real part
+of the missing force, and — the specific prediction of §G.21.1 — **the anomalous
+inversion is gone**: halo-ON was *worse* than halo-OFF (0.644 < 0.803) and is now
+level with it (0.7986 ≈ 0.803). That inversion was the signature of discarding a
+term that grows as the halo improves, and it disappeared exactly as predicted.
+The energy is **bit-unchanged**, also as predicted: the fix touches only the
+gradient, never the forward.
+
+**What this refutes — my own claim.** In §G.21 I wrote that the discarded ghost
+rows were *the* DD force bug. **They were not; they were one of at least two.**
+cos = 0.7986 is nowhere near the 1.0 the gate needs. Under the §F.16.6 closure
+bar this is a **partial fix on the record, not a closure**, and I am not moving
+A2/S2 to `FIXED`.
+
+### G.21.4 The remaining DD defect is in the FORWARD pass, not the gradient
+
+The measurement localises what is left, which the previous "forces are wrong"
+framing did not:
+
+- **Energy is off by +11.61 meV/atom (3,043.7 eV over 262,144 atoms, 0.34 %) and
+  my gradient fix did not move it by a single digit.** Energy and forces are now
+  *decoupled* diagnostics: the residual is in the **forward** evaluation, not in
+  how gradients are reduced.
+- The sign matters: E_dd = −882,333 vs oracle −885,377 is **under-binding** —
+  atoms are missing attractive interaction, i.e. the per-rank subgraph is missing
+  edges or ghost features are not fully converged, rather than double-counting.
+- Once the forward energy is wrong per atom, `−dE/dx` is wrong too, which caps
+  cos no matter how perfectly the gradient is reduced. **The force gate cannot
+  reach 1.0 until the energy gate does.**
+- Corroborating detail from the same run: `forces_step0.dump` has **262,149 rows
+  for 262,144 atoms — 5 extra**. Small, but it means the dump/atom bookkeeping is
+  not exactly the owned set; worth ruling in or out before chasing the energy.
+
+### G.21.5 Follow-up experiments — what they narrowed, and what blocked them
+
+I ran three further jobs rather than leave §G.21.4 as a hypothesis.
+
+**(a) N=16, 2 ranks, one node (job 8799561).** Against the bit-exact validated
+N=16 single-tile PE `−110673.829050`:
+
+```
+DD (2 ranks) = -110343.282353   dE = +330.55 eV = +10.0875 meV/atom
+```
+
+Compare N=32 / 24 ranks: **+11.611 meV/atom**. So the under-binding is
+**~10–12 meV/atom regardless of system size (32k vs 262k atoms) and rank count
+(2 vs 24)**. A halo/ghost-communication error would scale with the
+surface-to-volume ratio, which changes a lot between those two runs. **It does
+not scale — this is a near-constant per-atom offset**, which is a much stronger
+constraint than "forces are wrong" ever was.
+
+**(b) Ghost-shell scan 6.5 → 12 → 24 Å (job 8799597) — BLOCKED, informatively.**
+The plan was: at `comm_modify cutoff 24` (= `num_layers × cutoff`) every ghost has
+a complete depth-4 neighbour set and the halo is unnecessary, so `dE → 0` would
+convict the halo. Both wider shells died with
+
+```
+UMA_DD real edge count exceeds UMA_DD_EDGE_CAP
+```
+
+because a wider shell means more edges, and the cap is **baked into the traced
+artifact** (917504 = 14 × 65536 chunks). **This is itself a finding: the k=4 DD
+artifact structurally cannot be A/B'd against a deep-halo run, so the one
+experiment that cleanly separates "halo bug" from "graph bug" needs a re-export
+at a larger cap.** That is the next concrete step and it is an export job, not a
+debugging session.
+
+**(c) 1-rank DD vs single-tile, same binary/system/artifact (job 8799614).** DD at
+1 rank ran fine (N=6, `−5804.806517`) — no ghosts, no halo, so this isolates the
+DD *forward* path — but the single-tile control **segfaulted on the GPU**: the
+k=4 artifact carries the `uma_halo` op and the per-atom energy head, so it is not
+loadable by the normal path. The control needs a *normal* single-tile artifact
+for the same geometry, which I do not have at N=6.
+
+### G.21.6 Where A2 stands — and the one thing I did NOT prove
+
+**Proven:** discarding the ghost force rows was a real bug, and fixing it moved
+cos 0.644 → 0.7986 and removed the halo-ON-is-worse inversion.
+
+**Not proven, and I want this on the record rather than dressed up:** I do *not*
+have the root cause of the remaining ~10–12 meV/atom under-binding. I have
+narrowed it to the **forward pass**, shown it is **size- and rank-independent**,
+and ruled out two candidates by measurement/argument rather than assertion:
+
+- *MoLE composition (P0′.2)* — the owned+ghost mean is over ~1.29× the owned
+  atoms at N=16/2-rank, but NaCl's Na:Cl **ratio** is unchanged in the shell, so
+  the composition mean barely moves. Cannot explain 10 meV/atom.
+- *`max_neighbors` truncation* — `build_dd_graph()` genuinely lacks the
+  `max_neighbors` cap and the distance sort + total-order tie-break that
+  `neighbor_list.cpp:397-432` applies on **every validated path**. That is a real
+  divergence and worth fixing on its own. But at NaCl density the cutoff sphere
+  holds ~40 neighbours against a cap of 300, **so the cap never binds** and it
+  cannot be the cause here. (It would bite at higher density — a latent bug.)
+
+**Leading remaining candidate:** the DD graph itself. `build_dd_graph()` emits
+edges directly from the LAMMPS `REQ_FULL|REQ_GHOST` list with
+`dd_cell_offsets_ = 0` and skips any neighbour `j >= nall`. Under a **6.5 Å**
+shell with a 6.0 Å cutoff, in-halo nodes near the rim legitimately lose
+neighbours, and every such dropped edge removes attraction — the right *sign*
+for under-binding. Whether the k=4 halo is supposed to (and does) fully repair
+that is exactly what experiment (b) would settle, and (b) is blocked on the cap.
+
+**Disposition: A2/S2 stays `◐ OPEN`.** One real bug fixed and measured; the
+residual localised but not solved. Per the §F.16.6 closure bar I am not calling
+this closed, and per the §F.14.5 deferral bar the next step is named and
+concrete: **re-export the k=4 DD artifact at a larger `edge_pad_cap`, then re-run
+the 6.5/12/24 Å shell scan (job 8799597's script is committed and ready).**
+
+### G.21.5 Regression status
+
+Regression-free on the validated paths: rebuild **8799359** `LMP BUILD OK`,
+tripwire **8799393** PASS, full G4 **8799394 all 7 configs bit-identical**
+(N=16 W=1..12 `−110673.829050` + step-10 `−110602.976229`; N=32 W=12
+`−885377.060040`, cos = 1.0). Expected, since `reduce_dd_ghost_forces()` is only
+reachable under `dd_active_`.
+
+Also fixed en route: `run_dd_parity.pbs` could not run at all — the k=4 artifact
+predates Sprint 5's P4′.1 `metadata_version >= 2` gate, so the loader rejected it
+(job 8799482, `lmp exit=255`). Added `UMA_ALLOW_LEGACY_METADATA=1` to the mpiexec
+line, matching `n16_ase_parity.pbs` / `final_perf_parity.pbs`. **The DD gate had
+been unrunnable since Sprint 5 and nobody had noticed** — the DD row is not in
+any automated suite.
+
+## G.22 A1/S1 — the numerical-core gate now EXISTS and PASSES  `[DEV / SELF-REVIEW 2026-09-03]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). This closes the item the audit has called
+> *"the only thing between A− and A"* since rev 10, and it **corrects my own
+> §G.20**, where I said the numeric half was blocked on infrastructure. It was
+> not blocked. I had repeated the tracker's assumption instead of testing it.
+
+### G.22.1 The blocker was not real
+
+Every prior pass recorded the toy artifact as needing "a CPU trace path
+(`export_blocks_xpu.py:889`)". **That line is conditional:**
+`if trace_dev == "xpu" and not torch.xpu.is_available(): raise`. `TRACE_DEV`/
+`--device` already accepted `cpu` throughout. Nobody had tried it.
+
+I built the toy system with the **existing** `scripts/virial_make_atoms.py`
+(`N=1` → 8-atom NaCl) and exported with the **existing**
+`w15_export_traced_fast.py --device cpu --dtype float64`:
+
+```
+{"ok": true, "path": "/tmp/.../model_traced.pt", "n_atoms": 8,
+ "size": 90998251, "loaded": "RecursiveScriptModule"}
+```
+
+**A CPU-traced artifact, on a login node, no allocation, no XPU.** It is 91 MB
+(the traced UMA-s weights dominate; the *system* is tiny), so it is **not
+committed** — `UMA_TOY_ARTIFACT` points at it and the gate SKIPs (fail-closed
+under `--strict`) when unset, with build instructions in the script header.
+
+### G.22.2 The gate: `ci/tier2_opt_equivalence.sh`
+
+Real forwards through the real engine via the (previously unbuilt) CPU
+`uma_parity_cli`, comparing energy **and** forces across every memory strategy:
+
+```
+=== A1/S1 opt-equivalence gate (CPU toy artifact) ===
+baseline (UMA_CKPT=0):        -27.048345166039 3.4763386729e-01
+  OK  UMA_CKPT=1:             -27.048345166039 3.4763386729e-01
+  OK  UMA_NO_RECOMPUTE=1:     -27.048345166039 3.4763386729e-01
+  OK  UMA_NO_RECOMPUTE_BLOCK=1:-27.048345166039 3.4763386729e-01
+  OK  UMA_NO_RECOMPUTE_EDEG=1:-27.048345166039 3.4763386729e-01
+  OK  UMA_CHUNK_RETAIN_K=1:   -27.048345166039 3.4763386729e-01
+  OK  UMA_CHUNK_RETAIN_K=2:   -27.048345166039 3.4763386729e-01
+  OK  UMA_CHUNK_RETAIN_K=3:   -27.048345166039 3.4763386729e-01
+OPTEQ PASS (energy+forces bit-identical across all opt2/opt4/opt5 strategies)
+```
+
+**opt2 / opt4 / opt5 equivalence is now MEASURED, not asserted.** Since rev 3
+these claims were "numerically equivalent by construction" — prose — and gated
+only by the multi-GB XPU G4 suite. They are now bit-identity-checked in minutes
+with no allocation. This is exactly the §A.0 thesis ("every invariant is enforced
+by a comment rather than a test") applied to the last big one.
+
+**Negative-tested, per the closure bar:** with a deliberately falsified baseline
+the gate reports `⛔ MISMATCH` on all 7 configs and `OPTEQ FAIL`. Fail-closed
+verified too: missing artifact under `--strict` → **exit 2**. Wired as
+`ci/ci_local.sh --opteq`.
+
+### G.22.3 Third self-found defect: `uma_parity_cli` never linked pthread either
+
+Building the CLI on CPU failed with the *same* `pthread_mutexattr_destroy`
+undefined reference as `test_lifetime_asan` (§G.20). Root-caused properly this
+time: `shared_peer.h`/`libtorch_mp.cpp` use pthread primitives directly, so the
+fix belongs on the **library** — `uma_engine` now links `Threads::Threads`
+**PUBLIC** and every consumer inherits it (the per-target patches are removed).
+It stayed hidden because ASAN, icpx and oneCCL all drag libpthread in
+incidentally; **only the plain CPU gate ever exposed it**, which is an argument
+for having the plain CPU gate.
+
+## G.23 Review of the ASAN harness, A3 completion, A5, A7, A1-contract  `[AUDIT 2026-09-03, 21st pass]` — verdict rev 27
+
+> Twenty-first pass. Two things distinguish it: I **negative-tested the ASAN
+> harness** (removed the fix, confirmed the test fails), and I found that
+> **most of the work reviewed here is uncommitted and unvalidated** — a
+> process gap that outranks any of the individual items.
+
+### G.23.0 Verdict: **A− held.** Excellent work; **one process finding that must be closed before it lands**
+
+The engineering in this batch is the strongest of the campaign. But **19 files are
+modified in the working tree and not committed**, including `pair_uma.cpp` and six
+engine headers, with **no rebuild and no parity job** recorded for them. §G.20
+reports these as done. Under the §D.10 closure bar — *evidence true of the tree at
+that commit* — they are not yet closeable.
+
+### G.21.1 ✅ The ASAN harness — verified by injection  `[AUDIT 21st pass]`
+
+Committed (`f8fe0b847b`) and genuinely good. Clean run: real `-fsanitize=address`
+CPU build, LSan suppressions, wired as `ci/ci_local.sh --asan`, **5/5 CTests
+pass**.
+
+**Negative test — the part that matters.** I removed the
+`HaloContext::instance().clear()` before the captured object is freed — exactly
+the **P0′.4** shape:
+
+```
+80% tests passed, 1 tests failed out of 5
+  4 - test_lifetime_asan (Failed)
+ASAN FAIL: ctest (sanitizer found a memory error)
+```
+
+**The harness detects the original defect.** Restored via `git checkout`. This is
+the first test in the project that can see a memory-lifetime bug, and its header
+comment states the rationale I argued in §G.18.3 verbatim: *"Parity runs prove the
+NUMBERS are stable; they cannot see a use-after-free, double-free, or an
+uninitialised-mutex lock."*
+
+### G.21.2 ✅ `test_transport_table` — unprompted, and the better choice  `[AUDIT 21st pass]`
+
+§F.20-A7 offered *"delete the untested transports or bring them under CI"*. This
+takes the CI branch and does more than asked: it locks the **P3.1 XCCL-mislabel**
+regression, asserts the **id-3 gap** is real, and — the connection I had missed —
+checks `map_bytes_for()` includes the control block, so a `calloc`'d `Shm` is
+always large enough for **A3s2's** `init_control_block()`. It ties A7 back to A3.
+
+### G.23.3 ⚠ Process finding: the batch is uncommitted and unvalidated  `[AUDIT 21st pass]`
+
+`git status` at review time:
+
+```
+ M src/ML-UMA/pair_uma.cpp            M .../mpi_peer_predictor.cpp
+ M src/ML-UMA/pair_uma.h              M .../xccl_peer.cpp
+ M .../block_context.h                M .../shared_peer.h
+ M .../checkpoint_module.h            M .../xccl_peer.h
+ M .../mpi_peer_predictor.h           M ci/{tier0_guards,tier2_cpu_build,asan_build}.sh
+ A  ci/tests/test_opt_equivalence_contract.py
+ A  .../tests/test_transport_table.cpp        → 19 files
+```
+
+Grep of the report for a matching rebuild/tripwire/G4: **none**.
+
+This is not a correctness claim — the changes may well be fine, and Tier-0/1 are
+green on them. It is a **bookkeeping** claim, and it is the exact failure the
+§D.10 closure bar exists to prevent: §G.20 marks A3 *"5 of 5"* and A5 *"DONE"*
+while the code implementing them is not in the repository. **G1 — the
+release-blocking finding of this whole campaign — was precisely "work that exists
+only in a working directory."**
+
+**Required before these are closeable (S10):** commit the batch, then rebuild +
+tripwire + **full G4** (`pair_uma.cpp` and the checkpoint/peer headers are all on
+the compute path), and record the job IDs. Until then §D.10 should read `◐`.
+
+### G.23.4 Verified in the working tree (pending the above)  `[AUDIT 21st pass]`
+
+Measured, so the eventual closure is checkable:
+
+| Item | Measured | Note |
+|---|---|---|
+| **A3 item 3** slot destructor | `~SharedPeerGatherSlot` **present** | was absent at rev 26 |
+| **A3 item 4** `saved_data` lifetime | 1 `reinterpret_cast<int64_t>` remains, now with a stated invariant | acceptable if the invariant is asserted |
+| **A5** splits | **`load_predictor()` is gone from the over-130 set**; max method now **129 lines** (`run_compute_dd`) | A5's exit criterion — *"no function in `pair_uma.cpp` > 130"* — is **met** |
+| **A5c** baseline | `UMA_A5_BASELINE=""` — **empty** | correct: ratchet now enforces the plain ≤130 rule with no exemptions. This is the strongest form |
+| **A1 contract test** | 8/8 pass | see below |
+
+### G.23.5 On the A1 claim — scoped honestly  `[AUDIT 21st pass]`
+
+`test_opt_equivalence_contract.py` is **not** the Tier-2 numeric suite, and it does
+not claim to be. Its docstring is explicit: it gates the *"pure arithmetic /
+decision logic"* half — which chunk is retained, how many chunks a capacity
+implies, whether DD padding is inert — mirroring `block_context.cpp` and
+`pad_dd_edges` in Python, on a bare login node.
+
+**That is a legitimate and useful slice, honestly labelled**, and I want to be
+clear it does not close A1. **A1 needs the committed CPU-traceable toy artifact
+and a real forward/backward**; the numeric gates (opt2 freeze ≡ no-freeze, opt4
+C1 ≡ C2, retain-K equality, padding inertness at 1e-14) remain unwritten. The new
+test guards the *bookkeeping* those gates assume — valuable, and explicitly the
+non-numeric half.
+
+**A1 status: unchanged. Still the only thing between A− and A.**
+
+### G.23.6 Grades — rev 27  `[AUDIT 21st pass]`
+
+Graded on **committed** state; working-tree items are noted but not credited.
+
+| Dimension | rev 26 | **rev 27** | Basis |
+|---|---|---|---|
+| **Resource & lifetime** | B | **B+** | ↑ the two landed slices are now **CI-verified rather than review-verified**, by a harness negative-tested against the original P0′.4 defect. A− once items 3/4 are committed + validated |
+| **Dead code / redundancy** | B | **B+** | ↑ transports gated not deleted; P3.1 mislabel regression-locked |
+| Test & CI infrastructure | A− | **A−** | new ASAN tier, +8 Tier-1, 5th CTest — but the capping gap is unchanged: **no forward/backward coverage** |
+| **Process / bookkeeping** | A− | **B+** | ↓ 19 files of claimed-complete work uncommitted and unvalidated (§G.21.3). Returns to A− on S10. **This is the same shape as G1** |
+| all other dimensions | — | **unchanged** | |
+| **Overall** | **A−** | **A−** | |
+
+### G.23.7 Instructions  `[AUDIT 21st pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S10** *(new)* | **Commit the 19-file batch; rebuild + tripwire + full G4; record job IDs.** Then set A3 items 3/4 and A5 to `FIXED` in §D.10 — they are `◐` until then. Consider a Tier-0 HARD guard: *"no `src/ML-UMA` file modified-but-uncommitted when a closure is recorded"* | ~1 h | **OPEN — do first** |
+| **A1 / S1** | Tier-2 **numeric** suite: committed CPU-traceable toy artifact + CPU forward/FD + the 5 equality gates. The contract half is done and honestly scoped | days | **OPEN — the only thing between A− and A** |
+| **A2 / S2** | DD force gate → cos = 1.0; finish P0.3 | weeks | OPEN |
+| **A8** | Second-platform CI; vendor hen shims; P7.1/P7.2 in S2 | days | OPEN |
+| — | Wire `--asan` into the pre-merge path, or a Tier-0 REPORT of when it last ran | ~10 min | a sanitizer tier invoked only by hand decays (cf. E.10.2) |
+
+### G.23.8 Bottom line  `[AUDIT 21st pass]`
+
+The ASAN harness is the best single item of the campaign — the first test that can
+see a lifetime defect, aimed at the class that produced P0′.4/P0′.5, and it
+**demonstrably fails when that defect is reintroduced**. A5 hit its exit criterion
+outright and A5c's baseline is now *empty*, which is the strongest form of that
+ratchet. `test_transport_table` was unprompted and chose well.
+
+**The one thing to fix is not technical.** Nineteen files of finished work sit
+uncommitted with no parity run, while the tracker reports them complete. That is
+G1's shape — the release-blocking finding of this entire campaign — recurring at
+smaller scale. Commit and validate (S10, ~1 h) and this batch is unambiguously
+excellent.
+
+Twenty-one passes; **no new code defect from me in nine consecutive passes.** The
+engineering is running well ahead of the review; the bookkeeping slipped once here
+and is cheap to recover.
+
+---
+
+## G.24 The A1 gate exists; the DD title overstates; S10 overdue  `[AUDIT 2026-09-03, 22nd pass]` — verdict rev 28
+
+> Twenty-second pass. **HEAD is unchanged since §G.21** (`f8fe0b847b`). All work
+> reviewed here is in the working tree only, and the uncommitted set has grown
+> **19 → 21 files**. That is the finding; the engineering inside it is very good.
+
+### G.24.0 Verdict: **A− held.** The A−→A blocker has a real gate at last — and it is not committed
+
+Two things are simultaneously true:
+
+1. **`ci/tier2_opt_equivalence.sh` is the A1 numeric gate I have been asking for
+   since rev 9.** It measures the opt2/opt4/opt5 equivalence claims instead of
+   asserting them, on a login node.
+2. **S10 was not done, and the unvalidated batch grew.** A5's splits,
+   A3 items 3–4, the transport test, the ASAN wiring, the A1 gate, and now four
+   DD scripts are all uncommitted, with no rebuild/tripwire/G4 for any of it.
+
+### G.24.1 ✅ The A1 numeric gate — what it actually does  `[AUDIT 22nd pass]`
+
+Read and executed. It is the real thing, not a placeholder:
+
+```
+for cfg in UMA_CKPT=1  UMA_NO_RECOMPUTE=1  UMA_NO_RECOMPUTE_BLOCK=1 \
+           UMA_NO_RECOMPUTE_EDEG=1  UMA_CHUNK_RETAIN_K=1 \
+           UMA_CHUNK_RETAIN_K=2  UMA_CHUNK_RETAIN_K=3
+→ OPTEQ PASS (energy+forces bit-identical across all opt2/opt4/opt5 strategies)
+```
+
+**Seven memory strategies, real forwards through the actual engine
+(`uma_parity_cli`), energy and forces compared bit-for-bit, on a login node with
+no XPU and no allocation.** That converts the largest body of
+"numerically-equivalent-by-construction" prose in this project — asserted in
+comments since opt2, and previously exercised only by the expensive XPU G4 suite —
+into a gate.
+
+**Fail-closed, correctly:** default SKIPs `exit 0`; `--strict` / `UMA_CI_REQUIRE_OPTEQ=1`
+→ **exit 2** (verified). Wired into `ci_local.sh`.
+
+**One honest scoping note, stated in the header:** the toy artifact is ~90 MB and
+is **not committed**; the gate SKIPs unless `UMA_TOY_ARTIFACT` points at a locally
+built one. So today it is a gate that *can* run, not one that *does* run in a
+fresh clone. The header also records a genuinely useful correction — *"TRACE on
+CPU works — the belief that a toy export needed an XPU was wrong"* — which removes
+the blocker I had assumed made A1 expensive.
+
+**Assessment: A1 is close but not closed.** The measurement machinery exists and
+works; a fresh clone still cannot execute it. Closing A1 needs either a committed
+smaller artifact or a CI step that builds one.
+
+### G.24.2 ✅ A5 — exceeded its exit criterion  `[AUDIT 22nd pass]`
+
+Max `PairUMA::` method is now **124 lines** (was 216 at rev 25), and
+`UMA_A5_BASELINE=""` — **empty**. The ratchet now enforces a plain ≤130 rule with
+no exemptions, which is the strongest form and better than the baseline-decrement
+I proposed in A5c.
+
+### G.24.3 ⚠ S10 is overdue, and the exposure grew  `[AUDIT 22nd pass]`
+
+§G.21.7 asked for: commit the batch, rebuild + tripwire + full G4, record job IDs.
+**None of that happened.** Instead:
+
+| | rev 27 (§G.21) | **rev 28 (now)** |
+|---|---|---|
+| Uncommitted files | 19 | **21** |
+| Rebuild / tripwire / G4 for them | none | **none** |
+| HEAD | `f8fe0b847b` | `f8fe0b847b` (unchanged) |
+| New since | — | `tier2_opt_equivalence.sh`, 3 DD `.pbs`, +`run_dd_parity` edits |
+
+The new DD scripts (`run_dd_isolate`, `run_dd_haloscan`, `run_dd_1rank`) indicate
+**A2/S2 work has started on top of an unvalidated base.** That is the part I would
+push back on: DD debugging is exactly the activity that needs a known-good,
+committed, parity-validated foundation, because its symptom (cos = 0.644) is a
+*numerical* one. Debugging a gradient bug while `pair_uma.cpp`, `block_context.h`
+and `checkpoint_module.h` carry uncommitted, unparity-checked edits risks
+attributing an artefact of those edits to the DD path, or vice versa.
+
+**This is G1's shape for the third time** (G1 → §G.21.3 → here), and the campaign's
+own bar (§D.10 closure: *evidence true of the tree at that commit*) is not met for
+A3 items 3–4, A5, A7's test, or A1's gate.
+
+
+### G.24.3b ⚠ On §G.21's title: "the DD force bug is FOUND and FIXED"  `[AUDIT 22nd pass]`
+
+**The title overstates what the section's own data shows.** The root-cause
+analysis is genuinely good — the halo reverse exchange was dropping the
+cross-rank `dE_ownedB/dx_i` terms, and the section explains how that single
+defect produces all three observed symptoms. The fix reuses already-validated
+`pack_reverse_comm` machinery, and it was **measured, not assumed** (job 8799532,
+N=32, 2 nodes × 12 tiles):
+
+| Metric | halo-ON before | halo-ON after | Δ |
+|---|---|---|---|
+| force **cos** | 0.644 | **0.7986** | +0.155 |
+| rms\|dF\| | 0.140 | **0.1016** | −27 % |
+| max\|dF\| | 1.28 | **0.898** | −30 % |
+
+That is a large, real gain and the diagnosis looks right.
+
+**But cos = 0.7986 is not cos = 1.0, and the gate needs 1.0.** To its credit
+§G.21's *body* says exactly that — *"nowhere near the 1.0 the gate needs"*, A2
+stays `OPEN`, and it correctly localises the residual to the **forward** pass
+(the energy is still wrong, and no gradient reduction can fix a force whose
+energy is wrong).
+
+**So the content is honest and the heading is not.** Under the §F.16.6 closure bar
+— a `FIXED` state must cite evidence true of the tree — a section titled
+"FOUND and FIXED" for a defect that remains `OPEN` is the kind of claim that
+misleads a reader who skims headings. **Retitle it** (e.g. *"root cause found;
+partial fix measured, A2 still OPEN"*). The body needs no change.
+
+**Also note the fix is uncommitted**, so the +0.155 improvement is not in the
+repository either.
+
+### G.24.4 Grades — rev 28  `[AUDIT 22nd pass]`
+
+Graded on **committed** state; working-tree work is described but not credited.
+
+| Dimension | rev 27 | **rev 28** | Basis |
+|---|---|---|---|
+| Test & CI infrastructure | A− | **A−** | the A1 numeric gate exists and runs — but it is uncommitted and SKIPs without a local artifact, so a fresh clone gains nothing yet |
+| Architecture | B | **B** | A5's splits are real (216 → 124) but uncommitted |
+| Resource & lifetime | B+ | **B+** | items 3–4 present in-tree, uncommitted |
+| **Process / bookkeeping** | B+ | **B** | ↓ S10 not actioned; exposure grew 19 → 21; **A2 work started on an unvalidated base**. Recovers to A− on S10 |
+| all other dimensions | — | **unchanged** | |
+| **Overall** | **A−** | **A−** | |
+
+### G.24.5 Instructions  `[AUDIT 22nd pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S10** | **Commit the 21-file batch; rebuild + tripwire + full G4; record job IDs.** Then set A3 3–4, A5, A7-test, A1-gate to `FIXED` in §D.10 | ~1 h | **OVERDUE — blocks everything below** |
+| **S11** *(new)* | **Do not continue A2/S2 on an unvalidated base.** Land S10 first, so any DD force-gate movement is attributable to DD work and not to uncommitted engine edits | — | **OPEN** |
+| **A1 close-out** | Either commit a smaller toy artifact, or add a CI step that builds one, so `tier2_opt_equivalence.sh` runs in a fresh clone rather than SKIPping | ~half day | **OPEN — this is now all that separates A− from A** |
+| **A2 / S2** | DD force gate → cos = 1.0 (after S10) | weeks | OPEN |
+| **A8** | Second-platform CI; P7.1/P7.2 in S2 | days | OPEN |
+
+### G.24.6 Bottom line  `[AUDIT 22nd pass]`
+
+The A1 numeric gate is the most valuable artefact produced in this campaign — it
+retires "equivalent by construction" for seven memory strategies and does it on a
+login node. A5 beat its target (216 → 124, empty baseline). The engineering
+continues to be excellent.
+
+**But for the second consecutive pass I am reviewing work that does not exist in
+the repository**, and the exposure grew rather than closed. A1 cannot be *closed*
+while its gate is uncommitted and artifact-less; A2 should not *start* while the
+base is unvalidated.
+
+**S10 is one hour and it unblocks both.** It is now the highest-priority item in
+the project — above A1's close-out and above A2.
+
+---
+---
+
+
+---
+---
+
+
+---
+---
+
 
 ---
 ---

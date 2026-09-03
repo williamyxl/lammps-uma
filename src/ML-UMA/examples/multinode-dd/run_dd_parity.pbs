@@ -69,8 +69,13 @@ cd "${RUNDIR}"
 echo "=== UMA DD single-point: N=${N} (${NAT} atoms), ${NODES} nodes x ${TPN} tiles = ${RANKS} ranks ==="
 t0=$SECONDS
 # one XPU tile per rank via gpu_tile_compact.sh; UMA_DD path builds owned+ghost graph per rank
+# UMA_ALLOW_LEGACY_METADATA=1: the k=4 DD artifact predates Sprint 5's P4'.1
+# metadata_version>=2 gate (exported 2026-08-27), same as the other campaign gate
+# scripts (n16_ase_parity.pbs, final_perf_parity.pbs). Re-exporting the DD
+# artifact is a separate job; the loader reads the same fields either way.
 mpiexec -n ${RANKS} --ppn ${TPN} \
   gpu_tile_compact.sh \
+  env UMA_ALLOW_LEGACY_METADATA=1 \
   "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" -var datafile "data.nacl_n${N}" \
   > lmp.log 2>&1
 rc=$?

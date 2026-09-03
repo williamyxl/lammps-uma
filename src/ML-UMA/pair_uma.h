@@ -53,6 +53,12 @@ class PairUMA : public Pair {
  protected:
   virtual void allocate();
   void load_predictor();
+  // A5 (audit rev 26 §G.18.6): load_predictor() decomposition. init_mpi_peer()
+  // builds the GP-over-MPI peer and returns true when it handled construction
+  // (multi-node, non-DD). The single-tile device pick is a file-local helper in
+  // pair_uma.cpp (returns torch::Device, kept out of this torch-free header).
+  // Pure code-motion out of load_predictor(); no numeric change.
+  bool init_mpi_peer();
   // Convert the LAMMPS full neighbor list into FairChem edge format
   // (edge_index [2,E] int64 row0=neighbor row1=center, cell_offsets [E,3]).
   // Single-tile (non-mn) orthorhombic path only. Fills ext_edge_index_ /
@@ -77,6 +83,17 @@ class PairUMA : public Pair {
   // Enabled by env UMA_DD=1. Returns E; fills dd_edge_index_ / dd positions.
   void run_compute_dd(int eflag, int vflag);
   int64_t build_dd_graph(int nall);        // edges among owned+ghost within cutoff
+  // A5 (audit rev 26 §G.18.6): the P2.1 edge-padding block factored out of
+  // run_compute_dd(). Pads dd_edge_index_/dd_cell_offsets_ from the real edge
+  // count E up to UMA_DD_EDGE_CAP with inert atom0->dummy edges; returns the new
+  // (padded) edge count. `dummy` is the appended far-node index (nall). Pure
+  // code-motion; identical arithmetic to the pre-split inline block.
+  int64_t pad_dd_edges(int64_t E, int64_t edge_cap, int dummy);
+  // A2/S2 (audit rev 26 §G.18.6): reverse-comm the ghost force rows onto their
+  // owners and deposit owned rows into f. Ghost rows hold this rank's
+  // -dE_owned/dx_ghost, a real cross-rank force term that used to be discarded
+  // (the cos = 0.644 DD bug). See the derivation above the definition.
+  void reduce_dd_ghost_forces(int nlocal, int nall, double **f);
   void mole_composition_allreduce();        // owned-only per-Z counts, cross-rank
   bool mole_composition_done_ = false;      // R4: run the (discarded) diagnostic + warn ONCE, not per DD step
   void install_halo_callbacks();            // bind HaloContext to LAMMPS comm
@@ -88,6 +105,11 @@ class PairUMA : public Pair {
   std::vector<int> dd_z_;                   // [nall] atomic numbers owned+ghost
   std::vector<double> dd_force_;            // [nnodes,3] forces for all graph nodes
   std::vector<double> dd_energy_;           // [nnodes] per-node energy (DD k=4)
+  // A2/S2 (audit rev 26 §G.18.6): [nall,3] staging buffer for the ghost-force
+  // reverse_comm. Ghost rows of dd_force_ hold -dE_owned(this rank)/dx_ghost,
+  // which is a REAL contribution to the force on the atom's owner and used to be
+  // discarded (the cos = 0.644 bug). reverse_comm accumulates them onto owners.
+  std::vector<double> dd_fbuf_;
 
   // Per-layer halo exchange (k=4) scratch. The engine's uma_halo::exchange op
   // calls back into this pair style; halo_buf_ holds [nall, halo_per_node] node

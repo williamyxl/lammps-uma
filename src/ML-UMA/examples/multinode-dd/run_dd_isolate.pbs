@@ -1,0 +1,101 @@
+#!/bin/bash -l
+#PBS -N uma_dd_iso
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# A2/S2 isolation (audit rev 26 §G.21.4). The 2-node DD parity run (job 8799532,
+# after the ghost-force fix) left an ENERGY residual of +11.61 meV/atom that the
+# gradient fix did not touch, so the remaining defect is in the FORWARD pass.
+#
+# This separates the two candidate causes by removing the halo entirely:
+#
+#   RANKS=1  -> every atom is OWNED, there are no ghosts and no cross-rank halo.
+#              The DD path still builds its own graph (build_dd_graph + padding)
+#              and uses the per-atom energy head.
+#              * If 1-rank DD MATCHES the single-tile oracle -> the DD graph and
+#                the energy head are fine, and the residual is in the halo /
+#                ghost handling.
+#              * If 1-rank DD ALREADY under-binds -> the defect is in DD graph
+#                construction itself (build_dd_graph / edge padding / the
+#                per-atom energy head), NOT in the halo. Login-node debuggable.
+#
+#   RANKS=2  -> same node, so the fabric is not involved, but ghosts + halo ARE.
+#              The delta between RANKS=1 and RANKS=2 is purely the halo/ghost
+#              machinery.
+#
+# N=16 (32,768 atoms) because it has a bit-exact validated oracle:
+#   step-0 PE = -110673.829050 eV (report §13 / every G4 run).
+#
+#   qsub -v N=16 run_dd_isolate.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-16}
+NAT=$((8*N*N*N))
+ARTIFACT=${ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+REF_PE=${REF_PE:--110673.829050}         # validated N=16 single-tile step-0 PE
+RUNDIR=${RUNDIR:-${EX}/run_dd_iso_n${N}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+cp -f "${EX}/in.dd_sp" "${RUNDIR}/in.dd_sp"
+cd "${RUNDIR}"
+
+echo "### A2/S2 isolation: DD forward-pass residual (N=${N}, ${NAT} atoms) ###"
+echo "### reference single-tile step-0 PE = ${REF_PE} eV ###"
+echo
+
+for RANKS in 1 2; do
+  echo "=== DD with ${RANKS} rank(s) ==="
+  rm -f log.lammps
+  t0=$SECONDS
+  mpiexec -n ${RANKS} --ppn ${RANKS} gpu_tile_compact.sh \
+    env UMA_ALLOW_LEGACY_METADATA=1 UMA_DD=1 \
+    "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" -var datafile "data.nacl_n${N}" \
+    > lmp_r${RANKS}.log 2>&1
+  rc=$?
+  PE=$(grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1 | awk '{print $3}')
+  echo "  exit=${rc} wall=$((SECONDS-t0))s  step0_PE=${PE}"
+  if [ -n "${PE}" ]; then
+    python - "$PE" "$REF_PE" "$NAT" <<'PY'
+import sys
+pe, ref, nat = float(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3])
+d = pe - ref
+print(f"  dE = {d:+.4f} eV = {d/nat*1000:+.4f} meV/atom", end="  ")
+print("[MATCH]" if abs(d/nat*1000) <= 1e-3 else "[MISMATCH]")
+PY
+  else
+    grep -iE "ERROR|out of memory" lmp_r${RANKS}.log | head -3
+  fi
+  echo
+done
+
+echo "### VERDICT ###"
+echo "  1-rank MISMATCH  -> defect is in DD graph construction / energy head (not the halo)"
+echo "  1-rank MATCH but 2-rank MISMATCH -> defect is in the halo / ghost handling"
+echo "DONE"

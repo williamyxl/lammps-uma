@@ -36,7 +36,8 @@ cmake -S "${ENG}" -B "${BUILD}" \
   >/dev/null 2>"${BUILD}.cmake.err" || { echo "ASAN FAIL: configure"; tail -20 "${BUILD}.cmake.err"; exit 1; }
 
 cmake --build "${BUILD}" --target uma_engine test_lifetime_asan \
-  graph_shard_smoke test_m0_device_binding test_m3_gather_scatter -j 16 \
+  test_transport_table graph_shard_smoke test_m0_device_binding \
+  test_m3_gather_scatter -j 16 \
   >"${BUILD}.build.log" 2>&1 || { echo "ASAN FAIL: build"; tail -30 "${BUILD}.build.log"; exit 1; }
 echo "ASAN build OK"
 
@@ -47,7 +48,7 @@ export LSAN_OPTIONS="suppressions=${LU}/ci/lsan.supp:${LSAN_OPTIONS:-}"
 export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX:-}/lib:$(python -c 'import torch,os;print(os.path.join(os.path.dirname(torch.__file__),"lib"))'):${LD_LIBRARY_PATH:-}"
 
 ( cd "${BUILD}" && ctest --output-on-failure \
-    -R "test_lifetime_asan|graph_shard_smoke|test_m0_device_binding|test_m3_gather_scatter" ) \
+    -R "test_lifetime_asan|test_transport_table|graph_shard_smoke|test_m0_device_binding|test_m3_gather_scatter" ) \
   || { echo "ASAN FAIL: ctest (sanitizer found a memory error)"; exit 1; }
 
 echo "ASAN PASS (lifetime harness + CPU CTests clean under -fsanitize=address)"

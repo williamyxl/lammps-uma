@@ -158,6 +158,15 @@ for f in src/ML-UMA/uma-engine/third_party/nlohmann/json.hpp \
          scripts/uma_gates.py scripts/_pbs_common.sh; do
   git ls-files --error-unmatch "$f" >/dev/null 2>&1 || { say "  UNTRACKED: $f"; untracked=$((untracked+1)); }
 done
+# A hardcoded list can only catch files someone REMEMBERED to add: ci/asan_build.sh
+# (§G.19) and the new §G.20 tests were all absent from it. Sweep the harness
+# directories wholesale so a newly added guard/test cannot be silently untracked —
+# the F.7.1 failure mode ("guards exist but are unguarded at HEAD") in miniature.
+for f in $(ls ci/*.sh ci/*.supp ci/tests/*.py 2>/dev/null) \
+         $(ls src/ML-UMA/uma-engine/tests/*.cpp 2>/dev/null); do
+  git ls-files --error-unmatch "$f" >/dev/null 2>&1 \
+    || { say "  UNTRACKED harness file: $f"; untracked=$((untracked+1)); }
+done
 # Also: every vendored header actually #included by compiled library source.
 for hdr_inc in $(grep -rhoE '#include <nlohmann/[a-z_]+\.hpp>' \
                    src/ML-UMA/uma-engine/src 2>/dev/null | grep -oE 'nlohmann/[a-z_]+\.hpp' | sort -u); do
@@ -198,7 +207,11 @@ over=$(awk '/^[a-zA-Z].*PairUMA::[a-zA-Z_]+\(/{name=$0; s=NR}
 # under a membership-only ratchet). Baseline = "name:max_lines"; a new over-130
 # method, OR a baseline method exceeding its recorded size, HARD-fails. State can
 # only improve. When A5 splits a method below 130, drop its baseline entry.
-UMA_A5_BASELINE="load_predictor:218 run_compute_dd:156"
+# A5 DONE (audit rev 26 §G.18.6): load_predictor() split into init_mpi_peer() +
+# uma_select_compute_device() (both <130), run_compute_dd() split into
+# pad_dd_edges() (<130). Baseline is now EMPTY — A5's exit criterion "no method
+# > 130 lines" is met and the ratchet HARD-fails on ANY over-130 method.
+UMA_A5_BASELINE=""
 new_over=0; grew=0
 if [ -n "$over" ]; then
   while read -r n nm; do

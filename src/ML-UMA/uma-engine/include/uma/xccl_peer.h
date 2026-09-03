@@ -26,7 +26,14 @@ class XcclPeer {
   // Build the SYCL device/context/stream + ccl::communicator (KVS over MPI).
   // device_index is informational; the tile is pinned via ZE_AFFINITY_MASK so
   // torch's current XPU device is the rank's tile.
-  static std::shared_ptr<XcclPeer> create(int rank, int world, int device_index);
+  //
+  // P7.1 (audit rev 26 §G.18.6 / A8): comm_f is a Fortran MPI handle
+  // (MPI_Comm_c2f) for the KVS-address rendezvous Bcast. Passed as an int so this
+  // header stays MPI-type-free (GCC-safe). 0 means MPI_COMM_WORLD (the historical
+  // behaviour); pass the caller's real communicator so -partition / library-mode
+  // / MDI (where MPI_COMM_WORLD != the LAMMPS world) bootstrap on the right comm.
+  static std::shared_ptr<XcclPeer> create(int rank, int world, int device_index,
+                                          int comm_f = 0);
 
   virtual ~XcclPeer() = default;
 

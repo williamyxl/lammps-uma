@@ -1,0 +1,113 @@
+#!/bin/bash -l
+#PBS -N uma_dd_scan
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# A2/S2 decisive experiment (audit rev 26 §G.21.4).
+#
+# After the ghost-force fix (job 8799532) the DD FORCE cos rose 0.644 -> 0.799,
+# but a forward-pass ENERGY residual of ~+10-12 meV/atom remains (under-binding),
+# and it is nearly INDEPENDENT of rank count and system size:
+#     N=32, 24 ranks: +11.61 meV/atom
+#     N=16,  2 ranks: +10.09 meV/atom
+#
+# Two candidate causes remain. This scan separates them by GROWING the ghost
+# shell (`comm_modify cutoff`) while holding everything else fixed:
+#
+#   6.5 A  : thin shell; correctness relies entirely on the k=4 per-layer halo
+#            refreshing rim-ghost features (the production DD config).
+#   12.0 A : 2 layers' worth of real ghosts; halo has less to repair.
+#   24.0 A : num_layers*cutoff = 4*6. EVERY ghost has a complete neighbor set to
+#            depth 4, so NO halo repair is needed at all.
+#
+# VERDICT:
+#   dE -> 0 as the shell grows  => the k=4 halo is NOT fully repairing rim
+#                                  ghosts; the defect is in the halo shortcut.
+#   dE stays ~10 meV/atom       => the defect is in DD graph construction /
+#                                  the per-atom energy head, independent of the
+#                                  halo. (build_dd_graph has no max_neighbors
+#                                  truncation and no distance sort, unlike
+#                                  neighbor_list.cpp:397-432 which every
+#                                  validated path uses.)
+#
+# N=16 (32,768 atoms), 2 ranks on ONE node: the fabric is not involved, and the
+# reference is the bit-exact validated single-tile PE -110673.829050 eV.
+#
+#   qsub -v N=16 run_dd_haloscan.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-16}
+RANKS=${RANKS:-2}
+NAT=$((8*N*N*N))
+ARTIFACT=${ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+REF_PE=${REF_PE:--110673.829050}
+RUNDIR=${RUNDIR:-${EX}/run_dd_scan_n${N}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+cd "${RUNDIR}"
+
+echo "### A2/S2 halo-shell scan: N=${N} (${NAT} atoms), ${RANKS} ranks, 1 node ###"
+echo "### reference single-tile step-0 PE = ${REF_PE} eV ###"
+echo
+
+for SHELL in 6.5 12.0 24.0; do
+  # in.dd_sp with the ghost shell overridden
+  sed "s/^comm_modify     cutoff 6.5 vel no/comm_modify     cutoff ${SHELL} vel no/" \
+    "${EX}/in.dd_sp" > "in.dd_shell_${SHELL}"
+  grep -q "cutoff ${SHELL}" "in.dd_shell_${SHELL}" || { echo "sed failed for ${SHELL}"; continue; }
+
+  echo "=== comm_modify cutoff = ${SHELL} A ==="
+  rm -f log.lammps
+  t0=$SECONDS
+  mpiexec -n ${RANKS} --ppn ${RANKS} gpu_tile_compact.sh \
+    env UMA_ALLOW_LEGACY_METADATA=1 UMA_DD=1 \
+    "${LMP}" -in "in.dd_shell_${SHELL}" -var artifact "${ARTIFACT}" \
+    -var datafile "data.nacl_n${N}" > "lmp_shell_${SHELL}.log" 2>&1
+  rc=$?
+  PE=$(grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1 | awk '{print $3}')
+  echo "  exit=${rc} wall=$((SECONDS-t0))s  step0_PE=${PE}"
+  if [ -n "${PE}" ]; then
+    python - "$PE" "$REF_PE" "$NAT" <<'PY'
+import sys
+pe, ref, nat = float(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3])
+d = pe - ref
+print(f"  dE = {d:+.4f} eV = {d/nat*1000:+.4f} meV/atom", end="  ")
+print("[MATCH]" if abs(d/nat*1000) <= 1e-3 else "[MISMATCH]")
+PY
+  else
+    grep -iE "ERROR|out of memory|exceeds" "lmp_shell_${SHELL}.log" | head -3
+  fi
+  echo
+done
+
+echo "### VERDICT ###"
+echo "  dE shrinks toward 0 as shell grows -> k=4 halo not repairing rim ghosts"
+echo "  dE flat at ~10 meV/atom            -> DD graph construction / energy head"
+echo "DONE"

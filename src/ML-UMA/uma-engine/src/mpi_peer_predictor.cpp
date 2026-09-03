@@ -109,7 +109,7 @@ MpiPeerPredictor::~MpiPeerPredictor() {
 std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
     const std::string& artifact_dir, const ArtifactMetadata& metadata,
     int world, int rank, int device_index, const void* nccl_unique_id,
-    torch::ScalarType compute_dtype) {
+    torch::ScalarType compute_dtype, int comm_f) {
   if (world < 2) throw std::runtime_error("MpiPeerPredictor requires world >= 2");
   if (rank < 0 || rank >= world) throw std::runtime_error("MpiPeerPredictor: bad rank");
   if (compute_dtype != torch::kFloat64)
@@ -161,7 +161,7 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   PeerContext::instance().reset_shared(self->impl_->slot);
   PeerContext::set_thread_rank(rank);
   self->impl_->slot->init_xccl_external(rank, world, /*unused*/ nullptr,
-                                        device_index);
+                                        device_index, comm_f);  // P7.1
 #else
   // Private per-rank Shm (NCCL transport). Not shared across processes: NCCL
   // itself carries the cross-rank traffic; the Shm only records world/transport

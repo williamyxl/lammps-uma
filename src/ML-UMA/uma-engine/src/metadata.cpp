@@ -38,6 +38,18 @@ const json& require(const json& j, const char* key, const std::string& path) {
   return *it;
 }
 
+// A2/S2 fix (audit rev 26 §G.21.5): null-tolerant optional-string read. nlohmann's
+// j.value("k", default) substitutes the default ONLY when the key is ABSENT; if
+// the key is present but JSON null it throws type_error.302. Exporters legitimately
+// emit null for un-set provenance (checkpoint_sha256, atom_refs, ...), so a null
+// optional string must read as empty, not abort the whole artifact load. This bug
+// made the fresh v2 DD artifact unloadable ("type must be string, but is null").
+std::string opt_string(const json& j, const char* key) {
+  auto it = j.find(key);
+  if (it == j.end() || it->is_null() || !it->is_string()) return std::string();
+  return it->get<std::string>();
+}
+
 torch::ScalarType parse_compute_dtype(const json& j, const std::string& path) {
   // base_precision_dtype lives under inference_settings. P4'.2: on any parse
   // difficulty THROW (the old code silently returned kFloat32, which would run a
@@ -102,10 +114,12 @@ ArtifactMetadata load_artifact_metadata(const std::string& metadata_path) {
     throw std::runtime_error("metadata.json (" + metadata_path +
                              "): metadata_version must be an integer");
   }
-  meta.fairchem_version = j.value("fairchem_version", std::string());
-  meta.torch_version = j.value("torch_version", std::string());
-  meta.exporter_git_sha = j.value("exporter_git_sha", std::string());
-  meta.checkpoint_sha256 = j.value("checkpoint_sha256", std::string());
+  // opt_string (not j.value): null-tolerant, so a provenance field written as
+  // JSON null reads empty instead of throwing (see opt_string above).
+  meta.fairchem_version = opt_string(j, "fairchem_version");
+  meta.torch_version = opt_string(j, "torch_version");
+  meta.exporter_git_sha = opt_string(j, "exporter_git_sha");
+  meta.checkpoint_sha256 = opt_string(j, "checkpoint_sha256");
 
   // ---- required core fields ----------------------------------------------
   meta.model_name = require(j, "model_name", metadata_path).get<std::string>();
@@ -121,7 +135,7 @@ ArtifactMetadata load_artifact_metadata(const std::string& metadata_path) {
   meta.element_references = parse_double_array(et, "element_references");
 
   // ---- optional fields ----------------------------------------------------
-  meta.checkpoint_path = j.value("checkpoint_path", std::string());
+  meta.checkpoint_path = opt_string(j, "checkpoint_path");
   meta.edge_ac_chunk = j.value("edge_ac_chunk", 0);
   meta.edge_pad_cap = j.value("edge_pad_cap", 0);
   meta.edge_pad_atom = j.value("edge_pad_atom", 0);

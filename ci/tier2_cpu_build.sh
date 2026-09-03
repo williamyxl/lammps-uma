@@ -52,9 +52,10 @@ cmake -S "${ENG}" -B "${BUILD}" \
 
 # Build the library + the CPU hermetic self-tests (not the whole tree).
 cmake --build "${BUILD}" --target uma_engine graph_shard_smoke \
-  test_m0_device_binding test_m3_gather_scatter -j 16 \
+  test_m0_device_binding test_m3_gather_scatter \
+  test_lifetime_asan test_transport_table -j 16 \
   >"${BUILD}.build.log" 2>&1 || { echo "TIER2 FAIL: build"; tail -30 "${BUILD}.build.log"; exit 1; }
-echo "TIER2 build OK: libuma_engine + graph_shard_smoke + test_m0 + test_m3"
+echo "TIER2 build OK: libuma_engine + graph_shard_smoke + test_m0 + test_m3 + lifetime + transport_table"
 
 # fxpu's torch is the XPU build, so even libtorch_cpu pulls in libsycl.so.9; the
 # link warns it "may conflict with libsycl.so.8". Provide a compat shim + torch/
@@ -66,9 +67,12 @@ if [ -e "${CONDA_PREFIX:-}/lib/libsycl.so.9" ]; then
 fi
 export LD_LIBRARY_PATH="${COMPAT}:${CONDA_PREFIX:-}/lib:${TORCH_LIB}:${LD_LIBRARY_PATH:-}"
 
-# CTest: run all CPU-registered tests (graph_shard_smoke, test_m0, test_m3).
+# CTest: run ALL CPU-registered tests. A3/A7 (audit rev 26 §G.18.6) added
+# test_lifetime_asan (lifetime cycles) and test_transport_table (transport enum /
+# name / stride contract); they were registered but Tier-2 was not running them —
+# the non-ASAN CPU gate now covers the same set the ASAN gate does.
 ( cd "${BUILD}" && ctest --output-on-failure \
-    -R "graph_shard_smoke|test_m0_device_binding|test_m3_gather_scatter" ) \
+    -R "graph_shard_smoke|test_m0_device_binding|test_m3_gather_scatter|test_lifetime_asan|test_transport_table" ) \
   || { echo "TIER2 FAIL: ctest"; exit 1; }
 
 echo "TIER2 PASS"

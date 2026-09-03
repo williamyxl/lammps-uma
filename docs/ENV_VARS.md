@@ -125,17 +125,21 @@ hard-code copies in comparators or `.pbs` scripts.
 
 ## 8. Known limitations (not env vars)
 
-- **⚠ `MPI_COMM_WORLD` is hardcoded on the multi-node GP path** (P7.1;
-  `xccl_peer.cpp:79,82` build the XCCL KVS on `MPI_COMM_WORLD`, and the GP gather in
-  `pair_uma.cpp` uses `world`). Consequence: the GP/multi-node path assumes it owns
-  the whole MPI world, so it is **incompatible with anything that partitions
-  `MPI_COMM_WORLD`** — LAMMPS `-partition`/`run_multi`, library/`liblammps` mode with
-  a sub-communicator, and MDI coupling. In those modes GP ranks would gather across
-  the wrong communicator and there is **no diagnostic today** — the run silently
-  uses the wrong atom set. Single-tile (1 rank) is unaffected. Fix (deferred, P7.1):
-  thread `world = comm->world` (LAMMPS' communicator) through the peer/KVS setup.
-- **`atom->natoms` is narrowed to `int` on the GP gather** (P7.2, `pair_uma.cpp`) →
-  the GP path breaks above 2^31 atoms. Not reachable at validated sizes; tracked.
+- **✅ `MPI_COMM_WORLD` hardcoding FIXED** (P7.1, audit rev 26 §G.18.6 / A8): the
+  XCCL KVS rendezvous now bootstraps on the LAMMPS communicator. `pair_uma.cpp`
+  passes `MPI_Comm_c2f(world)` to `MpiPeerPredictor::create`, which threads it
+  (`comm_f`) through `init_xccl_external` to `XcclPeer::create`, where
+  `MPI_Comm_f2c(comm_f)` recovers the real comm for the address `MPI_Bcast`
+  (`comm_f=0` still means `MPI_COMM_WORLD` for backward compatibility). The
+  handle is passed as an `int` (Fortran MPI handle) so the GCC-safe engine
+  headers stay MPI-type-free. The multi-node GP path now bootstraps on the same
+  communicator LAMMPS gathers on, so `-partition` / library sub-communicator /
+  MDI use the correct comm instead of silently gathering across the wrong world.
+- **✅ `atom->natoms` int32 overflow now fails loudly** (P7.2, audit rev 26 §G.18.6
+  / A8): the GP gather still uses int counts (full 64-bit GP is deferred), but
+  `pair_uma.cpp` now guards `atom->natoms > INT_MAX` with an explicit
+  `error->all` naming the limit, instead of silently narrowing >2^31 atoms into a
+  garbage int. Converts silent-wrong-physics into a clear, actionable abort.
 - **NPT/stress requires `UMA_COMPUTE_VIRIAL=1` and is single-tile only** (P0'.1); the
   GP/DD paths refuse a barostat (they compute no virial).
 - **DD multi-species energies are approximate** (P0'.2): the traced MoLE mixture uses

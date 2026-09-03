@@ -39,6 +39,14 @@ if [ "${1:-}" = "--tier2" ]; then
   bash ci/tier2_cpu_build.sh || rc=1
 fi
 
+if [ "${1:-}" = "--opteq" ]; then
+  echo
+  echo "############ A1/S1: opt-equivalence numeric gate (CPU toy artifact) ############"
+  # opt2/opt4/opt5 energy+force bit-identity through the real engine. Needs
+  # UMA_TOY_ARTIFACT + a built uma_parity_cli (see the script header).
+  bash ci/tier2_opt_equivalence.sh || rc=1
+fi
+
 if [ "${1:-}" = "--asan" ]; then
   echo
   echo "############ ASAN: CPU engine + lifetime harness (A3) ############"

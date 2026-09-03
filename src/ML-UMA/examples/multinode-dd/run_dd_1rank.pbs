@@ -1,0 +1,118 @@
+#!/bin/bash -l
+#PBS -N uma_dd_1r
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# A2/S2 DEFINITIVE isolation (audit rev 26 §G.21.4).
+#
+# The DD path still under-binds by ~+10-12 meV/atom after the ghost-force fix,
+# essentially independent of rank count and system size. The halo-shell scan
+# (job 8799597) could not discriminate because widening `comm_modify cutoff`
+# blows past UMA_DD_EDGE_CAP (the traced chunk count is baked at 14 x 65536).
+#
+# This test removes the halo by removing GHOSTS: run DD on **1 rank** with a
+# system small enough that the edge count fits the traced cap. With one rank:
+#   * every atom is OWNED (nlocal == nall), there are NO ghosts,
+#   * comm->reverse_comm and the halo exchange are no-ops,
+#   * the ONLY thing still exercised is the DD-specific forward path --
+#     build_dd_graph(), the edge padding, and the per-atom energy head.
+#
+# It is compared against the SAME system run through the normal (non-DD)
+# single-tile path with the same binary, which is the validated reference.
+#
+#   DD == single-tile  -> DD forward is fine; residual is halo/ghost-only
+#   DD  != single-tile -> the defect is in build_dd_graph / padding / node-energy
+#                         head, and is reproducible on ONE rank (easy to fix)
+#
+#   qsub -v N=6 run_dd_1rank.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-6}
+NAT=$((8*N*N*N))
+# k=4 DD artifact (per-atom energy head + uma_halo op). Halo is inert at 1 rank.
+DD_ARTIFACT=${DD_ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+RUNDIR=${RUNDIR:-${EX}/run_dd_1rank_n${N}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+cd "${RUNDIR}"
+cp -f "${EX}/in.dd_sp" in.dd_sp
+
+echo "### A2/S2 one-rank DD isolation: N=${N} (${NAT} atoms), NO ghosts, NO halo ###"
+echo
+
+# ---- (a) DD path, 1 rank -----------------------------------------------------
+echo "=== (a) DD path (UMA_DD=1), 1 rank ==="
+rm -f log.lammps
+t0=$SECONDS
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_DD=1 \
+  "${LMP}" -in in.dd_sp -var artifact "${DD_ARTIFACT}" \
+  -var datafile "data.nacl_n${N}" > lmp_dd.log 2>&1
+echo "  exit=$? wall=$((SECONDS-t0))s"
+PE_DD=$(grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1 | awk '{print $3}')
+echo "  DD step0_PE = ${PE_DD:-<none>}"
+[ -z "${PE_DD}" ] && grep -iE "ERROR|exceeds|out of memory" lmp_dd.log | head -3
+echo
+
+# ---- (b) normal single-tile path, same binary, same system, same artifact ----
+# UMA_DD unset -> the validated single-tile predictor (its own vesin/cell-list
+# neighbor graph via neighbor_list.cpp, WITH max_neighbors + distance sort).
+echo "=== (b) single-tile path (UMA_DD unset), 1 rank, same artifact ==="
+rm -f log.lammps
+t0=$SECONDS
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
+  env UMA_ALLOW_LEGACY_METADATA=1 \
+  "${LMP}" -in in.dd_sp -var artifact "${DD_ARTIFACT}" \
+  -var datafile "data.nacl_n${N}" > lmp_st.log 2>&1
+echo "  exit=$? wall=$((SECONDS-t0))s"
+PE_ST=$(grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1 | awk '{print $3}')
+echo "  single-tile step0_PE = ${PE_ST:-<none>}"
+[ -z "${PE_ST}" ] && grep -iE "ERROR|exceeds|out of memory" lmp_st.log | head -3
+echo
+
+echo "### COMPARISON ###"
+if [ -n "${PE_DD}" ] && [ -n "${PE_ST}" ]; then
+  python - "$PE_DD" "$PE_ST" "$NAT" <<'PY'
+import sys
+dd, st, nat = float(sys.argv[1]), float(sys.argv[2]), int(sys.argv[3])
+d = dd - st
+print(f"  DD          = {dd:.9f} eV")
+print(f"  single-tile = {st:.9f} eV")
+print(f"  dE = {d:+.6f} eV = {d/nat*1000:+.5f} meV/atom")
+if abs(d/nat*1000) <= 1e-3:
+    print("  [MATCH] -> DD forward path is CORRECT with no ghosts;")
+    print("            the residual is halo/ghost-specific.")
+else:
+    print("  [MISMATCH] -> the DD FORWARD path is wrong even with NO ghosts and")
+    print("               NO halo. Defect is in build_dd_graph / edge padding /")
+    print("               the per-atom energy head. Reproducible on 1 rank.")
+PY
+fi
+echo "DONE"

@@ -40,6 +40,7 @@
 #endif
 
 #include <algorithm>  // std::stable_sort for the multi-node tag ordering
+#include <limits>     // P7.2: int32 overflow guard on atom->natoms
 #include <cmath>      // std::lround for ghost->integer-image recovery
 #include <cstdint>
 #include <cstdlib>
@@ -322,6 +323,16 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
   if (!use_f64)
     error->all(FLERR, "Pair style uma: multi-node requires precision double");
 
+  // P7.2 (audit rev 26 §G.18.6 / A8): atom->natoms is a 64-bit bigint but the GP
+  // gather path uses int counts/indices throughout (MPI_Allgatherv counts, vesin
+  // indices). Rather than silently narrow >2^31 atoms into a negative/garbage int
+  // (silent wrong physics), fail loudly. Full 64-bit GP support is deferred; the
+  // guard makes the limit explicit and safe.
+  if (atom->natoms > static_cast<bigint>(std::numeric_limits<int>::max()))
+    error->all(FLERR,
+               "Pair style uma: multi-node global atom count {} exceeds the "
+               "int32 GP gather limit ({}); 64-bit GP is not yet supported",
+               atom->natoms, std::numeric_limits<int>::max());
   const int natoms_global = static_cast<int>(atom->natoms);
   if (natoms_global <= 0)
     error->all(FLERR, "Pair style uma: bad global atom count");
@@ -495,101 +506,185 @@ void PairUMA::teardown_peer()
   mpi_peer.reset();
 }
 
-void PairUMA::load_predictor()
+// A5 (audit rev 26 §G.18.6): the single-tile compute-device pick, moved verbatim
+// out of load_predictor() into a file-local helper. Returns the torch::Device the
+// traced Predictor is constructed on; keeps the parsing/binding logic (identical
+// to the pre-split code) in one place. `me`/`screen` are threaded in so the helper
+// stays free of PairUMA internals; behaviour is byte-for-byte unchanged.
+namespace {
+torch::Device uma_select_compute_device(int me, FILE *screen)
 {
-  predictor.reset();
-  teardown_peer();  // P0'.5: was an un-hardened `if(mpi_peer)MPI_Barrier` here
+#if defined(UMA_ENGINE_USE_XPU)
+  // Intel XPU (Aurora): one tile per MPI rank. With ZE_AFFINITY_MASK pinning
+  // one tile per rank, device_count()==1 and index 0 is correct; otherwise
+  // bind local_rank % ndev. (Eager UMA_EAGER_CKPT path picks XPU in-worker.)
+  if (at::hasXPU() && torch::xpu::is_available()) {
+    int local_rank = me;
+    for (const char *v : {"PMI_LOCAL_RANK", "PALS_LOCAL_RANKID",
+                          "SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
+                          "MPI_LOCALRANKID", "LOCAL_RANK"}) {
+      const char *lr = std::getenv(v);
+      if (lr == nullptr || *lr == '\0') continue;
+      char *end = nullptr;
+      const long parsed = std::strtol(lr, &end, 10);
+      if (end == lr || *end != '\0' || parsed < 0) continue;
+      local_rank = static_cast<int>(parsed);
+      break;
+    }
+    const int ndev = static_cast<int>(torch::xpu::device_count());
+    const int idx = (ndev > 0 && local_rank >= 0) ? (local_rank % ndev) : 0;
+    if (screen)
+      fprintf(screen, "uma: rank %d -> xpu:%d (of %d visible)\n", me, idx, ndev);
+    return torch::Device(torch::kXPU, static_cast<c10::DeviceIndex>(idx));
+  }
+  return torch::Device(torch::kCPU);
+#else
+  if (torch::cuda::is_available()) {
+    // M0 (multi-node): bind one GPU per MPI rank. A bare
+    // torch::Device(torch::kCUDA) means index 0, so every rank on a node
+    // would pile onto GPU 0 -- N-way oversubscription and N x the memory on
+    // one card, while the other GPUs idle.
+    //
+    // Prefer the launcher's local-rank hint; fall back to me. When
+    // the launcher already pins one GPU per task (srun --gpus-per-task=1),
+    // device_count() is 1 and the modulo correctly yields index 0.
+    int local_rank = me;
+    for (const char *v : {"SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
+                          "MV2_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
+      const char *lr = std::getenv(v);
+      if (lr == nullptr || *lr == '\0') continue;
+      // strtol, not atoi: atoi cannot distinguish "abc" from "0", which
+      // would silently bind every rank to cuda:0.
+      char *end = nullptr;
+      const long parsed = std::strtol(lr, &end, 10);
+      if (end == lr || *end != '\0' || parsed < 0) {
+        if (me == 0 && screen)
+          fprintf(screen, "uma: ignoring malformed %s='%s'\n", v, lr);
+        continue;
+      }
+      local_rank = static_cast<int>(parsed);
+      break;
+    }
+    const int ndev = static_cast<int>(torch::cuda::device_count());
+    // Clamp defensively: a negative local_rank would yield a negative
+    // device index, and ndev==0 would divide by zero.
+    const int idx = (ndev > 0 && local_rank >= 0) ? (local_rank % ndev) : 0;
+    // Every rank prints: the whole point is to confirm ranks land on
+    // DIFFERENT GPUs, which a rank-0-only message cannot show.
+    if (screen)
+      fprintf(screen, "uma: rank %d -> cuda:%d (of %d visible)\n", me, idx, ndev);
+    return torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(idx));
+  }
+  return torch::Device(torch::kCPU);
+#endif  // UMA_ENGINE_USE_XPU
+}
+}  // namespace
 
+// A5 (audit rev 26 §G.18.6): the GP-over-MPI (multi-node edge-parallel) peer
+// construction, moved verbatim out of load_predictor(). Returns true when it
+// handled predictor construction (nprocs>1 and not DD), so the caller returns
+// early; false when the single-tile path below should run. Byte-for-byte the
+// same logic and error handling as the pre-split inline block.
+bool PairUMA::init_mpi_peer()
+{
   // Spatial DD: every rank runs the SINGLE-TILE predictor on its own subdomain
   // (owned+ghost). Do NOT build the GP-over-MPI peer even though nprocs>1; DD is
-  // a different decomposition (spatial, not edge-sharded). Fall through to the
-  // single-tile predictor construction below.
-  if (dd_active_) {
-    // (single-tile predictor built below)
-  } else if (comm->nprocs > 1) {
+  // a different decomposition (spatial, not edge-sharded).
+  if (dd_active_ || comm->nprocs <= 1) return false;
+
   // ---- multi-node edge-parallel: one MpiPeerPredictor per MPI rank ---------
   // Triggered by nprocs > 1. Each rank owns one GPU and evaluates 1/world of
   // the graph; NCCL (bootstrapped over MPI) does the force all-reduce. Only model
   // ACTIVATIONS are ~O(N/world); the assembled system + Allgather comm are O(N)
   // per rank (G.4). The activation saving lets systems too big for one GPU's
   // activation memory run across nodes (full O(N/world) is the DD path's goal).
-    if (precision != PRECISION_DOUBLE)
-      error->all(FLERR, "Pair style uma: multi-node requires precision double");
-    try {
-      const int mn_w = comm->nprocs;   // world SIZE (not the MPI_Comm `world`)
-      const int rank = comm->me;
+  if (precision != PRECISION_DOUBLE)
+    error->all(FLERR, "Pair style uma: multi-node requires precision double");
+  try {
+    const int mn_w = comm->nprocs;   // world SIZE (not the MPI_Comm `world`)
+    const int rank = comm->me;
 
-      // GPUs per node: env override else default (Polaris = 4).
-      gpus_per_node = 4;
-      if (const char *e = std::getenv("UMA_GPUS_PER_NODE")) {
-        const int v = atoi(e);
-        if (v >= 1) gpus_per_node = v;
-      }
-      // Local rank for device binding: launcher hint else me % gpus_per_node.
-      int local_rank = comm->me % gpus_per_node;
-      for (const char *v : {"PMI_LOCAL_RANK", "SLURM_LOCALID",
-                            "OMPI_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
-        const char *lr = std::getenv(v);
-        if (lr == nullptr || *lr == '\0') continue;
-        char *end = nullptr;
-        const long parsed = std::strtol(lr, &end, 10);
-        if (end == lr || *end != '\0' || parsed < 0) continue;
-        local_rank = static_cast<int>(parsed);
-        break;
-      }
-#if defined(UMA_ENGINE_USE_XPU)
-      // XPU: one tile per rank via ZE_AFFINITY_MASK (masked view -> index 0).
-      const int device_index = 0;
-#else
-      const int ndev =
-          torch::cuda::is_available() ? static_cast<int>(torch::cuda::device_count()) : 0;
-      // When the launcher pins one GPU per rank (CUDA_VISIBLE_DEVICES), ndev==1
-      // and device_index 0 is correct; otherwise bind local_rank % ndev.
-      const int device_index = (ndev > 1) ? (local_rank % ndev) : 0;
-#endif
-
-      // Load metadata (all ranks) for cutoff + normalizer + refs.
-      auto metadata = uma::load_artifact_metadata(artifact_dir + "/metadata.json");
-      cutoff = metadata.cutoff;
-
-#if defined(UMA_ENGINE_USE_XPU)
-      // XPU transport (host-staged MPI or XCCL) bootstraps over MPI_COMM_WORLD;
-      // no NCCL unique-id exchange needed.
-      mpi_peer = uma::MpiPeerPredictor::create(
-                     artifact_dir, metadata, mn_w, rank, device_index,
-                     /*nccl_unique_id=*/nullptr, torch::kFloat64);
-#else
-      // NCCL id: rank 0 generates, MPI_Bcast to all, then collective create.
-      const size_t id_bytes = uma::MpiPeerPredictor::nccl_unique_id_bytes();
-      if (id_bytes == 0)
-        error->all(FLERR, "Pair style uma: engine built without NCCL (multi-node)");
-      std::vector<char> nccl_id(id_bytes, 0);
-      if (rank == 0) uma::MpiPeerPredictor::make_nccl_unique_id(nccl_id.data());
-      MPI_Bcast(nccl_id.data(), static_cast<int>(id_bytes), MPI_BYTE, 0, world);
-
-      mpi_peer = uma::MpiPeerPredictor::create(
-                     artifact_dir, metadata, mn_w, rank, device_index,
-                     nccl_id.data(), torch::kFloat64);
-#endif
-      if (screen)
-        fprintf(screen,
-                "uma: rank %d -> multi-node peer (world=%d local_rank=%d dev=%d)\n",
-                rank, mn_w, local_rank, device_index);
-      utils::logmesg(lmp,
-                     "Pair uma: multi-node edge-parallel, world={} artifact '{}' "
-                     "cutoff={:.3f} precision=double\n",
-                     mn_w, artifact_dir, cutoff);
-      return;
-    } catch (const LAMMPSException &) {
-      // P0'.5: a LAMMPS error thrown inside this try (e.g. error->all above) is
-      // already the correct collective/abort path. Do NOT swallow it into
-      // error->one below (that would turn a clean collective abort into a ragged
-      // MPI_Abort with a misleading "Failed to init peer" message). Rethrow.
-      throw;
-    } catch (const std::exception &e) {
-      error->one(FLERR, "Failed to init UMA multi-node peer: {}", e.what());
+    // GPUs per node: env override else default (Polaris = 4).
+    gpus_per_node = 4;
+    if (const char *e = std::getenv("UMA_GPUS_PER_NODE")) {
+      const int v = atoi(e);
+      if (v >= 1) gpus_per_node = v;
     }
+    // Local rank for device binding: launcher hint else me % gpus_per_node.
+    int local_rank = comm->me % gpus_per_node;
+    for (const char *v : {"PMI_LOCAL_RANK", "SLURM_LOCALID",
+                          "OMPI_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
+      const char *lr = std::getenv(v);
+      if (lr == nullptr || *lr == '\0') continue;
+      char *end = nullptr;
+      const long parsed = std::strtol(lr, &end, 10);
+      if (end == lr || *end != '\0' || parsed < 0) continue;
+      local_rank = static_cast<int>(parsed);
+      break;
+    }
+#if defined(UMA_ENGINE_USE_XPU)
+    // XPU: one tile per rank via ZE_AFFINITY_MASK (masked view -> index 0).
+    const int device_index = 0;
+#else
+    const int ndev =
+        torch::cuda::is_available() ? static_cast<int>(torch::cuda::device_count()) : 0;
+    // When the launcher pins one GPU per rank (CUDA_VISIBLE_DEVICES), ndev==1
+    // and device_index 0 is correct; otherwise bind local_rank % ndev.
+    const int device_index = (ndev > 1) ? (local_rank % ndev) : 0;
+#endif
+
+    // Load metadata (all ranks) for cutoff + normalizer + refs.
+    auto metadata = uma::load_artifact_metadata(artifact_dir + "/metadata.json");
+    cutoff = metadata.cutoff;
+
+#if defined(UMA_ENGINE_USE_XPU)
+    // XPU transport (host-staged MPI or XCCL) bootstraps over MPI_COMM_WORLD;
+    // no NCCL unique-id exchange needed.
+      mpi_peer = uma::MpiPeerPredictor::create(
+                     artifact_dir, metadata, mn_w, rank, device_index,
+                     /*nccl_unique_id=*/nullptr, torch::kFloat64,
+                     /*comm_f=*/MPI_Comm_c2f(world));  // P7.1: LAMMPS world
+#else
+    // NCCL id: rank 0 generates, MPI_Bcast to all, then collective create.
+    const size_t id_bytes = uma::MpiPeerPredictor::nccl_unique_id_bytes();
+    if (id_bytes == 0)
+      error->all(FLERR, "Pair style uma: engine built without NCCL (multi-node)");
+    std::vector<char> nccl_id(id_bytes, 0);
+    if (rank == 0) uma::MpiPeerPredictor::make_nccl_unique_id(nccl_id.data());
+    MPI_Bcast(nccl_id.data(), static_cast<int>(id_bytes), MPI_BYTE, 0, world);
+
+      mpi_peer = uma::MpiPeerPredictor::create(
+                     artifact_dir, metadata, mn_w, rank, device_index,
+                     nccl_id.data(), torch::kFloat64,
+                     /*comm_f=*/MPI_Comm_c2f(world));  // P7.1: LAMMPS world
+#endif
+    if (screen)
+      fprintf(screen,
+              "uma: rank %d -> multi-node peer (world=%d local_rank=%d dev=%d)\n",
+              rank, mn_w, local_rank, device_index);
+    utils::logmesg(lmp,
+                   "Pair uma: multi-node edge-parallel, world={} artifact '{}' "
+                   "cutoff={:.3f} precision=double\n",
+                   mn_w, artifact_dir, cutoff);
+    return true;
+  } catch (const LAMMPSException &) {
+    // P0'.5: a LAMMPS error thrown inside this try (e.g. error->all above) is
+    // already the correct collective/abort path. Do NOT swallow it into
+    // error->one below (that would turn a clean collective abort into a ragged
+    // MPI_Abort with a misleading "Failed to init peer" message). Rethrow.
+    throw;
+  } catch (const std::exception &e) {
+    error->one(FLERR, "Failed to init UMA multi-node peer: {}", e.what());
   }
+  return true;  // nprocs>1 non-DD: this path owns construction either way
+}
+
+void PairUMA::load_predictor()
+{
+  predictor.reset();
+  teardown_peer();  // P0'.5: was an un-hardened `if(mpi_peer)MPI_Barrier` here
+
+  if (init_mpi_peer()) return;  // A5: multi-node edge-parallel peer built
 
   try {
     if (!devices_explicit) {
@@ -605,76 +700,10 @@ void PairUMA::load_predictor()
     }
 
     // For devices>1 fork the GP worker before any parent CUDA init.
-    torch::Device device = torch::Device(torch::kCPU);
-    if (num_devices <= 1) {
-#if defined(UMA_ENGINE_USE_XPU)
-      // Intel XPU (Aurora): one tile per MPI rank. With ZE_AFFINITY_MASK pinning
-      // one tile per rank, device_count()==1 and index 0 is correct; otherwise
-      // bind local_rank % ndev. (Eager UMA_EAGER_CKPT path picks XPU in-worker.)
-      if (at::hasXPU() && torch::xpu::is_available()) {
-        int local_rank = comm->me;
-        for (const char *v : {"PMI_LOCAL_RANK", "PALS_LOCAL_RANKID",
-                              "SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
-                              "MPI_LOCALRANKID", "LOCAL_RANK"}) {
-          const char *lr = std::getenv(v);
-          if (lr == nullptr || *lr == '\0') continue;
-          char *end = nullptr;
-          const long parsed = std::strtol(lr, &end, 10);
-          if (end == lr || *end != '\0' || parsed < 0) continue;
-          local_rank = static_cast<int>(parsed);
-          break;
-        }
-        const int ndev = static_cast<int>(torch::xpu::device_count());
-        const int idx = (ndev > 0 && local_rank >= 0) ? (local_rank % ndev) : 0;
-        device = torch::Device(torch::kXPU, static_cast<c10::DeviceIndex>(idx));
-        if (screen)
-          fprintf(screen, "uma: rank %d -> xpu:%d (of %d visible)\n",
-                  comm->me, idx, ndev);
-      } else {
-        device = torch::Device(torch::kCPU);
-      }
-#else
-      if (torch::cuda::is_available()) {
-        // M0 (multi-node): bind one GPU per MPI rank. A bare
-        // torch::Device(torch::kCUDA) means index 0, so every rank on a node
-        // would pile onto GPU 0 -- N-way oversubscription and N x the memory on
-        // one card, while the other GPUs idle.
-        //
-        // Prefer the launcher's local-rank hint; fall back to comm->me. When
-        // the launcher already pins one GPU per task (srun --gpus-per-task=1),
-        // device_count() is 1 and the modulo correctly yields index 0.
-        int local_rank = comm->me;
-        for (const char *v : {"SLURM_LOCALID", "OMPI_COMM_WORLD_LOCAL_RANK",
-                              "MV2_COMM_WORLD_LOCAL_RANK", "LOCAL_RANK"}) {
-          const char *lr = std::getenv(v);
-          if (lr == nullptr || *lr == '\0') continue;
-          // strtol, not atoi: atoi cannot distinguish "abc" from "0", which
-          // would silently bind every rank to cuda:0.
-          char *end = nullptr;
-          const long parsed = std::strtol(lr, &end, 10);
-          if (end == lr || *end != '\0' || parsed < 0) {
-            if (comm->me == 0 && screen)
-              fprintf(screen, "uma: ignoring malformed %s='%s'\n", v, lr);
-            continue;
-          }
-          local_rank = static_cast<int>(parsed);
-          break;
-        }
-        const int ndev = static_cast<int>(torch::cuda::device_count());
-        // Clamp defensively: a negative local_rank would yield a negative
-        // device index, and ndev==0 would divide by zero.
-        const int idx = (ndev > 0 && local_rank >= 0) ? (local_rank % ndev) : 0;
-        device = torch::Device(torch::kCUDA, static_cast<c10::DeviceIndex>(idx));
-        // Every rank prints: the whole point is to confirm ranks land on
-        // DIFFERENT GPUs, which a rank-0-only message cannot show.
-        if (screen)
-          fprintf(screen, "uma: rank %d -> cuda:%d (of %d visible)\n",
-                  comm->me, idx, ndev);
-      } else {
-        device = torch::Device(torch::kCPU);
-      }
-#endif  // UMA_ENGINE_USE_XPU
-    }
+    // A5: single-tile device pick is now uma_select_compute_device() (same logic).
+    torch::Device device = (num_devices <= 1)
+                               ? uma_select_compute_device(comm->me, screen)
+                               : torch::Device(torch::kCPU);
     predictor = std::make_unique<uma::Predictor>(
         uma::Predictor::from_artifact(artifact_dir, device, num_devices));
     if (num_devices <= 1 && predictor->device().is_cuda()) {
@@ -790,7 +819,10 @@ void PairUMA::init_style()
                  "Pair style uma: UMA_DD requires a k=4 DD artifact with "
                  "dd_halo_width in metadata (export with UMA_DD_HALO=1)");
     comm_forward = w;
-    comm_reverse = w;
+    // A2/S2: the same reverse buffer also carries the [nall,3] ghost-force
+    // reverse_comm at the end of run_compute_dd, so it must be at least 3 wide.
+    // dd_halo_width is O(1000), but assert rather than assume.
+    comm_reverse = (w > 3) ? w : 3;
     if (comm->me == 0 && screen)
       fprintf(screen, "uma DD: halo comm width = %d doubles/atom\n", w);
   } else {
@@ -1033,34 +1065,7 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   if (dd_dbg && screen)
     fprintf(screen, "uma DD[%d]: build_dd_graph E=%lld (cap=%lld)\n",
             comm->me, (long long) E, (long long) edge_cap);
-  if (edge_cap > 0) {
-    if (E > edge_cap)
-      error->one(FLERR,
-                 "Pair style uma: UMA_DD real edge count exceeds UMA_DD_EDGE_CAP "
-                 "(raise the cap and re-export the artifact traced at that cap)");
-    const int64_t old = E;
-    dd_edge_index_.resize(static_cast<size_t>(2) * edge_cap);
-    // dd_edge_index_ is stored row-major [2,E]: row0 at [0,E), row1 at [E,2E).
-    // Rebuild as [2,edge_cap] keeping real edges then dummy self-loops.
-    std::vector<int64_t> ei(static_cast<size_t>(2) * edge_cap);
-    for (int64_t k = 0; k < old; k++) {
-      ei[k] = dd_edge_index_[k];                       // row0 real
-      ei[edge_cap + k] = dd_edge_index_[old + k];      // row1 real
-    }
-    // Padded edges MUST be inert: neighbor=atom 0 (a real node), center=dummy.
-    // The dummy sits at (far,far,far), so edge_distance = |pos[dummy]-pos[0]| >>
-    // cutoff -> radial envelope = 0 -> zero message. Center is the dummy, whose
-    // energy/force are discarded (excluded from owned sum). A dummy->dummy
-    // SELF-LOOP would have edge_distance = 0 (NOT > cutoff): r=0 poisons the edge
-    // basis (SO2/envelope) and corrupts the whole batch -- that was the bug.
-    for (int64_t k = old; k < edge_cap; k++) {
-      ei[k] = 0;                                       // row0 = neighbor = atom 0
-      ei[edge_cap + k] = dummy;                        // row1 = center = dummy (far)
-    }
-    dd_edge_index_.swap(ei);
-    dd_cell_offsets_.assign(static_cast<size_t>(edge_cap) * 3, 0.0);
-    E = edge_cap;
-  }
+  if (edge_cap > 0) E = pad_dd_edges(E, edge_cap, dummy);   // A5: P2.1 padding
 
   if (dd_dbg && screen)
     fprintf(screen, "uma DD[%d]: padded E=%lld; calling predict_host_extgraph_dd\n",
@@ -1075,15 +1080,10 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
       dd_edge_index_.data(), dd_cell_offsets_.data(),
       dd_energy_.data(), dd_force_.data());
 
-  // Keep forces for OWNED atoms only (rows [0,nlocal); ghosts [nlocal,nall) and
-  // the dummy node [nall] are discarded). Under k=4 the halo-exchange BACKWARD
-  // (reverse comm) already delivered each ghost's force contribution back to its
-  // owner during autograd, so an owned atom's force here is complete and exact.
-  for (int i = 0; i < nlocal; i++) {
-    f[i][0] += dd_force_[3 * i + 0];
-    f[i][1] += dd_force_[3 * i + 1];
-    f[i][2] += dd_force_[3 * i + 2];
-  }
+  // A2/S2 FIX (audit rev 26 §G.18.6): ghost force rows carry real cross-rank
+  // contributions and must be reverse-comm'd onto their owners before use.
+  // See reduce_dd_ghost_forces() for the full derivation of the cos=0.644 bug.
+  reduce_dd_ghost_forces(nlocal, nall, f);
 
   // Energy: each rank contributes its OWNED-atom energy sum. predict_body_dd
   // returned Prediction.energy = sum(node_energy[0:nlocal]) using the per-atom
@@ -1093,6 +1093,95 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   // scalar. dd_energy_ holds per-node energy for optional per-atom output later.
   if (eflag_global) eng_vdwl += result.energy;
   (void) vflag;
+}
+
+/* ----------------------------------------------------------------------
+   A2/S2 FIX (audit rev 26 §G.18.6) — THE DD FORCE BUG (cos = 0.644).
+
+   The old code kept force rows [0,nlocal) and DISCARDED rows [nlocal,nall), on
+   the premise (stated in a comment) that "the halo-exchange BACKWARD already
+   delivered each ghost's force contribution back to its owner". **That premise
+   is false.** The halo reverse exchange transports FEATURE-space gradients
+   (d/d x_message) between ranks; it says nothing about POSITION gradients.
+
+   `pos_grad` in predict_body_dd() is a rank-LOCAL leaf, and the backprop root is
+   this rank's owned-energy sum E_ownedA = sum_{i<nlocal} node_e[i]. Its gradient
+   is -dE_ownedA/dx_j for EVERY node j the graph touched -- ghosts included. But
+   the true force on an owned atom i is
+
+       F_i = -dE_global/dx_i,     E_global = sum_ranks E_owned(rank)
+
+   so rank A is missing dE_ownedB/dx_i for every OTHER rank B on which i appears
+   as a ghost. Those cross-rank terms are exactly the ghost rows being discarded:
+   every atom was missing all of its neighbouring ranks' energy contributions.
+
+   This also explains the diagnostic that made no sense before: turning the halo
+   ON made forces WORSE (cos 0.803 -> 0.644). A working halo makes E_ownedA
+   depend MORE strongly on ghost positions, so a LARGER, more physically real
+   force term was thrown away. Every DD primitive passed its own self-test
+   because the defect is in the composition, not in any primitive.
+
+   LAMMPS' reverse_comm is precisely the required transpose: it ADDS each ghost
+   row onto its owner, across ranks, reusing the already-validated
+   pack_reverse_comm/unpack_reverse_comm pair. The dummy pad node (index nall) is
+   local-only and never a ghost, so it is excluded naturally.
+------------------------------------------------------------------------- */
+void PairUMA::reduce_dd_ghost_forces(int nlocal, int nall, double **f)
+{
+  // Stage [nall,3] into the halo buffer and let comm add ghost rows to owners.
+  dd_fbuf_.assign(static_cast<size_t>(nall) * 3, 0.0);
+  for (int i = 0; i < nall; i++) {
+    dd_fbuf_[3 * i + 0] = dd_force_[3 * i + 0];
+    dd_fbuf_[3 * i + 1] = dd_force_[3 * i + 1];
+    dd_fbuf_[3 * i + 2] = dd_force_[3 * i + 2];
+  }
+  halo_buf_ = dd_fbuf_.data();
+  halo_per_node_ = 3;
+  comm->reverse_comm(this, 3);   // ghost rows ACCUMULATE onto owner rows
+  halo_buf_ = nullptr;
+  halo_per_node_ = 0;
+  // Owned rows now carry (local term + every remote rank's ghost term).
+  for (int i = 0; i < nlocal; i++) {
+    f[i][0] += dd_fbuf_[3 * i + 0];
+    f[i][1] += dd_fbuf_[3 * i + 1];
+    f[i][2] += dd_fbuf_[3 * i + 2];
+  }
+}
+
+/* ----------------------------------------------------------------------
+   A5 (audit rev 26 §G.18.6): P2.1 edge-padding, extracted verbatim from
+   run_compute_dd(). Pads dd_edge_index_ (row-major [2,E]) and dd_cell_offsets_
+   up to edge_cap with inert atom0->dummy edges and returns the padded count.
+   Identical arithmetic to the pre-split inline block.
+------------------------------------------------------------------------- */
+int64_t PairUMA::pad_dd_edges(int64_t E, int64_t edge_cap, int dummy)
+{
+  if (E > edge_cap)
+    error->one(FLERR,
+               "Pair style uma: UMA_DD real edge count exceeds UMA_DD_EDGE_CAP "
+               "(raise the cap and re-export the artifact traced at that cap)");
+  const int64_t old = E;
+  dd_edge_index_.resize(static_cast<size_t>(2) * edge_cap);
+  // dd_edge_index_ is stored row-major [2,E]: row0 at [0,E), row1 at [E,2E).
+  // Rebuild as [2,edge_cap] keeping real edges then dummy self-loops.
+  std::vector<int64_t> ei(static_cast<size_t>(2) * edge_cap);
+  for (int64_t k = 0; k < old; k++) {
+    ei[k] = dd_edge_index_[k];                       // row0 real
+    ei[edge_cap + k] = dd_edge_index_[old + k];      // row1 real
+  }
+  // Padded edges MUST be inert: neighbor=atom 0 (a real node), center=dummy.
+  // The dummy sits at (far,far,far), so edge_distance = |pos[dummy]-pos[0]| >>
+  // cutoff -> radial envelope = 0 -> zero message. Center is the dummy, whose
+  // energy/force are discarded (excluded from owned sum). A dummy->dummy
+  // SELF-LOOP would have edge_distance = 0 (NOT > cutoff): r=0 poisons the edge
+  // basis (SO2/envelope) and corrupts the whole batch -- that was the bug.
+  for (int64_t k = old; k < edge_cap; k++) {
+    ei[k] = 0;                                       // row0 = neighbor = atom 0
+    ei[edge_cap + k] = dummy;                        // row1 = center = dummy (far)
+  }
+  dd_edge_index_.swap(ei);
+  dd_cell_offsets_.assign(static_cast<size_t>(edge_cap) * 3, 0.0);
+  return edge_cap;
 }
 
 /* ----------------------------------------------------------------------

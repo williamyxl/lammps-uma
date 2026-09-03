@@ -155,7 +155,15 @@ struct BlockCheckpointFn
                                torch::Tensor edge_distance,
                                torch::Tensor atomic_numbers,
                                torch::Tensor edge_index,
-                               torch::Tensor sys_node_emb) {
+                                torch::Tensor sys_node_emb) {
+    // A3/G.5 item 4 (audit rev 26 §G.18.6): the module pointers threaded through
+    // ctx->saved_data (here "block", and "chunk_module"/"edgedeg_module" below)
+    // are NON-OWNING borrows of jit Modules owned by the Predictor for the whole
+    // predict() call. forward()+backward() run inside one autograd invocation, so
+    // the owner outlives backward's recompute. Stored as int64_t only because
+    // saved_data holds IValues; never freed here, never an autograd input.
+    TORCH_CHECK(block != nullptr,
+                "BlockCheckpointFn: null block module into saved_data");
     ctx->saved_data["block"] = reinterpret_cast<int64_t>(block);
     // Save ONLY the small precursors. Nothing edge-sized-huge is saved: wigner
     // ([E,25,25]) is recomputed inside the block, never an input here.
@@ -173,6 +181,9 @@ struct BlockCheckpointFn
       torch::autograd::tensor_list grad_outputs) {
     auto* block = reinterpret_cast<torch::jit::script::Module*>(
         ctx->saved_data["block"].toInt());
+    TORCH_CHECK(block != nullptr,
+                "BlockCheckpointFn::backward: block module lost across the "
+                "autograd boundary (owner freed before backward)");
     auto saved = ctx->get_saved_variables();
     // Detach + require grad on the FLOAT pos-derived inputs that need grads for
     // forces. atomic_numbers and edge_index are integer constants -> no grad.
@@ -258,6 +269,8 @@ struct ChunkCheckpointFn
                                torch::Tensor edge_index,
                                int64_t node_offset,
                                int64_t mole_start) {
+    TORCH_CHECK(chunk_module != nullptr,
+                "ChunkCheckpointFn: null chunk_module into saved_data");
     ctx->saved_data["chunk_module"] = reinterpret_cast<int64_t>(chunk_module);
     // Ints threaded via saved_data (NOT autograd inputs); the module forward
     // needs them in both the no_grad forward and the backward recompute.
@@ -281,6 +294,9 @@ struct ChunkCheckpointFn
       torch::autograd::tensor_list grad_outputs) {
     auto* chunk_module = reinterpret_cast<torch::jit::script::Module*>(
         ctx->saved_data["chunk_module"].toInt());
+    TORCH_CHECK(chunk_module != nullptr,
+                "ChunkCheckpointFn::backward: chunk_module lost across the "
+                "autograd boundary (owner freed before backward)");
     const int64_t node_offset = ctx->saved_data["node_offset"].toInt();
     const int64_t mole_start = ctx->saved_data["mole_start"].toInt();
     auto saved = ctx->get_saved_variables();
@@ -368,6 +384,8 @@ struct EdgeDegreeCheckpointFn
                                torch::Tensor edge_index,
                                int64_t node_offset,
                                int64_t mole_start) {
+    TORCH_CHECK(edgedeg_module != nullptr,
+                "EdgeDegCheckpointFn: null edgedeg_module into saved_data");
     ctx->saved_data["edgedeg_module"] =
         reinterpret_cast<int64_t>(edgedeg_module);
     // Ints threaded via saved_data (NOT autograd inputs); the module forward
@@ -392,6 +410,9 @@ struct EdgeDegreeCheckpointFn
       torch::autograd::tensor_list grad_outputs) {
     auto* edgedeg_module = reinterpret_cast<torch::jit::script::Module*>(
         ctx->saved_data["edgedeg_module"].toInt());
+    TORCH_CHECK(edgedeg_module != nullptr,
+                "EdgeDegCheckpointFn::backward: edgedeg_module lost across the "
+                "autograd boundary (owner freed before backward)");
     const int64_t node_offset = ctx->saved_data["node_offset"].toInt();
     const int64_t mole_start = ctx->saved_data["mole_start"].toInt();
     auto saved = ctx->get_saved_variables();

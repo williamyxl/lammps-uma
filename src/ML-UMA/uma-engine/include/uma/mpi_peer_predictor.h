@@ -28,10 +28,14 @@ class MpiPeerPredictor {
   /// Collective across all W ranks (each calls ncclCommInitRank). The NCCL
   /// unique id must have been generated on rank 0 and MPI_Bcast to every rank
   /// BEFORE calling this (nccl_unique_id points at unique_id_bytes() bytes).
+  // P7.1 (audit rev 26 §G.18.6 / A8): comm_f is a Fortran MPI handle
+  // (MPI_Comm_c2f) for the XCCL KVS rendezvous; 0 = MPI_COMM_WORLD (historical
+  // default). Pass the LAMMPS `world` so -partition / library / MDI bootstrap on
+  // the correct communicator. Ignored on the NCCL path (id already broadcast).
   static std::unique_ptr<MpiPeerPredictor> create(
       const std::string& artifact_dir, const ArtifactMetadata& metadata,
       int world, int rank, int device_index, const void* nccl_unique_id,
-      torch::ScalarType compute_dtype);
+      torch::ScalarType compute_dtype, int comm_f = 0);
 
   /// Size (bytes) of the opaque NCCL id the caller must broadcast.
   static size_t nccl_unique_id_bytes();

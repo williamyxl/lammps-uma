@@ -26,7 +26,16 @@ struct CheckpointModuleFn
                                torch::Tensor pos, torch::Tensor z,
                                torch::Tensor cell, torch::Tensor pbc,
                                torch::Tensor eidx, torch::Tensor coff,
-                               torch::Tensor charge, torch::Tensor spin) {
+                                torch::Tensor charge, torch::Tensor spin) {
+    // A3/G.5 item 4 (audit rev 26 §G.18.6): lifetime contract for the smuggled
+    // module pointer. `module` is a NON-OWNING borrow of a torch::jit::Module
+    // owned by the Predictor for the whole predict() call. forward() and
+    // backward() both run inside that single autograd invocation, so the module
+    // is guaranteed live when backward() recomputes through it. It is passed as
+    // int64_t only because AutogradContext::saved_data holds IValues, not raw
+    // pointers; it is NEVER freed here and MUST NOT be an autograd input.
+    TORCH_CHECK(module != nullptr,
+                "CheckpointModuleFn: null module pointer into saved_data");
     ctx->saved_data["module"] = reinterpret_cast<int64_t>(module);
     ctx->save_for_backward({pos, z, cell, pbc, eidx, coff, charge, spin});
     torch::NoGradGuard no_grad;  // do not retain the forward graph
@@ -40,6 +49,9 @@ struct CheckpointModuleFn
       torch::autograd::tensor_list grad_outputs) {
     auto* module = reinterpret_cast<torch::jit::script::Module*>(
         ctx->saved_data["module"].toInt());
+    TORCH_CHECK(module != nullptr,
+                "CheckpointModuleFn::backward: module pointer lost across the "
+                "autograd boundary (owner freed before backward)");
     auto saved = ctx->get_saved_variables();
     auto pos = saved[0].detach().set_requires_grad(true);
     auto z = saved[1], cell = saved[2], pbc = saved[3];

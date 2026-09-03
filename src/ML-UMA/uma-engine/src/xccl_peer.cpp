@@ -54,9 +54,13 @@ ccl::datatype ccl_dtype(c10::ScalarType t) {
 
 class XcclPeerImpl final : public XcclPeer {
  public:
-  XcclPeerImpl(int rank, int world, int device_index)
+  XcclPeerImpl(int rank, int world, int device_index, int comm_f)
       : rank_(rank), world_(world) {
     (void)device_index;
+    // P7.1: 0 -> MPI_COMM_WORLD (historical); else convert the Fortran handle to
+    // the caller's real communicator so the KVS rendezvous runs on the LAMMPS
+    // world under -partition / library / MDI.
+    boot_comm_ = (comm_f == 0) ? MPI_COMM_WORLD : MPI_Comm_f2c(comm_f);
     static std::once_flag ccl_init_once;
     std::call_once(ccl_init_once, [] { ccl::init(); });
 
@@ -76,10 +80,10 @@ class XcclPeerImpl final : public XcclPeer {
       kvs = ccl::create_main_kvs();
       addr = kvs->get_address();
       MPI_Bcast(addr.data(), static_cast<int>(addr.size()), MPI_BYTE, 0,
-                MPI_COMM_WORLD);
+                boot_comm_);
     } else {
       MPI_Bcast(addr.data(), static_cast<int>(addr.size()), MPI_BYTE, 0,
-                MPI_COMM_WORLD);
+                boot_comm_);
       kvs = ccl::create_kvs(addr);
     }
 
@@ -140,6 +144,7 @@ class XcclPeerImpl final : public XcclPeer {
  private:
   int rank_;
   int world_;
+  MPI_Comm boot_comm_ = MPI_COMM_WORLD;  // P7.1: KVS rendezvous comm
   sycl::device sycl_dev_;
   sycl::context sycl_ctx_;
   sycl::queue* queue_ = nullptr;
@@ -148,8 +153,8 @@ class XcclPeerImpl final : public XcclPeer {
 };
 
 std::shared_ptr<XcclPeer> XcclPeer::create(int rank, int world,
-                                           int device_index) {
-  return std::make_shared<XcclPeerImpl>(rank, world, device_index);
+                                           int device_index, int comm_f) {
+  return std::make_shared<XcclPeerImpl>(rank, world, device_index, comm_f);
 }
 
 void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,

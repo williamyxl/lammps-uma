@@ -44,9 +44,17 @@ namespace kokkos_peer {
 class SharedPeerGatherSlot {
  public:
   static constexpr size_t kMaxBytesPerRank = 256ull * 1024ull * 1024ull;
+  // Transport ids. A7 (audit rev 26 §G.18.6): the numbering has a deliberate gap
+  // at id 3 (a retired shm-bootstrap NCCL variant) — kept reserved rather than
+  // renumbered so any artifact/log that recorded a numeric transport stays
+  // unambiguous. transport_name() below maps every LIVE id; ids 0/1/2 are the
+  // CPU/CUDA transports (exercised by kokkos_peer_smoke + test_transport_table),
+  // id 4 (XCCL) is the sole XPU production transport. select_transport() never
+  // returns 3.
   static constexpr int kTransportShm = 0;
   static constexpr int kTransportCudaIpc = 1;
   static constexpr int kTransportNccl = 2;
+  // (id 3 reserved — retired shm-bootstrap NCCL path; do not reuse.)
   // Native oneCCL (XCCL) on-device collectives (XPU). KVS bootstrap over MPI;
   // data path stays on device (Level-Zero IPC). Sole inter-tile transport on XPU.
   static constexpr int kTransportXccl = 4;
@@ -164,21 +172,22 @@ class SharedPeerGatherSlot {
   Shm* raw() { return shm_; }
   int transport() const { return shm_ ? shm_->transport : kTransportShm; }
 
-  void destroy() {
-    release_nccl();
-    release_cuda_ipc();
-    if (!shm_) {
-      delete this;
-      return;
-    }
-    if (owns_) {
-      pthread_mutex_destroy(&shm_->mu);
-      pthread_cond_destroy(&shm_->cv);
-      munmap(shm_, map_bytes_);
-    }
-    shm_ = nullptr;
-    delete this;
-  }
+  // A3/G.5 item 3 (audit rev 26 §G.18.6): the slot owns process-shared OS
+  // resources (an mmap segment + pthread primitives when owns_) and remote
+  // CUDA-IPC/NCCL handles. Copying it would double-free those on the second
+  // teardown; there is no sane copy of an mmap-backed control block, so both
+  // copy and move are deleted. Lifetime is single-owner via create()/attach()
+  // (heap) + destroy() (which now routes through the destructor), or via the
+  // destructor directly for a stack instance. This removes the "manual delete
+  // this with hand-inlined cleanup" hazard the ASAN harness guards against.
+  SharedPeerGatherSlot(const SharedPeerGatherSlot&) = delete;
+  SharedPeerGatherSlot& operator=(const SharedPeerGatherSlot&) = delete;
+  SharedPeerGatherSlot(SharedPeerGatherSlot&&) = delete;
+  SharedPeerGatherSlot& operator=(SharedPeerGatherSlot&&) = delete;
+
+  ~SharedPeerGatherSlot() { release_resources_(); }
+
+  void destroy() { delete this; }
 
   // Under the MPI bootstrap there is no shm segment, so fall back to the
   // world recorded at init_nccl_external time.
@@ -333,10 +342,12 @@ class SharedPeerGatherSlot {
   // (rank 0 create_main_kvs + MPI_Bcast address; others create_kvs). The
   // XcclPeer owns the SYCL device/context/stream + ccl::communicator and runs
   // on-device allreduce/allgatherv (no host staging).
+  // P7.1: comm_f = Fortran MPI handle (MPI_Comm_c2f) for the KVS rendezvous; 0 =
+  // MPI_COMM_WORLD (historical). Threaded down to XcclPeer::create.
   void init_xccl_external(int rank, int world, const void* /*unused*/,
-                          int device_index) {
+                          int device_index, int comm_f = 0) {
 #if !defined(UMA_ENGINE_USE_XCCL)
-    (void)rank; (void)world; (void)device_index;
+    (void)rank; (void)world; (void)device_index; (void)comm_f;
     throw std::runtime_error("SharedPeerGatherSlot: xccl requested without XCCL");
 #else
     if (rank < 0 || world < 1 || rank >= world) {
@@ -344,7 +355,7 @@ class SharedPeerGatherSlot {
     }
     my_rank_ = rank;
     external_world_ = world;
-    xccl_ = XcclPeer::create(rank, world, device_index);  // KVS-over-MPI inside
+    xccl_ = XcclPeer::create(rank, world, device_index, comm_f);  // KVS-over-MPI
     xccl_ready_ = true;
     std::cerr << "SharedPeerGatherSlot: xccl(on-device) ready rank=" << rank
               << " world=" << world << " dev=" << device_index << "\n";
@@ -575,6 +586,21 @@ class SharedPeerGatherSlot {
  private:
   SharedPeerGatherSlot(Shm* shm, size_t map_bytes, bool owns)
       : shm_(shm), map_bytes_(map_bytes), owns_(owns) {}
+
+  // Idempotent teardown shared by ~SharedPeerGatherSlot() and destroy().
+  // Releases remote handles first, then (only when we own it) the pthread
+  // primitives and the mmap segment. Safe to call on an already-released slot.
+  void release_resources_() {
+    release_nccl();
+    release_cuda_ipc();
+    if (!shm_) return;
+    if (owns_) {
+      pthread_mutex_destroy(&shm_->mu);
+      pthread_cond_destroy(&shm_->cv);
+      munmap(shm_, map_bytes_);
+    }
+    shm_ = nullptr;
+  }
 
   static void init_sync_primitives_(Shm* shm) {
     pthread_mutexattr_t mattr;
