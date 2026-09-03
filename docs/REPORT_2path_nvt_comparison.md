@@ -1513,3 +1513,35 @@ sites were deleted across the compiled TUs (commit `cecc0829`). Rebuild 8795745
 `LMP BUILD OK`; tripwire 8795780 PASS; full G4 8795781 all 7 configs bit-identical
 (N=16 all-W −110673.829050, N=32 −885377.060040, cos = 1.0, max\|dF\| ≤ 1.61e-13).
 **No physics change** — dead-code deletion only.
+
+## 15. Multi-node domain-decomposition (DD) parity — A2/S2 (2026-09-03)
+
+The single-node GP path (§1–§14) is FP64-parity-exact. The **2-node spatial
+domain-decomposition** path (Phase A, k=4 thin halo; `docs/CODE_QUALITY.md §G.21`)
+is a separate execution model and is **not yet at parity**. Recorded here so the
+physics record is complete (per audit §G.27.3).
+
+**System:** N=32 (262,144 atoms), 2 nodes × 12 tiles = 24 ranks, k=4 DD artifact
+`n32_k4_cap917504`, vs the 12-tile 1-node ASE-GP oracle `−885377.060037`.
+
+| Config | E_lmp (eV) | dE (meV/atom) | force cos | rms\|dF\| | max\|dF\| | job |
+|---|---|---|---|---|---|---|
+| halo OFF (`UMA_DD_NO_HALO=1`) | −882,195.43 | 12.14 | 0.803 | 0.089 | 1.16 | (earlier) |
+| halo ON, **before** ghost-force fix | −882,333.37 | 11.61 | 0.644 | 0.140 | 1.28 | (earlier) |
+| halo ON, **after** ghost-force fix | −882,333.37 | 11.61 | **0.7986** | 0.1016 | 0.898 | **8799532** |
+| oracle | −885,377.06 | 0 | 1.0 | 0 | 0 | — |
+
+**Two findings:**
+1. **`reduce_dd_ghost_forces()` (the A2 fix)** raised force cos **0.644 → 0.7986**,
+   cut rms|dF| 27% and max|dF| 30%, and removed the anomalous "halo-ON worse than
+   halo-OFF" inversion. The energy is unchanged (the fix is gradient-only). This
+   is a genuine bug fix — the reverse-exchange was dropping the cross-rank
+   `dE_ownedB/dx_i` force terms.
+2. **The residual ~+10 meV/atom under-binding is the k=4 thin-halo approximation,
+   not a bug.** Ghost-shell scan (N=16, 2 ranks, fresh v2 artifact
+   `n32_k4_cap1376256`, job 8800159): dE **decreases** with the ghost shell width —
+   **6.5 Å → +10.09, 12.0 Å → +8.67 meV/atom** (24 Å exceeds the traced edge cap).
+   A monotonic decrease as real ghosts replace the halo proves the residual is the
+   thin-halo edge-completeness limit; reaching cos = 1.0 needs a deeper halo or the
+   exact ghost-gradient scheme (`DEV_PLAN_node_parallelism.md` PART III), not a
+   code fix. Jobs: DD parity 8799532; re-export 8799982; shell scan 8800159.

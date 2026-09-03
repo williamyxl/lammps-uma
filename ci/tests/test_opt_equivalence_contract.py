@@ -143,6 +143,62 @@ def test_pad_dd_edges_noop_when_full():
 # There is nothing to compute here without a model, but we assert the DECISION
 # surface is closed: every retain-K in 0..3 is a valid, distinct memory strategy
 # that must map to the SAME numerics — i.e. the gate must test each K, not just 0.
+# --- 5. A10: activation checkpointing defaults OFF (audit rev 29 §G.25) ---------
+# Python replica of block_context.cpp::ac_level + no_recompute_* so a silent
+# revert of the default (§G.25.4 crit. 5) is caught without a device build.
+def _ac_level(env):
+    v = env.get("UMA_AC")
+    if v is None:
+        return "off"                     # ← the directive: DEFAULT OFF
+    if v in ("off", "0", ""):
+        return "off"
+    if v in ("chunk", "block", "full"):
+        return v
+    if v == "1":
+        return "full"
+    return "off"                          # unknown -> off
+
+
+def _no_recompute(level_wanted, env):
+    # legacy explicit-retain aliases still force retain (recompute OFF)
+    legacy = {"chunk": ("UMA_NO_RECOMPUTE", "UMA_NO_RECOMPUTE_CHUNK"),
+              "block": ("UMA_NO_RECOMPUTE", "UMA_NO_RECOMPUTE_BLOCK"),
+              "edeg":  ("UMA_NO_RECOMPUTE", "UMA_NO_RECOMPUTE_EDEG")}[level_wanted]
+    if any(env.get(k) == "1" for k in legacy):
+        return True
+    L = _ac_level(env)
+    on = {"chunk": L in ("chunk", "block", "full"),
+          "block": L in ("block", "full"),
+          "edeg":  L == "full"}[level_wanted]
+    return not on                         # recompute ON only if opted in
+
+
+def test_ac_defaults_off_no_env():
+    env = {}                              # a fresh run, no UMA_* set
+    assert _ac_level(env) == "off"
+    # every level retains activations (recompute OFF) -> fully differentiable
+    for lvl in ("chunk", "block", "edeg"):
+        assert _no_recompute(lvl, env) is True, lvl
+
+
+def test_ac_chunk_opts_in_only_chunk():
+    env = {"UMA_AC": "chunk"}
+    assert _no_recompute("chunk", env) is False   # recompute ON at chunk
+    assert _no_recompute("block", env) is True     # still retained
+    assert _no_recompute("edeg", env) is True
+
+
+def test_ac_full_opts_in_all():
+    env = {"UMA_AC": "full"}
+    for lvl in ("chunk", "block", "edeg"):
+        assert _no_recompute(lvl, env) is False
+
+
+def test_ac_legacy_alias_still_retains():
+    env = {"UMA_NO_RECOMPUTE_CHUNK": "1"}          # old script
+    assert _no_recompute("chunk", env) is True     # honoured (retain)
+
+
 def test_opt_equivalence_gate_matrix_is_specified():
     ks = [0, 1, 2, 3]
     # The numeric gate must cover every K (K=0 legacy + K>=1 retain paths) and the
@@ -163,6 +219,10 @@ def main():
         test_chunk_count_is_ceil_and_cap_is_multiple,
         test_pad_dd_edges_are_inert_atom0_to_dummy,
         test_pad_dd_edges_noop_when_full,
+        test_ac_defaults_off_no_env,
+        test_ac_chunk_opts_in_only_chunk,
+        test_ac_full_opts_in_all,
+        test_ac_legacy_alias_still_retains,
         test_opt_equivalence_gate_matrix_is_specified,
     ]
     n = 0

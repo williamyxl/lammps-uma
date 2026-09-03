@@ -31,7 +31,19 @@ TOY="${UMA_TOY_ARTIFACT:-}"
 REQUIRE="${UMA_CI_REQUIRE_OPTEQ:-0}"; [ "${1:-}" = "--strict" ] && REQUIRE=1
 skip() { echo "OPTEQ SKIP: $1"; [ "$REQUIRE" = 1 ] && { echo "  (strict -> FAIL)"; exit 2; }; exit 0; }
 
-[ -n "${TOY}" ] || skip "UMA_TOY_ARTIFACT not set (see header for how to build one)"
+# A1 close-out (audit rev 29 §G.27.5): if no artifact is provided, BUILD one so
+# the gate runs in a fresh clone instead of SKIPping (~4 min CPU, login node). The
+# 90 MB traced weights are too large to commit; building on demand also exercises
+# the export path. UMA_TOY_NO_BUILD=1 forces the old skip-if-absent behaviour.
+if [ -z "${TOY}" ] || [ ! -f "${TOY}/model_traced.pt" ] || [ ! -f "${TOY}/struct.txt" ]; then
+  if [ "${UMA_TOY_NO_BUILD:-0}" = "1" ]; then
+    skip "no toy artifact and UMA_TOY_NO_BUILD=1"
+  fi
+  echo "OPTEQ: no toy artifact -> building one (ci/build_toy_artifact.sh)"
+  built="$(UMA_TOY_ARTIFACT="${TOY}" bash "${LU}/ci/build_toy_artifact.sh" ${1:+"$1"} | tail -1)" || \
+    skip "toy artifact build failed"
+  TOY="${built}"
+fi
 [ -f "${TOY}/model_traced.pt" ] || skip "no model_traced.pt in ${TOY}"
 [ -f "${TOY}/struct.txt" ] || skip "no struct.txt in ${TOY}"
 CLI="${BUILD}/uma_parity_cli"

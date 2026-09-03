@@ -772,29 +772,59 @@ void PairUMA::init_style()
   // reading mn_active here always sees the ctor value `false` -> under mpirun -n>1
   // with UMA_COMPUTE_VIRIAL=1 the guard was skipped and NPT ran on the GP path with
   // a ZERO pair virial (the exact P0'.1 silent-wrong-physics this guard prevents).
+  // A10 (audit rev 29 §G.25.4 crit. 1-2): with activation checkpointing now OFF
+  // by default, the single-tile pos+cell-gradient virial is viable out of the
+  // box. So when a barostat is present on a single tile we AUTO-ENABLE the virial
+  // (no need for the user to know UMA_COMPUTE_VIRIAL / UMA_CKPT=0) -- unless AC
+  // was explicitly turned back on, which is incompatible with the strain grad.
+  // The multi-node GP/DD paths still have no virial and still refuse a barostat.
   const bool multinode = (comm->nprocs > 1);
-  const bool virial_supported = !multinode && !dd_active_ && want_virial_flag_;
-  if (!virial_supported) {
-    for (const auto &ifix : modify->get_fix_list()) {
-      const char *s = ifix->style;
-      const bool barostat =
-          utils::strmatch(s, "^npt") || utils::strmatch(s, "^nph") ||
-          utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
-          utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug");
-      if (barostat) {
-        if (multinode || dd_active_)
-          error->all(FLERR,
-                     "Pair style uma does not compute the virial on the multi-node "
-                     "(GP/DD) path; pressure control (fix {}) is not supported "
-                     "there. Use a single tile for NPT, or NVE/NVT.", s);
-        else
-          error->all(FLERR,
-                     "Pair style uma: pressure control (fix {}) needs the virial. "
-                     "Set UMA_COMPUTE_VIRIAL=1 (single-tile stress via pos+cell "
-                     "autograd) + UMA_CKPT=0, or use NVE/NVT.", s);
-      }
+  const bool ac_on = uma_env_bool("UMA_CKPT", false) ||
+                     (std::getenv("UMA_AC") != nullptr &&
+                      std::string(std::getenv("UMA_AC")) != "off" &&
+                      std::string(std::getenv("UMA_AC")) != "0");
+  bool barostat_present = false;
+  const char *barostat_style = nullptr;
+  for (const auto &ifix : modify->get_fix_list()) {
+    const char *s = ifix->style;
+    if (utils::strmatch(s, "^npt") || utils::strmatch(s, "^nph") ||
+        utils::strmatch(s, "^press/") || utils::strmatch(s, "/npt") ||
+        utils::strmatch(s, "/nph") || utils::strmatch(s, "nphug")) {
+      barostat_present = true; barostat_style = s; break;
     }
   }
+  if (barostat_present && !multinode && !dd_active_ && !want_virial_flag_ && !ac_on) {
+    // A10: single-tile + AC-off + no explicit flag -> just turn the virial on.
+    want_virial_flag_ = true;
+    if (comm->me == 0)
+      utils::logmesg(lmp,
+          "Pair uma: barostat (fix {}) present on a single tile with activation "
+          "checkpointing OFF -> virial auto-enabled (pos+cell autograd). Set "
+          "UMA_COMPUTE_VIRIAL=0 to force it off.\n", barostat_style);
+  }
+  const bool virial_supported = !multinode && !dd_active_ && want_virial_flag_;
+  if (barostat_present && !virial_supported) {
+    if (multinode || dd_active_)
+      error->all(FLERR,
+                 "Pair style uma does not compute the virial on the multi-node "
+                 "(GP/DD) path; pressure control (fix {}) is not supported "
+                 "there. Use a single tile for NPT, or NVE/NVT.", barostat_style);
+    else
+      // Single tile but AC was explicitly re-enabled: the strain grad cannot
+      // thread the checkpoint Functions, so refuse with the fix.
+      error->all(FLERR,
+                 "Pair style uma: pressure control (fix {}) needs the virial, but "
+                 "activation checkpointing is ON (UMA_AC/UMA_CKPT) which is "
+                 "incompatible with the strain gradient. Unset UMA_AC (default "
+                 "off) so the virial can be computed, or use NVE/NVT.",
+                 barostat_style);
+  }
+
+  // A11 (audit rev 29 §G.25): pre-flight per-rank capacity check. WARN (never
+  // hard-fail) if this run is likely to OOM, and NAME the flag that fixes it, so
+  // the failure is legible instead of a mid-run device abort. Especially matters
+  // once activation checkpointing defaults OFF (A10): the default capacity drops.
+  preflight_memory_check();
 
   // Full neighbor list; we CONSUME it (convert to FairChem edges) instead of
   // letting the engine rebuild its own O(N^2) graph. The list is built to the
@@ -827,6 +857,53 @@ void PairUMA::init_style()
       fprintf(screen, "uma DD: halo comm width = %d doubles/atom\n", w);
   } else {
     neighbor->add_request(this, NeighConst::REQ_FULL);
+  }
+}
+
+/* ----------------------------------------------------------------------
+   A11 (audit rev 29 §G.25): pre-flight per-rank memory estimate. Purely a
+   warning — it must NEVER change numerics or abort a run (a wrong estimate must
+   not block a job that would actually fit). Calibrated to the MEASURED ceilings
+   in REPORT_2path_nvt_comparison.md §2a/§3:
+     - AC-on  (checkpointing): ~38 x 8 x N^3 fits per 12 tiles at N=38 (438,976
+       atoms / 12 ~= 36,600 atoms/tile) for a single point; NVT is a bit tighter.
+     - AC-off (retain activations): far tighter (opt4 OOMs at 12-tile N>=36, and
+       fully AC-off is tighter still) -- empirically ~1/3 the AC-on capacity.
+   These are order-of-magnitude guards, deliberately conservative, and only
+   printed on rank 0. When AC is OFF (A10 default) the ceiling used is the tight
+   one and the message names UMA_AC=chunk (the flag that restores capacity).
+------------------------------------------------------------------------- */
+void PairUMA::preflight_memory_check()
+{
+  if (comm->me != 0) return;                 // one warning, from rank 0
+  if (dd_active_) return;                     // DD capacity is halo/shell-bound; skip
+  // per-rank owned atom estimate: global atoms / number of tiles.
+  const int tiles = (num_devices > 1) ? num_devices
+                                       : (comm->nprocs > 1 ? comm->nprocs : 1);
+  const bigint natoms = atom->natoms;
+  if (natoms <= 0 || tiles <= 0) return;
+  const double per_rank = static_cast<double>(natoms) / tiles;
+
+  // Resolve whether activation checkpointing is effectively ON for this run.
+  // (Production artifacts bake per-chunk AC; UMA_CKPT alone is a no-op there -
+  //  see §G.25.1. Treat "any recompute path active" as AC-on for the estimate.)
+  const bool ac_off = uma_env_bool("UMA_NO_RECOMPUTE", false);
+  // Measured single-point ceilings (atoms/tile), conservative:
+  const double ceil_ac_on = 36000.0;         // ~N=38/12 tiles
+  const double ceil_ac_off = 12000.0;        // ~1/3; opt4 OOMs 12-tile N>=36
+  const double ceiling = ac_off ? ceil_ac_off : ceil_ac_on;
+
+  if (per_rank > ceiling) {
+    utils::logmesg(lmp,
+        "Pair uma [pre-flight]: ~{:.0f} atoms/tile ({} atoms / {} tile(s)) is "
+        "above the measured {} ceiling (~{:.0f} atoms/tile). This run may OOM "
+        "on device. To fit: {}. (This is a WARNING; the run will proceed.)\n",
+        per_rank, static_cast<long long>(natoms), tiles,
+        ac_off ? "activation-checkpointing-OFF" : "activation-checkpointing-ON",
+        ceiling,
+        ac_off ? "enable activation checkpointing (UMA_AC=chunk / UMA_CKPT=1), "
+                 "or add more tiles"
+               : "add more tiles, or reduce system size");
   }
 }
 

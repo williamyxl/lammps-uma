@@ -68,7 +68,7 @@ one () {
   local LOOP="" WALL=0 OOM=1 rc=1 KUSED=-1
   for K in ${KLIST}; do
     local t0=$SECONDS
-    ( cd "${RD}" && ${mpi} env UMA_ALLOW_LEGACY_METADATA=1 ${NRENV} UMA_CHUNK_RETAIN_K=${K} UMA_SKIP_MAXNBR_CAP=1 \
+    ( cd "${RD}" && ${mpi} env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk ${NRENV} UMA_CHUNK_RETAIN_K=${K} UMA_SKIP_MAXNBR_CAP=1 \
         UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} \
         LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
     rc=$?; WALL=$((SECONDS-t0))
@@ -83,7 +83,7 @@ one () {
     local RBP=${OUTDIR}/n${N}_w${W}_sp; mkdir -p "${RBP}"
     OUTDIR="${RBP}" ART="${ART}" N=${N} W=${W} NVT_STEPS=0 python -u "${LU}/scripts/phase6_make_gp_inputs.py" >/dev/null 2>&1
     local RDP=$(dirname $(ls ${RBP}/*/in.sp 2>/dev/null|head -1))
-    ( cd "${RDP}" && ${mpi} env UMA_ALLOW_LEGACY_METADATA=1 ${NRENV} UMA_CHUNK_RETAIN_K=${KP} UMA_SKIP_MAXNBR_CAP=1 \
+    ( cd "${RDP}" && ${mpi} env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk ${NRENV} UMA_CHUNK_RETAIN_K=${KP} UMA_SKIP_MAXNBR_CAP=1 \
         UMA_CHECKPOINT="${UMA_CHECKPOINT}" UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
         gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
     local OD=${RBP}/oracle; mkdir -p "${OD}"

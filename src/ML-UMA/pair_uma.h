@@ -94,6 +94,10 @@ class PairUMA : public Pair {
   // -dE_owned/dx_ghost, a real cross-rank force term that used to be discarded
   // (the cos = 0.644 DD bug). See the derivation above the definition.
   void reduce_dd_ghost_forces(int nlocal, int nall, double **f);
+  // A11 (audit rev 29 §G.25): pre-flight per-rank memory estimate at init_style.
+  // WARN-only (never aborts, never changes numerics); names the flag that fixes
+  // an expected OOM. Calibrated to the measured ceilings in the report.
+  void preflight_memory_check();
   void mole_composition_allreduce();        // owned-only per-Z counts, cross-rank
   bool mole_composition_done_ = false;      // R4: run the (discarded) diagnostic + warn ONCE, not per DD step
   void install_halo_callbacks();            // bind HaloContext to LAMMPS comm

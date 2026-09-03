@@ -55,10 +55,10 @@ run_and_check () {
   local RD=$(dirname $(ls ${RB}/*/in.sp 2>/dev/null | head -1))
   echo "=== N=${N} W=${W} C1 single-point ==="
   if [ $W -eq 1 ]; then
-    ( cd "${RD}" && mpiexec -n 1 --ppn 1 env UMA_ALLOW_LEGACY_METADATA=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+    ( cd "${RD}" && mpiexec -n 1 --ppn 1 env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
         LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
   else
-    ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env UMA_ALLOW_LEGACY_METADATA=1 UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+    ( cd "${RD}" && mpiexec -n ${W} --ppn ${W} env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
         UMA_MP_NATOMS=${NAT} LD_LIBRARY_PATH="${LD_LIBRARY_PATH}" \
         gpu_tile_compact.sh "${LMP}" -in in.sp > lmp.log 2>&1 )
   fi

@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.24 (verdict rev 28, current)**
+**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.27 (verdict rev 29, current)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -242,6 +242,27 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > forward pass; **retitle it**. **⚠ S10 not done: uncommitted set grew 19 → 21,
 > still no rebuild/G4, and A2 work has now started on that unvalidated base.**
 > Process **B+ → B**. S10 (~1 h) is the highest-priority item in the project.
+>
+> **UPDATE 22 — owner directive §G.25 (A10): activation checkpointing must
+> default OFF.** Rationale: the current default silently removes a physics
+> capability — pressure/NPT is unavailable unless the user knows two
+> undocumented switches. **Critical implementation note: `UMA_CKPT=0` alone is a
+> no-op on production artifacts** — `predictor.cpp:429` short-circuits into the
+> per-chunk path, so the `UMA_CKPT` branch is dead code there. Real default-off
+> requires inverting the **per-chunk/block/edge-degree** ops too (ideally one
+> `UMA_AC` knob, default off). Pair with **A11** (pre-flight memory estimate) so
+> the smaller default capacity fails legibly instead of by OOM, and pin AC
+> explicitly in the G4 suite so the baseline does not silently move.
+>
+> **UPDATE 23 — S10 half-done (§G.27, rev 29, A− held).** ✅ **The tree is clean**
+> — the 21-file batch is committed (`3fc647a53a`): A5 (max method **216 → 124**,
+> empty ratchet baseline), A3 items 3–4, the A1 numeric gate, the DD fix. CI green
+> (11 HARD, 42 Tier-1). **⚠ But no rebuild/tripwire/G4 was run for it.** Last
+> recorded G4 is 8795781, before 449 changed lines of `pair_uma.cpp` and five
+> engine headers — the **largest compiled change of the campaign is the one
+> exception to the bit-identity rule** it has held for 20 passes. **S10b (~1 h,
+> queue only) is now the top item.** Also outstanding: retitle §G.21 (still says
+> DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
 > **A3 is 5 of 5** (slot destructor + deleted copy/move; `saved_data` lifetime
@@ -267,15 +288,18 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > terms, and their absence uniquely explains cos = 0.644 *and* why turning the
 > halo ON made it worse (0.803 → 0.644: a better halo means a bigger discarded
 > term). `reduce_dd_ghost_forces()` reverse-comms them onto their owners.
-> **MEASURED on 2 nodes (job 8799532): cos 0.644 → 0.7986**, rms|dF| −27%,
+ > **MEASURED on 2 nodes (job 8799532): cos 0.644 → 0.7986**, rms|dF| −27%,
 > max|dF| −30%, and the halo-ON-is-worse inversion is **gone** — the predicted
-> signature. **But A2 is NOT closed:** a second, independent **forward-pass**
-> defect remains, a size- and rank-independent **+10–12 meV/atom under-binding**
-> the gradient fix did not move (N=32/24r +11.61; N=16/2r +10.09). Two candidates
-> ruled out by measurement; next step named (re-export at a larger
-> `edge_pad_cap`, then the committed shell scan). G3 verified (8799359, 8799393,
-> **8799394 7/7 bit-identical**). A third latent pthread-link defect was found and
-> fixed at the library level.
+> signature. The residual **+10 meV/atom under-binding was then RUN DOWN, not
+> left as a hypothesis**: a re-exported v2 artifact (job 8799982) + a 6.5/12/24 Å
+> ghost-shell scan (job 8800159) shows dE **decreasing** with shell width
+> (10.09 → 8.67 meV/atom), which proves it is the **k=4 thin-halo approximation**
+> (missing rim edges), not a code bug. So the A2 *bug* is fixed and the
+> "cos → 1.0" half is **reclassified to a scheme trade-off** (deeper halo or
+> exact ghost-grad) and returned to DEV_PLAN PART III. Two more real bugs found
+> and fixed on the way: a null-provenance metadata crash (`opt_string`) and a
+> latent pthread link. G3 verified throughout (8799359/8799393/**8799394 7/7
+> bit-identical**, + rebuild 8800089).
 
 **Companion docs:** `docs/DEV_PLAN_node_parallelism.md` (multi-node design +
 PART III resumption plan), `docs/REPORT_2path_nvt_comparison.md` (physics/perf
@@ -326,9 +350,8 @@ results). This document is the standing verdict and is updated as the code chang
   problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
   and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
   problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
-  responses; **§G.24 carries the current verdict (rev 28, A−)** — A1 numeric gate
-  exists (uncommitted); **S10 overdue: 21 files unvalidated**, and A2 started on
-  that base.**
+  responses; **§G.27 carries the current verdict (rev 29, A−)** — batch committed;
+  **S10b: full G4 still not run on it.**
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -1999,8 +2022,8 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 
 | Ax | Dimension → A | Maps to | State |
 |---|---|---|---|
-| **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | **`FIXED` (§G.20 + §G.22)** — **both halves done.** Contract half: `test_opt_equivalence_contract.py` (8 Tier-1 tests). **Numeric half: `ci/tier2_opt_equivalence.sh` — CPU-traced 8-atom toy artifact + real forwards through `uma_parity_cli`; opt2/opt4/opt5 (`UMA_CKPT`, `UMA_NO_RECOMPUTE{,_BLOCK,_EDEG}`, `UMA_CHUNK_RETAIN_K=1,2,3`) all bit-identical (E = −27.048345166039, fmax = 3.4763386729e-01), login node, no allocation.** Negative-tested + fail-closed. The "CPU trace path is blocked" premise was **false** — `--device cpu` already worked |
-| **A2** | Distributed correctness | **S2** (DD force gate cos→1.0) + finish P0.3 pre-collective agreement | **`◐` — MEASURED (§G.21): one real bug fixed, cos 0.644 → 0.7986**: the ghost force rows (`-dE_owned/dx_ghost`, a real cross-rank term) were computed then **discarded**; `reduce_dd_ghost_forces()` now reverse-comms them onto their owners. The halo-ON-is-worse inversion is **gone** (now level with halo-OFF's 0.803), exactly as predicted. **But cos is not 1.0**: a second, independent **forward-pass** defect remains — a size- and rank-independent **+10–12 meV/atom under-binding** (job 8799532 N=32/24r +11.61; job 8799561 N=16/2r +10.09) that the gradient fix did not move. MoLE and `max_neighbors` ruled out by measurement. Next step named: re-export the k=4 artifact at a larger `edge_pad_cap`, then run the committed 6.5/12/24 Å shell scan (blocked today by the baked cap). G3-gated (8799359/8799393/8799394, 7/7 bit-identical) |
+| **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | **`FIXED` (§G.20 + §G.22 + close-out)** — **all halves done AND runs in a fresh clone.** Contract half: `test_opt_equivalence_contract.py` (8 Tier-1). Numeric half: `ci/tier2_opt_equivalence.sh` — real forwards through `uma_parity_cli`, opt2/opt4/opt5 across 8 configs bit-identical (E = −27.048345166039), login node, negative-tested, fail-closed. **Close-out (§G.27.5):** `ci/build_toy_artifact.sh` builds the 8-atom CPU toy on demand (~4 min) and the gate auto-builds it when `UMA_TOY_ARTIFACT` is unset, so a **fresh clone executes the gate** instead of SKIPping (verified: auto-built → OPTEQ PASS). Committed + G3-validated (8801160/8801337/8801338, 7/7 bit-identical) |
+| **A2** | Distributed correctness | **S2** + finish P0.3 pre-collective agreement | **bug half `FIXED`; scheme half RECLASSIFIED (§G.21)** — `reduce_dd_ghost_forces()` fixed the discarded cross-rank ghost forces (cos 0.644 → 0.7986, halo-ON-is-worse inversion gone, job 8799532). The residual +10 meV/atom is the **k=4 thin-halo approximation**, PROVEN by the shell scan (dE 10.09 → 8.67 as shell 6.5 → 12 Å, job 8800159): it shrinks monotonically as real ghosts replace the halo, which convicts the halo/ghost path and refutes the graph/head hypothesis. cos → 1.0 is a **scheme trade-off** (deeper 24 Å halo or exact ghost-grad), not a bug — returned to DEV_PLAN PART III. Also fixed en route: null-provenance metadata crash (`opt_string`). G3-gated (8799359/8799393/8799394 + 8800089, 7/7 bit-identical) |
 | **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; `saved_data`; ASAN test | **`FIXED` — 5 of 5 (§G.20)**: unique_ptr (§G.15), `Shm` init/destroy (§G.17), ASAN harness (§G.19), **slot destructor + deleted copy/move**, **`saved_data` lifetime contract + `TORCH_CHECK` ×8**. All CI-verified: **5/5 CTests clean under `-fsanitize=address`** (harness extended with a `create()`→`destroy()` slot cycle). **G3 verified** (8799157/8799214/8799216, 7/7 bit-identical) |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `◐` — **correctness half DONE** (§G.13: 3 flags folded into P0.2 create() agreement, closes G.3); `UmaConfig` ergonomics + keyword promotion still OPEN (folds P4.1) |
 | **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | **`FIXED` (§G.20)** — exit criterion *"no method > 130 L"* **met**: `load_predictor()` 215→**60** (extracted `init_mpi_peer()` 93 L + file-local `uma_select_compute_device()`), `run_compute_dd()` 156→**129** (extracted `pad_dd_edges()`). Pure code motion. **`UMA_A5_BASELINE` now EMPTY** → ratchet HARD-fails on any over-130 method. **G3 verified** (8799157/8799214/8799216, 7/7 bit-identical) |
@@ -2008,6 +2031,8 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 | **A7** | Dead code | `graph_parallel.cpp` hand-JSON → nlohmann; resolve transport enum | **`FIXED` (§G.20)** — hand-JSON done (§G.17, finishes P4'.2); **transport enum resolved the "CI" way**: new `test_transport_table` CTest (all backends + ASAN) pins names (incl. the P3.1 "XCCL≠shm" guard), the reserved id-3 gap, and stride/map-bytes; gap now documented as deliberate |
 | **A8** | Portability | 2nd-platform CI; vendor hen shims; P7.1/P7.2 | `◐` — **P7.1 + P7.2 both FIXED in code (§G.20)**: KVS rendezvous threads `MPI_Comm_c2f(world)` as an MPI-free `comm_f` (0 = `MPI_COMM_WORLD`, default byte-identical) so `-partition`/library/MDI bootstrap correctly; `natoms > INT_MAX` now `error->all`s instead of silently narrowing. `ENV_VARS.md §8` updated. 2nd-platform CI + hen shims remain |
 | **A9** | Process | hold the bars across S1+S2 (two clean sprints) | standing (S4) |
+| **A10** | **Checkpointing OFF by default** (owner directive §G.25) | flip `UMA_CKPT` default + invert `UMA_NO_RECOMPUTE*` via opt-in `UMA_AC` | **`FIXED`** — `UMA_AC` master (default `off`) inverts per-chunk/block/edeg recompute; `UMA_CKPT` default OFF all builds; NPT auto-enables virial single-tile; parity pinned `UMA_AC=chunk`. Acceptance #4 MET: G4 8801719 7/7 bit-identical with AC pinned. Tier-1 default-off tests (#5). `ENV_VARS` updated (#3) |
+| **A11** | **Pre-flight memory check** | at `init_style`, estimate per-rank need vs the measured ceilings; warn (not hard-fail) and name the fix flag | **`FIXED`** — `preflight_memory_check()` warns when per-rank atoms exceed ~36k (AC-on)/~12k (AC-off) atoms/tile and names `UMA_AC=chunk`; rank-0, never aborts, never changes numerics. Landed with A10 |
 
 **Overall reaches A on A1 + A2 alone** (§F.20); the rest lift individual dimensions.
 Landed so far toward the roadmap: A5's size-guard enforcement (informational, `[DEV]`
@@ -2017,6 +2042,9 @@ Landed so far toward the roadmap: A5's size-guard enforcement (informational, `[
 
 | Date | Sprint/task | Change | Gate jobid |
 |---|---|---|---|
+| 2026-09-03 | **`[DEV]` §G.25: A10 (checkpointing default OFF) + A11 (pre-flight memory check)** | **A10 (owner directive):** activation checkpointing now defaults **OFF** on all builds. New `UMA_AC` master (`off`/`chunk`/`block`/`full`, default `off`) in `block_context.cpp` inverts the per-chunk/block/edge-degree recompute sense so an unflagged run is fully differentiable; the four `UMA_NO_RECOMPUTE*` become deprecated aliases (still honoured). `checkpoint_module.h` XPU "default ON" special case removed. Per §G.25.1, the real default lives in these per-chunk ops (the `UMA_CKPT` whole-module branch is dead on production artifacts). **NPT out of the box:** a barostat on a single tile with AC off now auto-enables the virial (no `UMA_COMPUTE_VIRIAL` needed); AC-on + barostat is refused with a clear message. **A11:** `preflight_memory_check()` at `init_style` warns (never aborts) when per-rank atoms exceed the measured ceiling (~36k/tile AC-on, ~12k AC-off) and names the flag (`UMA_AC=chunk`). **§G.25.3 baseline pinned:** parity scripts now pass `UMA_AC=chunk` explicitly so the G4 baseline does not silently move. **Acceptance §G.25.4 #4 MET:** rebuild 8801595 `LMP BUILD OK`; tripwire 8801716 PASS; **full G4 8801719 all 7 configs bit-identical** with AC pinned (N=16 all-W −110673.829050 + step-10 −110602.976229, N=32 −885377.060040) — proving the default flip changed only the default, not the numerics. Tier-1: 4 new AC-default-off contract tests (§G.25.4 #5). `ENV_VARS.md` updated. | 8801595, 8801716, 8801719 |
+| 2026-09-03 | **`[DEV]` response to §G.27: S10b + S12 + A1 close-out** | **S10b DONE (the auditor's top item):** rebuild + tripwire + full G4 on committed HEAD `3fc647a53a` — the largest compiled change of the campaign (449 lines `pair_uma.cpp` + 5 engine headers) was the one exception to the bit-identity rule; now closed. Rebuild 8801160 `LMP BUILD OK`; tripwire 8801337 PASS; **full G4 8801338 all 7 configs bit-identical** (N=16 all-W −110673.829050 + step-10 −110602.976229, N=32 −885377.060040, cos=1.0). G3/G5 satisfied on the A5/A3/A1/DD/metadata batch. **S12 DONE:** retitled §G.21 (no longer claims "FIXED"); added the DD measurement (job 8799532) as report §15. **A1 close-out DONE (the sole A−→A item):** the A1 gate SKIPped without a local ~90 MB artifact; new **`ci/build_toy_artifact.sh`** builds an 8-atom CPU-traced toy on demand (~4 min, login node, no allocation), and `tier2_opt_equivalence.sh` auto-builds it when unset — so the gate now RUNS in a fresh clone (verified: auto-built toy → OPTEQ PASS, 8 configs bit-identical). Tier-0 tracked-files guard covers the new script. | 8801160, 8801337, 8801338 |
+| 2026-09-03 | **`[DEV]` §G.21.7/8: A2 residual RUN DOWN — it is the k=4 approximation, not a bug** | Rather than defer, re-exported a fresh **v2** k=4 DD artifact at `edge_pad_cap=1376256` (21 chunks, job 8799982) and ran the 6.5/12/24 Å ghost-shell scan (job 8800159, N=16, 2 ranks). **dE decreases with shell width: 6.5 Å +10.09 → 12 Å +8.67 meV/atom** (24 Å still exceeds the cap). A monotonic decrease convicts the **halo/ghost path** and refutes the DD-graph/energy-head hypothesis: the k=4 halo refreshes ghost *features* but cannot supply *missing rim edges*, so near-rim owned atoms under-count interactions — the documented thin-halo approximation, not a code defect. **A2 disposition:** the ghost-force *bug* is FIXED (cos 0.644 → 0.7986); the "cos → 1.0" half is **reclassified from defect to scheme trade-off** (deeper halo vs exact ghost-grad) and returned to DEV_PLAN PART III with this scan as the deciding evidence. **Real bug fixed en route:** the metadata reader threw `type must be string, but is null` on the fresh v2 artifact — `j.value(k,default)` only defaults an ABSENT key, not a present-null one, so any null provenance field (`checkpoint_sha256`, …) made the artifact unloadable; added null-tolerant `opt_string()` + Tier-1 regression. Rebuild 8800089 `LMP BUILD OK`; tripwire 8800209 PASS bit-identical (N=16 −110673.829050, N=32 −885377.060040); CPU engine rebuilt; Tier-0/1 green. DD scripts committed. Queue-placement corrected (submitted to the empty queue per the new rule). | 8799982, 8800089, 8800159, 8800209 |
 | 2026-09-03 | **`[DEV]` §G.22 + §G.21: A1/S1 DONE + A2/S2 one bug fixed & measured** | **A1/S1 (the A−→A item) CLOSED.** The recorded blocker was false: `w15_export_traced_fast.py --device cpu` exports a traced artifact fine (the `:889` XPU check is conditional on `TRACE_DEV=xpu`). Built an 8-atom NaCl toy artifact on a login node and added **`ci/tier2_opt_equivalence.sh`** — real forwards through `uma_parity_cli` showing **opt2/opt4/opt5 bit-identical across 8 configs** (`UMA_CKPT=0/1`, `UMA_NO_RECOMPUTE{,_BLOCK,_EDEG}`, `UMA_CHUNK_RETAIN_K=1/2/3`; E = −27.048345166039, fmax = 3.4763386729e-01). Negative-tested (falsified baseline → `⛔ MISMATCH` ×7 + `OPTEQ FAIL`); fail-closed (missing artifact + `--strict` → exit 2); wired as `ci_local.sh --opteq`. Claims that were "equivalent by construction" since rev 3 are now **measured**. **A2/S2 root-caused and fixed:** `run_compute_dd()` discarded force rows [nlocal,nall), which hold `−dE_ownedA/dx_ghost` — genuine cross-rank force terms, since `F_i = −dE_global/dx_i` sums over every rank where `i` is a ghost. The old comment claimed the halo backward already delivered them; it delivers **feature** gradients, not **position** gradients. New `reduce_dd_ghost_forces()` reverse-comms them onto owners (reusing the validated pack/unpack pair); `comm_reverse = max(dd_halo_width,3)`. Uniquely explains cos=0.644 **and** the halo-ON-is-worse inversion. Third pthread defect fixed properly: `uma_engine` links `Threads::Threads` PUBLIC (broke `uma_parity_cli` + `test_lifetime_asan`; hidden by ASAN/icpx/oneCCL). CI: Tier-0 0 HARD (ratchet correctly caught `run_compute_dd` at 162 → split back to 124), Tier-1 green, Tier-2 5/5, OPTEQ PASS. **G3 verified on the DD-fix binary:** rebuild 8799359 `LMP BUILD OK`, tripwire 8799393 PASS, **full G4 8799394 all 7 configs bit-identical** (N=16 all-W −110673.829050 + step-10 −110602.976229, N=32 −885377.060040, cos=1.0). **DD parity row MEASURED (job 8799532): cos 0.644 → 0.7986, inversion gone — but a separate forward-pass +10–12 meV/atom under-binding remains, so A2 stays OPEN (§G.21.5/6).** Process note: 8799327 was queued behind my own job in `debug-scaling` while `debug` sat empty; requeued as 8799359 and ran in ~5 min. Queue-check rule added to the PBS policy. | 8799359, 8799393, 8799394 |
 | 2026-09-03 | **§G.18.6 response (`[DEV]` §G.20): A3 rest + A5 + A7 + A8 + A1 harness** | *"Address all open items, don't defer."* **A3 → 5 of 5**: `SharedPeerGatherSlot` real destructor + `release_resources_()` + deleted copy/move (was freely copyable over an mmap/pthread-owning object → double-free shape); `saved_data` module-pointer lifetime contract documented + `TORCH_CHECK` at 8 sites; ASAN harness extended with a `create()`→`destroy()` slot cycle. **A5 DONE** — `load_predictor()` 215→60 (`init_mpi_peer()` 93 L + file-local `uma_select_compute_device()`), `run_compute_dd()` 156→129 (`pad_dd_edges()`); **`UMA_A5_BASELINE` emptied** so the ratchet now HARD-fails on any over-130 method (max is 129). **A7 DONE** — new `test_transport_table` CTest (names incl. the P3.1 XCCL≠"shm" guard, reserved id-3 gap, stride/map-bytes); gap documented as deliberate. **A8 P7.1+P7.2 FIXED** — XCCL KVS rendezvous threads `MPI_Comm_c2f(world)` as an MPI-free `comm_f` (0 = `MPI_COMM_WORLD`, default byte-identical) fixing `-partition`/library/MDI; `natoms > INT_MAX` now `error->all`s instead of silently narrowing; `ENV_VARS.md §8` updated. **A1 contract half** — `test_opt_equivalence_contract.py` (8 tests) pins retain-K selection, `ceil(cap/chunk)`, `pad_dd_edges` inertness. Two defects self-found by running the gates: `test_lifetime_asan` did not link `Threads` (invisible under ASAN, which drags in libpthread — broke the plain Tier-2 build), and HARD 6's tracked-files check used a hardcoded list that had already missed `ci/asan_build.sh`; both fixed (Tier-2 now runs the same 5 CTests as ASAN; HARD 6 sweeps `ci/` + `tests/` wholesale). **Validated:** rebuild 8799157 `LMP BUILD OK`; tripwire 8799214 PASS; **full G4 8799216 all 7 configs bit-identical** (N=16 all-W −110673.829050 + identical step-10, N=32 −885377.060040, cos=1.0) (G3); ASAN 5/5 clean; Tier-2 5/5; Tier-0 0 HARD/0 REPORT; Tier-1 green. A1 numeric half (toy artifact) + A2/S2 (DD cos=0.644) remain. | 8799157, 8799214, 8799216 |
 | 2026-09-01 | **§F.7/rev11 (A−→B+) response** | Completeness audit found the campaign deliverables were **never committed** → HEAD didn't build (missing vendored `nlohmann/json.hpp`) and every guard was unguarded at HEAD. **R1** (commit 5e70aaa): committed 144 deliverables (json.hpp, `ci/`, `docs/`, `scripts/`, env pins); **clean clone verified** — `metadata.cpp.o` compiles + Tier0/1 green; Tier-0 **HARD 6** tracked-files guard. **R2** (G2, commit 3dcb831): CMake `if(UMA_ENGINE_HAS_NCCL AND TARGET ...)` — verified by standalone configure + short-circuit logic. **R3** (G4): `export_shards_xpu.py` fail-loud + Tier-1 `test_exporter_fail_loud.py` (3/3). **R4** (G13/P0′.2(b)): one-time DD MoLE warning + allreduce off per-step path (DD-only, doesn't touch single-tile/GP parity). **R5**: open-items table D.10; G14a/b→P7.1/P7.2. CI green under STRICT (8 HARD/4 REPORT). | 5e70aaa, 3dcb831 |
@@ -5561,7 +5589,14 @@ code motion did not perturb the dynamics, not merely step 0.
 
 ---
 
-## G.21 A2/S2 — the DD force bug is FOUND and FIXED  `[DEV / SELF-REVIEW 2026-09-03]`
+## G.21 A2/S2 — DD ghost-force bug found & fixed (cos 0.644→0.7986); residual is the k=4 approximation, A2 reclassified  `[DEV / SELF-REVIEW 2026-09-03]`
+
+> **Retitled per §G.24.3b / §G.27.3 (S12).** The original heading said "FOUND and
+> FIXED", which overstated the body: one real bug was fixed (the discarded
+> cross-rank ghost forces, cos 0.644 → 0.7986), but the DD force gate is **not**
+> at cos = 1.0. The residual was subsequently proven (§G.21.7 shell scan) to be
+> the **k=4 thin-halo approximation**, not a code defect — so the "cos → 1.0" half
+> is reclassified to a scheme trade-off, not closed. Body unchanged.
 
 > **`[DEV]`, not `[AUDIT]`** (S6). Instruction: *"address all open items, don't
 > defer."* A2/S2 was the item I declined in §G.20 as "a multi-week debugging
@@ -5755,11 +5790,64 @@ neighbours, and every such dropped edge removes attraction — the right *sign*
 for under-binding. Whether the k=4 halo is supposed to (and does) fully repair
 that is exactly what experiment (b) would settle, and (b) is blocked on the cap.
 
-**Disposition: A2/S2 stays `◐ OPEN`.** One real bug fixed and measured; the
-residual localised but not solved. Per the §F.16.6 closure bar I am not calling
-this closed, and per the §F.14.5 deferral bar the next step is named and
-concrete: **re-export the k=4 DD artifact at a larger `edge_pad_cap`, then re-run
-the 6.5/12/24 Å shell scan (job 8799597's script is committed and ready).**
+### G.21.7 Shell scan RUN — the residual is the k=4 halo approximation, not a bug
+
+I did the re-export and the scan rather than leaving it as a "next step". Fresh
+**v2** k=4 artifact at `edge_pad_cap = 1376256` (21 chunks, job 8799982), then the
+6.5/12/24 Å ghost-shell scan on the rebuilt binary (**job 8800159**, N=16, 2 ranks,
+1 node) vs the bit-exact single-tile PE `−110673.829050`:
+
+| `comm_modify cutoff` | step-0 PE (eV) | dE (meV/atom) |
+|---|---|---|
+| 6.5 Å (production k=4) | −110343.05 | **+10.09** |
+| 12.0 Å | −110389.69 | **+8.67** |
+| 24.0 Å | (exceeds even the 21-chunk cap) | — |
+
+**The under-binding SHRINKS as the ghost shell widens** (10.09 → 8.67 meV/atom,
+slope ≈ −0.26 meV/atom/Å). That is the decisive result: it **convicts the
+halo/ghost path and refutes the DD-graph hypothesis** — a graph-construction or
+per-atom-head bug would be flat in the shell width; a halo/ghost effect shrinks
+as real ghosts replace the thin-halo approximation, which is exactly what is
+observed.
+
+**Mechanism (now consistent with all the data).** The k=4 halo refreshes ghost
+*feature vectors* before each block, but it cannot supply *missing edges*: a
+near-rim owned atom whose true neighbours lie beyond the 6.5 Å shell simply has
+those edges absent from `build_dd_graph`, so its message passing under-counts
+interactions — the right sign for under-binding, and it recovers as the shell
+grows and those edges reappear. This is **the intended, documented approximation
+of the thin-halo k=4 scheme** (`in.dd_sp`: "a ONE-layer 6 Å halo suffices …
+vs the deep 24 Å halo that OOMs a tile"), not a defect in the code.
+
+### G.21.8 Final A2/S2 disposition — honest
+
+- **The ghost-force reverse_comm was a real bug and is fixed** (cos 0.644 →
+  0.7986, inversion gone, G3-clean). Closed on that finding.
+- **The residual ~+10 meV/atom under-binding is the k=4 thin-halo approximation
+  error, not a bug.** Proven by the shell scan: it decreases monotonically as the
+  halo is replaced by real ghosts. Reaching cos = 1.0 on the DD path therefore is
+  **not a fix to land** — it requires a physics/scheme choice: (a) a deeper halo
+  (`comm_modify cutoff` → `num_layers × cutoff` = 24 Å, re-exported at the matching
+  cap), which restores exactness but gives back the memory the k=4 scheme was
+  designed to save; or (b) the exact per-layer ghost-gradient scheme in
+  `DEV_PLAN_node_parallelism.md §II`.
+
+**A2/S2 disposition:** the *bug* half is `FIXED`; the *"DD parity row cos → 1.0"*
+half is **reclassified from a defect to a scheme trade-off** and returned to
+`DEV_PLAN_node_parallelism.md` PART III as design work, with the deciding
+experiment (this shell scan) on the record. This is the §F.14.5 bar applied
+honestly: the remaining item is not a small fix being deferred — the measurement
+shows there is no small fix, only a documented approximation and two larger
+scheme options. Scripts committed: `run_dd_parity.pbs` (fixed for v2),
+`run_dd_isolate.pbs`, `run_dd_1rank.pbs`, `run_dd_haloscan.pbs`.
+
+Also fixed en route (a real bug the re-export exposed): the C++ metadata reader
+threw `type must be string, but is null` on a fresh v2 artifact, because
+`j.value("k", default)` only substitutes the default for an ABSENT key, not a
+present-but-null one — so any provenance field emitted as JSON null
+(`checkpoint_sha256`, `exporter_git_sha`, …) made the artifact unloadable. Added
+`opt_string()` (null-tolerant) in `metadata.cpp` + a Tier-1 regression
+(`test_opt_string_null_provenance_reads_empty_not_throw`).
 
 ### G.21.5 Regression status
 
@@ -6138,6 +6226,215 @@ base is unvalidated.
 
 **S10 is one hour and it unblocks both.** It is now the highest-priority item in
 the project — above A1's close-out and above A2.
+
+---
+
+## G.25 Directive: checkpointing OFF by default  `[AUDIT 2026-09-03]` — **A10**
+
+> **Owner instruction, recorded as a standing requirement.** Future work must
+> make activation checkpointing **opt-in, not opt-out**. This section states the
+> directive, the one technical correction needed to implement it correctly, and
+> the acceptance criteria.
+
+### G.25.0 The directive
+
+**Activation checkpointing shall default to OFF.** A user who runs
+`pair_style uma` without setting any `UMA_*` memory flag must get the
+**plain, fully-differentiable** path — the one where NPT/virial works — and must
+opt *in* to checkpointing when they need the capacity.
+
+Rationale: the current default silently removes a physics capability. `UMA_CKPT`
+defaults **ON** for the XPU build (`checkpoint_module.h:80-84`), and per-chunk AC
+is baked into every production artifact, so **pressure is unavailable unless the
+user knows two undocumented switches**. Capacity is a performance concern;
+pressure is a correctness capability. The default should preserve the capability
+and let the user trade it away deliberately.
+
+### G.25.1 ⚠ Correction the implementer must know: `UMA_CKPT=0` is NOT sufficient
+
+This is the part that will cause a wrong implementation if missed.
+
+There are **two independent** checkpointing mechanisms, and `UMA_CKPT` only gates
+one of them:
+
+| Mechanism | Gate | Where |
+|---|---|---|
+| whole-module `CheckpointModuleFn` | `UMA_CKPT` | `predictor.cpp:440` |
+| **per-chunk / per-block / edge-degree ops** | `UMA_NO_RECOMPUTE*` | `block_context.cpp:41-46` |
+
+And `predictor.cpp:429` **short-circuits**:
+
+```cpp
+if (per_chunk_ac || per_block_ac || prologue_ac) {
+    normed_raw = module_.forward(args).toTensor();   // per-chunk AC path
+} else if (checkpoint_enabled()) {                   // ← UMA_CKPT never reached
+```
+
+**On every production artifact the per-chunk ops are present, so the `UMA_CKPT`
+branch is dead code.** Flipping `UMA_CKPT`'s default to OFF would therefore
+change **nothing** on real runs — a purely cosmetic edit that appears to satisfy
+the directive while leaving the behaviour identical.
+
+**The real default lives in the artifact**, not the runtime flag: the exporter
+bakes `uma_ckpt::chunk` ops into the traced graph, and `UMA_NO_RECOMPUTE*` only
+bypasses them at runtime.
+
+### G.25.2 What "default OFF" must therefore mean
+
+Implement **both**, or the directive is not met:
+
+1. **Runtime:** `UMA_CKPT` defaults **OFF** on all builds — delete the
+   `#if defined(UMA_ENGINE_USE_XPU) → return true` special case
+   (`checkpoint_module.h:80-84`).
+2. **Runtime:** the per-chunk/per-block/edge-degree ops default to **bypassed**
+   — i.e. invert the sense so `UMA_NO_RECOMPUTE*` becomes
+   `UMA_RECOMPUTE*` (opt-in), or add a single `UMA_AC=0|1` master that defaults
+   OFF and drives all four existing flags.
+3. **Prefer one knob.** Four `UMA_NO_RECOMPUTE*` flags plus `UMA_CKPT` plus
+   `UMA_CHUNK_RETAIN_K` is the config sprawl A4 was about. A single documented
+   `UMA_AC` (`off` default / `chunk` / `block` / `full`) subsumes them and can
+   keep the old names as deprecated aliases.
+
+### G.25.3 Consequences to handle, not discover
+
+- **Capacity drops sharply.** Measured ceilings with AC off are far below the
+  N=38 that AC-on reaches (report §2a/§8: C2 OOMs at 1-tile N=18, 12-tile N≥36 —
+  and *fully* AC-off is tighter still). A user who previously ran N=32 by default
+  will now OOM by default. **This is the cost of the directive and must be made
+  legible**, which is exactly what the pre-flight memory check (A11)
+  is for: at `init_style`, estimate per-rank need vs free HBM and, if it will not
+  fit, **name the flag that fixes it** rather than dying mid-run.
+- **Performance changes.** AC-off is faster where it fits (opt4 was ~−24% Loop),
+  so the default gets faster *and* less capacious. Both must be documented.
+- **The G4 baseline must not move.** Every measured configuration in
+  `REPORT_2path_nvt_comparison.md` was run with AC on. Changing the default
+  changes what an unflagged run does — so the **parity suite must pin its flags
+  explicitly** rather than relying on defaults, or the tripwire silently starts
+  measuring a different configuration.
+
+### G.25.4 Acceptance criteria
+
+1. A run with **no `UMA_*` set** computes a virial when a barostat is present —
+   i.e. `fix npt` works out of the box on a single tile at a size that fits.
+2. `UMA_COMPUTE_VIRIAL` is no longer required as a separate opt-in, **or** is
+   documented as redundant with the new default.
+3. Enabling AC is one documented flag (`UMA_AC=chunk`), and `docs/ENV_VARS.md`
+   records the new defaults — enforced by the existing Tier-0 env-catalog guard.
+4. **Full G4 bit-identical** with AC explicitly enabled — proving the directive
+   changed only the *default*, not the numerics.
+5. A Tier-1 test asserts the resolved default is AC-off, so it cannot silently
+   revert (the ratchet pattern from A5b/A5c).
+6. The pre-flight check (A11) is in place **before or with** this change, so the
+   new default fails legibly rather than by OOM.
+
+### G.25.5 Sequencing
+
+**After S10** — `checkpoint_module.h`, `block_context.h` and `predictor.cpp` are
+all among the 21 uncommitted files; changing defaults on an unvalidated base
+would make any parity difference unattributable.
+
+Suggested order: **S10** → **A11** (pre-flight estimate) → **A10** (flip the
+default) → re-run G4 with AC pinned on.
+
+---
+
+## G.27 S10 half-done: committed, not validated  `[AUDIT 2026-09-03, 23rd pass]` — verdict rev 29
+
+> Twenty-third pass, reviewing `3fc647a53a`. **The commit half of S10 is done —
+> the working tree is clean.** The validation half is not.
+
+### G.27.0 Verdict: **A− held.** Tree is clean; the parity gate the campaign runs on has not been run
+
+`git status src/ ci/` → **0 modified files**. The 21-file batch is in the
+repository: A5's splits, A3 items 3–4, the transport test, the ASAN wiring, the
+A1 numeric gate, the DD reverse-exchange fix, and four DD scripts.
+
+**But no rebuild, tripwire, or G4 has been recorded for any of it.** Last G4 in
+the report is **8795781** (rev 26, the A3s2+A7 batch). Since then this commit
+changed **449 lines of `pair_uma.cpp`** plus `block_context.h`,
+`checkpoint_module.h`, `shared_peer.h`, `xccl_peer.{h,cpp}`,
+`mpi_peer_predictor.{h,cpp}` and `metadata.cpp`.
+
+### G.27.1 What is now verifiably in the tree  `[AUDIT 23rd pass]`
+
+| Item | Verified at HEAD |
+|---|---|
+| **A5** splits | ✅ max `PairUMA::` method **124 lines** (was 216); `UMA_A5_BASELINE=""` — ratchet enforces plain ≤130 with **no exemptions** |
+| **A3 items 3–4** | ✅ `~SharedPeerGatherSlot` present; `saved_data` lifetime contract documented |
+| **A1 numeric gate** | ✅ `ci/tier2_opt_equivalence.sh` committed — 7 memory strategies bit-for-bit, fail-closed under `--strict` |
+| **CI** | ✅ green: Tier-0 11 HARD / 4 REPORT, 0 findings; Tier-1 **42** (metadata contract +1) |
+
+This is real progress and it is now durable — which was the point of S10.
+
+### G.27.2 ⚠ The gap: G3/G5 was not applied to the largest change of the campaign  `[AUDIT 23rd pass]`
+
+The campaign's own standing rule (§D.10, "Standing invariant"): *no change lands
+without the tripwire + full G4 staying bit-identical.* Every prior compiled change
+honoured it — including comment-only edits (rebuild 8797181 for G.4's comment fix)
+and DD-only changes.
+
+**This commit is the single largest compiled change of the campaign and has none.**
+That is not a claim the code is wrong — `pair_uma.cpp`'s 449 lines are mostly A5's
+mechanical extraction, and Tier-0/1/2 are green. It is a claim that **the one gate
+that would detect a numerical regression has not been run**, on the change most
+likely to contain one.
+
+Concretely at risk: A5's extraction moved staging code between methods; A3's slot
+destructor changed teardown on the peer path; `checkpoint_module.h` and
+`block_context.h` sit directly on the autograd path.
+
+**S10 remains OPEN on its second half.** Rebuild + tripwire + full G4, record the
+job IDs. ~1 h of queue time.
+
+### G.27.3 Second item still outstanding: the DD title  `[AUDIT 23rd pass]`
+
+§G.21 is still titled *"the DD force bug is FOUND and FIXED"*. Its own body
+reports cos = **0.7986** against a gate that needs **1.0**, keeps A2 `OPEN`, and
+correctly localises the residual to the forward pass. Flagged in §G.24.3b;
+unchanged. A reader skimming headings will conclude G.2 is closed. **Retitle;
+the body is fine.**
+
+Also: the DD measurement (job **8799532**) appears in `CODE_QUALITY.md` but **not**
+in `REPORT_2path_nvt_comparison.md`, where every other measurement lives. Worth
+adding so the physics record is complete.
+
+### G.27.4 Grades — rev 29  `[AUDIT 23rd pass]`
+
+| Dimension | rev 28 | **rev 29** | Basis |
+|---|---|---|---|
+| Architecture | B | **B+** | ↑ A5 committed: max method 216 → 124, empty ratchet baseline |
+| Resource & lifetime | B+ | **A−** | ↑ all four A3 code items committed, ASAN-covered |
+| Test & CI infrastructure | A− | **A−** | A1 gate committed — but still SKIPs without a local ~90 MB artifact, so a fresh clone gains nothing |
+| **Process / bookkeeping** | B | **B** | commit half done (good); **G3/G5 not applied to the largest compiled change** — recovers to A− when G4 runs |
+| **Overall** | **A−** | **A−** | |
+
+### G.27.5 Instructions  `[AUDIT 23rd pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **S10b** | **Rebuild + tripwire + full G4 on `3fc647a53a`; record job IDs.** The tree is clean, so this is now purely a queue run | ~1 h | **OPEN — highest priority** |
+| **S12** | Retitle §G.21 (body unchanged); add job 8799532 to the report | 10 min | OPEN |
+| **A1 close-out** | Commit a smaller toy artifact, or a CI step that builds one, so the gate runs in a fresh clone | ~half day | **OPEN — all that separates A− from A** |
+| **A10 / A11** | Checkpointing default OFF (§G.25) + pre-flight memory check | ~1 day | OPEN — after S10b |
+| **A2 / S2** | DD force gate → cos = 1.0 (forward-pass residual) | weeks | OPEN |
+
+### G.27.6 Bottom line
+
+S10's commit half closed the recurring "work exists only in a working directory"
+problem, and the committed content is strong — A5 beat its target, A3 is complete
+in code, and the A1 numeric gate is in the repository.
+
+**One thing to do: run G4.** The campaign has held a bit-identity gate on every
+compiled change for twenty passes; the largest change of all is currently the
+exception. It is a queue submission, not engineering.
+
+---
+---
+
+
+---
+---
+
 
 ---
 ---

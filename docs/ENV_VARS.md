@@ -20,14 +20,16 @@ is **not** listed in this file. Keep this catalog in sync when adding a var.
 |---|---|---|---|
 | `UMA_CHECKPOINT` | path | (none) | Path to the scientific UMA checkpoint (`uma-s-1p2.pt`); required by the eager/GP worker and by provenance sha256. |
 | `UMA_ENGINE_BUILD_GRAPH` | 0/1 | 0 | Build/trace the graph in-engine instead of loading a prebuilt artifact. |
-| `UMA_CKPT` | 0/1 | 0 | Enable whole-module C++ activation checkpointing (single-tile path). |
+| `UMA_AC` | off/chunk/block/full | **off** | **A10 (owner directive §G.25): activation checkpointing master, DEFAULT OFF.** `off` = no recompute anywhere (fully differentiable, NPT/virial works, lower capacity); `chunk` = per-chunk recompute (restores most capacity); `block` = chunk+block; `full` = chunk+block+edge-degree. Enabling AC trades the virial capability for memory. Subsumes the four `UMA_NO_RECOMPUTE*` (now deprecated aliases). |
+| `UMA_CKPT` | 0/1 | **0** | Whole-module C++ activation checkpointing. **A10: default OFF on ALL builds** (was ON for XPU). On production artifacts this branch is dead (per-chunk ops short-circuit); use `UMA_AC` for the effective control. |
+| `UMA_NO_RECOMPUTE`, `_BLOCK`, `_CHUNK`, `_EDEG` | 0/1 | 0 | **Deprecated (A10):** legacy per-level "retain activations" switches. Redundant now that recompute defaults OFF; kept for back-compat. Prefer `UMA_AC`. |
 | `UMA_MN_CKPT` | 0/1 | 0 | Whole-module checkpointing on the multi-node (GP) legacy monolithic-shard path. |
 | `UMA_EAGER_CKPT` | 0/1 | 0 | Eager (non-traced) checkpoint path selection. |
 | `UMA_CHUNK_RETAIN_K` | int | (adaptive) | Number of edge-chunk activations to retain (memory/speed knob); the harness sweeps 3→2→1→0. |
 | `UMA_SKIP_MAXNBR_CAP` | 0/1 | 0 | Skip the max-neighbors cap (fast artifacts). |
 | `UMA_ALLOW_LEGACY_METADATA` | 0/1 | 0 | **P4'.1**: accept a `metadata.json` without `metadata_version>=2` (pre-Sprint-5 artifacts). Off ⇒ such artifacts are rejected. |
 | `UMA_ALLOW_FAIRCHEM_MISMATCH` | 0/1 | 0 | **P5'.1**: allow export with a fairchem/torch version different from the pinned one (`trace_patch`). |
-| `UMA_COMPUTE_VIRIAL` | 0/1 | 0 | **P0'.1 step 2**: enable the single-tile stress/virial (pos+cell autograd) → NPT. Requires `UMA_CKPT=0`; refused on the GP/DD path. |
+| `UMA_COMPUTE_VIRIAL` | 0/1 | **auto** | **P0'.1 step 2 / A10**: single-tile stress/virial (pos+cell autograd) → NPT. **Now AUTO-ENABLED** when a barostat (`fix npt/nph/…`) is present on a single tile with AC off (the new default), so NPT works out of the box. Set to `0` to force off; refused on the GP/DD path and when AC is explicitly on. |
 | ⚠ `UMA_SKIP_FORCE_GP_REDUCE` | 0/1 | 0 | **CHANGES NUMERICS.** Skip the cross-rank force all-reduce on the GP path (`kokkos_gp_runtime.py`, debug/perf only) → forces are per-shard, NOT the full system. Do not use for production. |
 
 ## 2. Runtime — performance / debug (may be read per-step; informational)
@@ -140,7 +142,12 @@ hard-code copies in comparators or `.pbs` scripts.
   `pair_uma.cpp` now guards `atom->natoms > INT_MAX` with an explicit
   `error->all` naming the limit, instead of silently narrowing >2^31 atoms into a
   garbage int. Converts silent-wrong-physics into a clear, actionable abort.
-- **NPT/stress requires `UMA_COMPUTE_VIRIAL=1` and is single-tile only** (P0'.1); the
-  GP/DD paths refuse a barostat (they compute no virial).
+- **NPT/stress now works OUT OF THE BOX on a single tile** (A10, §G.25): activation
+  checkpointing defaults OFF (`UMA_AC=off`), so the fully-differentiable virial path
+  is the default; a barostat on a single tile auto-enables `UMA_COMPUTE_VIRIAL`. The
+  GP/DD paths still refuse a barostat (no virial there), and enabling AC
+  (`UMA_AC=chunk/…`) makes the virial unavailable (strain grad can't thread the
+  checkpoint) — refused with a clear message. Capacity is lower by default; the A11
+  pre-flight check warns and names `UMA_AC=chunk` when a run may OOM.
 - **DD multi-species energies are approximate** (P0'.2): the traced MoLE mixture uses
   each rank's local composition; a one-time warning is emitted (R4). DD is deferred.

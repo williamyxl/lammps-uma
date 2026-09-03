@@ -76,15 +76,17 @@ struct CheckpointModuleFn
   }
 };
 
-// Env gate: UMA_CKPT. Default ON for the XPU build (large systems OOM without
-// it and it is bit-exact); UMA_CKPT=0 disables.
+// Env gate: UMA_CKPT (whole-module checkpoint). A10 (audit rev 29 §G.25 — owner
+// directive): activation checkpointing defaults OFF on ALL builds, so an
+// unflagged run is fully differentiable (NPT/virial works) at lower capacity.
+// The previous XPU "default ON" special case is removed. UMA_CKPT=1 opts back in.
+// NOTE: on production artifacts this whole-module branch is dead code (the
+// per-chunk ops short-circuit first, predictor.cpp) — the effective AC default is
+// controlled by UMA_AC in block_context.cpp (see §G.25.1). This flag is kept
+// consistent with the directive for the no-per-chunk-op case.
 inline bool checkpoint_enabled() {
   const char* e = std::getenv("UMA_CKPT");
-#if defined(UMA_ENGINE_USE_XPU)
-  if (e == nullptr) return true;   // default ON on XPU
-#else
-  if (e == nullptr) return false;  // default OFF on CUDA (single-tile has memory)
-#endif
+  if (e == nullptr) return false;  // A10: default OFF on every build
   return !(e[0] == '0' && e[1] == '\0');
 }
 

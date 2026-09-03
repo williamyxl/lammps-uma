@@ -36,19 +36,65 @@ bool env_flag_1(const char* name) {
   const char* e = std::getenv(name);
   return e != nullptr && e[0] == '1' && e[1] == '\0';
 }
+
+// A10 (audit rev 29 §G.25 — owner directive): activation checkpointing defaults
+// OFF. Recompute is now OPT-IN via a single UMA_AC master, so an unflagged run
+// gets the plain, fully-differentiable path (NPT/virial works) at lower capacity.
+//
+//   UMA_AC unset | "off" | "0"  -> NO recompute anywhere (default): every op
+//                                   retains its activations. Fully differentiable,
+//                                   tighter HBM. This is the new default.
+//   UMA_AC="chunk"              -> per-chunk recompute ON (the memory-heavy one)
+//   UMA_AC="block"             -> chunk + block
+//   UMA_AC="full"              -> chunk + block + edge-degree prologue
+//
+// Deprecated aliases (still honoured so old scripts keep working): the legacy
+// sense was "recompute ON by default, UMA_NO_RECOMPUTE* turns it OFF". Under the
+// new default recompute is already OFF, so UMA_NO_RECOMPUTE* are no-ops UNLESS
+// someone also set UMA_AC; then they subtract as before. UMA_RECOMPUTE* are the
+// new opt-in per-level knobs (equivalent to picking UMA_AC granularity).
+enum class AcLevel { kOff, kChunk, kBlock, kFull };
+AcLevel ac_level() {
+  static const AcLevel v = [] {
+    const char* e = std::getenv("UMA_AC");
+    if (e == nullptr) return AcLevel::kOff;              // ← DEFAULT OFF (A10)
+    const std::string s(e);
+    if (s == "off" || s == "0" || s.empty()) return AcLevel::kOff;
+    if (s == "chunk") return AcLevel::kChunk;
+    if (s == "block") return AcLevel::kBlock;
+    if (s == "full" || s == "1") return AcLevel::kFull;
+    return AcLevel::kOff;  // unknown -> off (safe/default; documented in ENV_VARS)
+  }();
+  return v;
+}
+// "no_recompute_X" == "retain activations for level X" == "AC is NOT applied at X".
+// Default OFF means these return TRUE unless UMA_AC opts the level in. The legacy
+// UMA_NO_RECOMPUTE* still force TRUE (retain) for back-compat with old scripts.
 bool no_recompute_block() {
-  static const bool v =
-      env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_BLOCK");
+  static const bool v = [] {
+    if (env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_BLOCK"))
+      return true;                                        // legacy explicit retain
+    const AcLevel L = ac_level();
+    return !(L == AcLevel::kBlock || L == AcLevel::kFull);  // recompute only if opted in
+  }();
   return v;
 }
 bool no_recompute_chunk() {
-  static const bool v =
-      env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_CHUNK");
+  static const bool v = [] {
+    if (env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_CHUNK"))
+      return true;
+    const AcLevel L = ac_level();
+    return !(L == AcLevel::kChunk || L == AcLevel::kBlock || L == AcLevel::kFull);
+  }();
   return v;
 }
 bool no_recompute_edeg() {
-  static const bool v =
-      env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_EDEG");
+  static const bool v = [] {
+    if (env_flag_1("UMA_NO_RECOMPUTE") || env_flag_1("UMA_NO_RECOMPUTE_EDEG"))
+      return true;
+    const AcLevel L = ac_level();
+    return !(L == AcLevel::kFull);
+  }();
   return v;
 }
 
