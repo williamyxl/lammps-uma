@@ -87,12 +87,38 @@ def main():
     a = f_lmp.ravel()
     b = f_ase.ravel()
     cos = float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b)))
+    # NON-SATURATING force metrics. Cosine is a poor accuracy metric near 1: its
+    # slope -> 0 there (arccos(0.99) is still ~8 deg), and being a global inner
+    # product it hides per-atom outliers. Report the metrics the gate actually
+    # uses instead: relative L2 error (linear near 0, magnitude-aware) and the
+    # per-atom angular error (max + 99th pct), which a single bad atom moves.
+    rel_l2 = float(np.linalg.norm(a - b) / (np.linalg.norm(b) + 1e-300))
+    # TRUE per-atom force-direction deviation, in DEGREES. Report this ALWAYS,
+    # alongside cosine, because cosine saturates near 1 (arccos(0.99) is still
+    # ~8 deg) and hides per-atom outliers. mean/median = typical misdirection;
+    # p99/max = worst atoms.
+    fn_lmp = np.linalg.norm(f_lmp, axis=1)
+    fn_ase = np.linalg.norm(f_ase, axis=1)
+    good = (fn_lmp > 1e-12) & (fn_ase > 1e-12)
+    if good.any():
+        pa_cos = np.clip((f_lmp[good] * f_ase[good]).sum(1)
+                         / (fn_lmp[good] * fn_ase[good]), -1.0, 1.0)
+        ang = np.degrees(np.arccos(pa_cos))
+        ang_mean = float(ang.mean())
+        ang_med = float(np.median(ang))
+        ang_p99 = float(np.percentile(ang, 99))
+        ang_max = float(ang.max())
+    else:
+        ang_mean = ang_med = ang_p99 = ang_max = 0.0
     sampled = n
 
     print(f"natoms={n} sampled={sampled} (min_sample={min_sample})")
     print(f"  E_lmp={e_lmp:.6f}  E_ase={e_ase:.6f}  dE={dE:.3e} eV "
           f"({dE_per_atom_meV:.3e} meV/atom)")
-    print(f"  max|dF|={max_dF:.3e}  rms|dF|={rms_dF:.3e}  cos={cos:.10f} eV/A")
+    print(f"  max|dF|={max_dF:.3e}  rms|dF|={rms_dF:.3e}  relL2(F)={rel_l2:.3e} eV/A")
+    # force DIRECTION deviation (degrees) — the metric that does not saturate
+    print(f"  force angle deviation: mean={ang_mean:.2f} median={ang_med:.2f} "
+          f"p99={ang_p99:.2f} max={ang_max:.2f} deg  (cos={cos:.10f})")
     # DD Phase A: the LAMMPS global energy is a per-rank subsystem sum, not the
     # true global energy (needs per-atom-energy export, Phase B). UMA_DD_SKIP_ENERGY=1
     # validates FORCES over ALL atoms (the exact quantity) and drops the energy gate.

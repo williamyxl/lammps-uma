@@ -2068,7 +2068,7 @@ maps to existing IDs so no new bookkeeping surface is created; sequencing per §
 | Ax | Dimension → A | Maps to | State |
 |---|---|---|---|
 | **A1** | Test&CI (numerical-core gate) | **S1** — Tier-2 equiv suite, folds G12/G17/G5 | **`FIXED` (§G.20 + §G.22 + close-out)** — **all halves done AND runs in a fresh clone.** Contract half: `test_opt_equivalence_contract.py` (8 Tier-1). Numeric half: `ci/tier2_opt_equivalence.sh` — real forwards through `uma_parity_cli`, opt2/opt4/opt5 across 8 configs bit-identical (E = −27.048345166039), login node, negative-tested, fail-closed. **Close-out (§G.27.5):** `ci/build_toy_artifact.sh` builds the 8-atom CPU toy on demand (~4 min) and the gate auto-builds it when `UMA_TOY_ARTIFACT` is unset, so a **fresh clone executes the gate** instead of SKIPping (verified: auto-built → OPTEQ PASS). Committed + G3-validated (8801160/8801337/8801338, 7/7 bit-identical) |
-| **A2** | Distributed correctness | **S2** + finish P0.3 pre-collective agreement | **bug half `FIXED`; scheme half RECLASSIFIED (§G.21)** — `reduce_dd_ghost_forces()` fixed the discarded cross-rank ghost forces (cos 0.644 → 0.7986, halo-ON-is-worse inversion gone, job 8799532). The residual +10 meV/atom is the **k=4 thin-halo approximation**, PROVEN by the shell scan (dE 10.09 → 8.67 as shell 6.5 → 12 Å, job 8800159): it shrinks monotonically as real ghosts replace the halo, which convicts the halo/ghost path and refutes the graph/head hypothesis. cos → 1.0 is a **scheme trade-off** (deeper 24 Å halo or exact ghost-grad), not a bug — returned to DEV_PLAN PART III. Also fixed en route: null-provenance metadata crash (`opt_string`). G3-gated (8799359/8799393/8799394 + 8800089, 7/7 bit-identical) |
+| **A2** | Distributed correctness | **S2** + finish P0.3 pre-collective agreement | **`OPEN` — DD is NOT USABLE.** Measured cos = **0.7986** (job 8799532/8803112) = **arccos ≈ 37° average force misdirection → invalid MD dynamics**, plus **+11.6 meV/atom** energy error. `reduce_dd_ghost_forces()` improved it (0.644 → 0.7986) and PART H hardened the defects, but neither makes DD *work* — it must not be used for production. Root cause characterised (shell scan 8800159: error shrinks as shell widens) = the **k=4 thin-halo cannot supply rim edges**. Fixing it is an unmade **design decision** (deep 24 Å halo, forfeiting the memory savings, or an exact ghost-gradient exchange — DEV_PLAN PART III), NOT a small fix. G3-gated for regression only (single-node/GP bit-identical). |
 | **A3** | Resource & lifetime | predictor/mpi_peer → `unique_ptr`; `Shm` init; slot dtor; `saved_data`; ASAN test | **`FIXED` — 5 of 5 (§G.20)**: unique_ptr (§G.15), `Shm` init/destroy (§G.17), ASAN harness (§G.19), **slot destructor + deleted copy/move**, **`saved_data` lifetime contract + `TORCH_CHECK` ×8**. All CI-verified: **5/5 CTests clean under `-fsanitize=address`** (harness extended with a `create()`→`destroy()` slot cycle). **G3 verified** (8799157/8799214/8799216, 7/7 bit-identical) |
 | **A4** | Config surface | `struct UmaConfig` + **allreduce collective-affecting flags** (correctness half) | `◐` — **correctness half DONE** (§G.13: 3 flags folded into P0.2 create() agreement, closes G.3); `UmaConfig` ergonomics + keyword promotion still OPEN (folds P4.1) |
 | **A5** | Architecture | split `load_predictor()` (218 L) / `run_compute_dd` (156 L); one `stage_inputs()` | **`FIXED` (§G.20)** — exit criterion *"no method > 130 L"* **met**: `load_predictor()` 215→**60** (extracted `init_mpi_peer()` 93 L + file-local `uma_select_compute_device()`), `run_compute_dd()` 156→**129** (extracted `pad_dd_edges()`). Pure code motion. **`UMA_A5_BASELINE` now EMPTY** → ratchet HARD-fails on any over-130 method. **G3 verified** (8799157/8799214/8799216, 7/7 bit-identical) |
@@ -5636,14 +5636,18 @@ code motion did not perturb the dynamics, not merely step 0.
 
 ---
 
-## G.21 A2/S2 — DD ghost-force bug found & fixed (cos 0.644→0.7986); residual is the k=4 approximation, A2 reclassified  `[DEV / SELF-REVIEW 2026-09-03]`
+## G.21 A2/S2 — DD ghost-force bug fixed (cos 0.644→0.7986), but DD is STILL NOT USABLE  `[DEV / SELF-REVIEW 2026-09-03, status corrected 2026-09-04]`
 
-> **Retitled per §G.24.3b / §G.27.3 (S12).** The original heading said "FOUND and
-> FIXED", which overstated the body: one real bug was fixed (the discarded
-> cross-rank ghost forces, cos 0.644 → 0.7986), but the DD force gate is **not**
-> at cos = 1.0. The residual was subsequently proven (§G.21.7 shell scan) to be
-> the **k=4 thin-halo approximation**, not a code defect — so the "cos → 1.0" half
-> is reclassified to a scheme trade-off, not closed. Body unchanged.
+> **⛔ Read this first.** cos = 0.7986 is **arccos ≈ 37°** — each force is, on
+> average, 37° off the correct direction. **DD MD dynamics are invalid** and DD
+> must not be used for production; the +11.6 meV/atom energy error compounds it.
+> Fixing the ghost-force bug (0.644 → 0.7986) and hardening the PART H defects
+> were real and necessary, but they do **not** make DD work. Earlier revisions of
+> this section called the remaining gap a "scheme trade-off"; that language
+> understated a broken path. The honest status: **DD is OPEN/unusable**, and
+> closing it is an unmade design decision (deep halo or exact ghost gradients),
+> not a finishing touch. The shell scan (§G.21.7) explains *why* it fails; it does
+> not make it any less failed.
 
 > **`[DEV]`, not `[AUDIT]`** (S6). Instruction: *"address all open items, don't
 > defer."* A2/S2 was the item I declined in §G.20 as "a multi-week debugging

@@ -637,15 +637,24 @@ completes in ~31–41 s, forces dumped for all 262,144 atoms.
 
 Parity vs 12-tile ASE-GP oracle:
 
-| Config | E_lmp (eV) | dE (meV/atom) | force cos | rms\|dF\| | max\|dF\| |
-|---|---|---|---|---|---|
-| **halo ON (k=4)** | −882,333.37 | 11.61 | **0.644** | 0.140 | 1.28 |
-| **halo OFF** (`UMA_DD_NO_HALO=1`) | −882,195.43 | 12.14 | **0.803** | 0.089 | 1.16 |
-| oracle | −885,377.06 | 0 | 1.0 | 0 | 0 |
+| Config | E_lmp (eV) | dE (meV/atom) | **max\|dF\| (gate)** | rms\|dF\| | ~avg angle | force cos |
+|---|---|---|---|---|---|---|
+| **halo ON (k=4), after ghost-force fix** | −882,333.37 | 11.61 | **0.898** | 0.102 | **≈ 37°** | 0.7986 |
+| **halo ON (k=4), before fix** | −882,333.37 | 11.61 | 1.28 | 0.140 | ≈ 50° | 0.644 |
+| **halo OFF** (`UMA_DD_NO_HALO=1`) | −882,195.43 | 12.14 | 1.16 | 0.089 | ≈ 37° | 0.803 |
+| oracle | −885,377.06 | 0 | **≤ 1e-5 (target)** | 0 | 0° | 1.0 |
 
-**Both gates FAIL.** Energy is 0.34% off; forces are qualitatively right but far
-from parity. **Turning the halo ON makes forces WORSE (0.80 → 0.64)** — the
-central anomaly.
+**The gate is `max|dF| ≤ 1e-5 eV/Å`; DD is at ~0.9 — five orders of magnitude
+past it. DD is NOT usable for MD.** Do not read the cosine as "close": cosine
+saturates near 1 (arccos(0.99) is still ~8°, arccos(0.999) ~2.6°) and, being a
+global inner product, hides per-atom outliers, so it is a **poor** force-accuracy
+metric. The honest numbers are `max|dF|`, `rms|dF|`, and the per-atom **angle**:
+at cos 0.7986 the average force is **~37° misdirected**, which makes the dynamics
+meaningless. The single-node GP/single-tile paths report cos = 1.0 only because
+they are **bit-exact** (a parity statement), not because "high cosine = accurate".
+`parity_vs_asegp.py` now also prints `relL2(F)` and `ang(max, p99)` so the metric
+cannot flatter a genuinely-different path. The ghost-force fix (0.644 → 0.7986)
+and PART H hardening were necessary but do **not** make DD work.
 
 ## II.6 Isolation tests — every primitive proven CORRECT
 

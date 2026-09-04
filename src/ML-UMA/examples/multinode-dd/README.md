@@ -1,11 +1,33 @@
 # Multi-node spatial domain decomposition (DD)
 
-## Status (2026-08-27): k=4 implemented, compiles clean, ready to run
+## Status (2026-09-04): ⛔ NOT USABLE — measured cos = 0.7986, dynamics are invalid
 
-**k=4 per-layer halo exchange, 6 A halo** — the design that fits N=32 on 2 nodes.
-Engine library and `pair_uma.cpp` both build/syntax-check clean against
-torch 2.13.0+xpu on Aurora. Remaining: export the k=4 artifact and run the
-2-node job (needs a queue allocation).
+**Do not run production MD on the DD path.** It has been run and measured, and it
+does **not** work:
+
+| N=32, 2 nodes × 12 tiles vs 12-tile ASE-GP oracle | value | verdict |
+|---|---|---|
+| energy | −882,333.37 eV (oracle −885,377.06) | **+11.6 meV/atom under-binding** |
+| force cos | **0.7986** | **arccos ≈ 37° average misdirection** |
+| rms\|dF\| | 0.1016 eV/Å | — |
+
+**arccos(0.7986) ≈ 37°** means each force points, on average, 37° away from the
+correct direction. That is not "close" — MD trajectories are meaningless, and no
+observable (RDF, diffusion, stress, phonons) is trustworthy. Energy is ~1 kcal/mol
+per atom off on top of that. The single-node GP path is bit-exact; **DD is not.**
+
+**Root cause (characterised, job 8800159):** the k=4 *thin*-halo refreshes ghost
+FEATURES but cannot supply the *edges* a near-rim atom needs — the ghost-shell
+scan shows the error shrinking as the shell widens (6.5 Å → 10.1, 12 Å → 8.7
+meV/atom). Reaching usable accuracy requires either a **deep** (num_layers·cutoff
+= 24 Å) halo — which gives back the memory the k=4 scheme was built to save — or an
+exact per-layer ghost-gradient exchange (`DEV_PLAN_node_parallelism.md` PART III).
+The multi-node **defect hardening** (PART H: H1–H9, H11) and the ghost-force fix
+(cos 0.644 → 0.7986) are done, but the fundamental accuracy problem is a **design
+decision that has not been made**, not a bug that has been fixed.
+
+Engine + `pair_uma.cpp` build clean (torch 2.13.0+xpu, Aurora); the recipe below
+runs, but the numbers above are what it produces.
 
 ### Run recipe (2-node N=32, energy + force parity vs 12-tile ASE-GP oracle)
 
