@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies; PART G = single-node problems (rev 30 = **A**); PART H = multi-node audit (rev 31, multi-node **C+**)**
+**PART F = auditor replies; PART G = single-node (rev 30 = **A**); PART H = multi-node (rev 32, multi-node **B**)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -289,7 +289,20 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > re-creates the `r=0` `dummy→dummy` edge. Also: **zero automated multi-node
 > tests**. One correction to P0′.6 — the `comm->style`/CommTiled concern is a
 > **false alarm** (verified against `comm_tiled.cpp:1279-1282`). **H-1…H-4 are
-> one-liners; do them before any further DD physics.**** Also outstanding: retitle §G.21 (still says
+> one-liners; do them before any further DD physics.**
+>
+> **UPDATE 26 — PART H response reviewed (§H.10, rev 32): multi-node C+ → B.**
+> **8 of 15 findings fixed in one cycle, all four P0s**, validated by full G4
+> **8802938 7/7 bit-identical**. H1 (`comm_reverse_off`), H3 (backward gated),
+> H5 (**better than my fix** — a second pad node removes the `nall==0` dependency
+> entirely), H2/H7/H8/H9/H11. **H15: 6 new Tier-1 tests — I ran them, 6/6**, incl.
+> halo adjointness `⟨Sx,y⟩=⟨x,Sᵀy⟩` and a regression test for H3 itself.
+> **The mandated A/B was re-run on the corrected control (8803112): cos = 0.7986,
+> unchanged** — correct, since H3 corrupted only the control arm, so the
+> thin-halo conclusion now rests on a valid experiment. Also caught by *running*:
+> the **A10×DD interaction** (DD needs `UMA_AC=chunk` for capacity). Remaining:
+> **H4** (last silent-wrong-forces path, blocked on `num_layers` in metadata) +
+> **H6**, best done together as ~1 day.** Also outstanding: retitle §G.21 (still says
 > DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
@@ -382,8 +395,8 @@ results). This document is the standing verdict and is updated as the code chang
   fresh clone; single-node engine at A; DD (A2) the remaining work.**
 - **Part H — Multi-node audit.** ★ GP and DD audited on their own terms at HEAD
   `e7031807dd`: 15 findings (H1–H15) severity-ordered, what is verified *correct*,
-  the quantified halo round trip, and H-1…H-10 instructions. **Multi-node C+**;
-  single-node (PART G) is unaffected at **A**.
+  the quantified halo round trip, and instructions. **`[AUDIT]` §H.10 reviews the
+  response: 8/15 fixed incl. all P0s → multi-node **B**** (single-node **A**).
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -2074,6 +2087,7 @@ Landed so far toward the roadmap: A5's size-guard enforcement (informational, `[
 
 | Date | Sprint/task | Change | Gate jobid |
 |---|---|---|---|
+| 2026-09-04 | **`[DEV]` §H.10.6: H-11 (H4+H6) + H-12 (A11 covers DD)** | **H-12:** `preflight_memory_check` no longer returns early for `dd_active_` — it never fired for the 8803000 DD OOM, the exact case A11 exists for. DD per-rank load is now `owned+ghost` (nall) and the AC resolution is A10-consistent (default OFF unless `UMA_AC`/`UMA_CKPT`). **H-11a:** parsed `num_layers`/`dd_k` into `ArtifactMetadata` (exporter wrote them; C++ didn't read them). **H-11b (H4, the last silent-wrong-forces DD path):** `init_style_dd()` validates `comm->cutghostuser ≥` required shell (1·cutoff for the per-layer k≥num_layers artifact, num_layers·cutoff otherwise); too-shallow → `error->all`; legacy artifacts (no num_layers) warn, don't block. **H-11c (H6):** `dd_flag_agreement()` `Allreduce(MIN/MAX)` over `[no_halo, halo_test, edge_cap]` — a cross-rank mismatch aborts cleanly instead of deadlocking, mirroring GP's flag agreement. Extracted `init_style_dd()` to keep methods ≤130. **Tier-1 +6** (shell-depth k4/k1/legacy, flag-agreement equal/mismatch×2): `test_multinode_dd_contract.py` 12/12. **Validated:** rebuild 8804541 `LMP BUILD OK`; tripwire 8804577 PASS; **full G4 8804578 all 7 bit-identical** (setup/DD-path only, single-node/GP untouched). Remaining: H10 (re-export), H12-14 (design). | 8804541, 8804577, 8804578 |
 | 2026-09-04 | **`[DEV]` §H.9: PART H multi-node hardening (H1/H2/H3/H5/H7/H8/H9/H11 + H15 CI)** | Worked the §H.7 list top-down. **P0 one-liners:** H1 `comm_reverse_off` (newton-off heap overflow), H3 gate halo backward on `no_halo` (makes the A/B diagnostic valid), H5 zero-atom-rank second far pad node (no `dummy→dummy` r=0), H8 `!mpi_peer` before the Allgathers (deadlock). **P1:** H7 GP gather limit `INT_MAX/3`, H9 `run_exchange` `.clone()` (CPU aliasing), H11 `pad_dd_edges` `error->all`. **H2** `UMA_DD_EDGE_CAP` validated + metadata-cross-checked. **H15/H-9** new `test_multinode_dd_contract.py` (6 Tier-1 tests: halo adjointness ⟨Sx,y⟩=⟨x,Sᵀy⟩, pad incl nall==0, pack/unpack round trip, H3 control). New helpers `resolve_dd_edge_cap`/`setup_dd_pad_nodes` keep `run_compute_dd`≤130. **Validated:** rebuild 8802866 `LMP BUILD OK`; tripwire 8802937 PASS; **full G4 8802938 all 7 bit-identical** (single-node/GP unaffected — H-fixes are DD/GP-path, gated). **H-2 mandate:** re-ran the DD halo-ON A/B on the H3-corrected binary — **cos = 0.7986, unchanged** (job 8803112), confirming the k=4-thin-halo conclusion now rests on a sound control (H3 only affects the no_halo control's gradient, so halo-ON being unchanged is correct). **A10 interaction found:** DD needs AC on for capacity; the first DD re-run (8803000) hit `OUT_OF_RESOURCES` under the new AC-off default — fixed by pinning `UMA_AC=chunk` in all DD scripts. **Deferred (scoped):** H4/H6 (metadata parse + DD flag-agreement, ~½ day), H10 (dummy Z in MoLE, needs re-export, ~5e-5), H12-14 (design limits). | 8802866, 8802937, 8802938, 8803112 |
 | 2026-09-03 | **`[DEV]` §G.25: A10 (checkpointing default OFF) + A11 (pre-flight memory check)** | **A10 (owner directive):** activation checkpointing now defaults **OFF** on all builds. New `UMA_AC` master (`off`/`chunk`/`block`/`full`, default `off`) in `block_context.cpp` inverts the per-chunk/block/edge-degree recompute sense so an unflagged run is fully differentiable; the four `UMA_NO_RECOMPUTE*` become deprecated aliases (still honoured). `checkpoint_module.h` XPU "default ON" special case removed. Per §G.25.1, the real default lives in these per-chunk ops (the `UMA_CKPT` whole-module branch is dead on production artifacts). **NPT out of the box:** a barostat on a single tile with AC off now auto-enables the virial (no `UMA_COMPUTE_VIRIAL` needed); AC-on + barostat is refused with a clear message. **A11:** `preflight_memory_check()` at `init_style` warns (never aborts) when per-rank atoms exceed the measured ceiling (~36k/tile AC-on, ~12k AC-off) and names the flag (`UMA_AC=chunk`). **§G.25.3 baseline pinned:** parity scripts now pass `UMA_AC=chunk` explicitly so the G4 baseline does not silently move. **Acceptance §G.25.4 #4 MET:** rebuild 8801595 `LMP BUILD OK`; tripwire 8801716 PASS; **full G4 8801719 all 7 configs bit-identical** with AC pinned (N=16 all-W −110673.829050 + step-10 −110602.976229, N=32 −885377.060040) — proving the default flip changed only the default, not the numerics. Tier-1: 4 new AC-default-off contract tests (§G.25.4 #5). `ENV_VARS.md` updated. | 8801595, 8801716, 8801719 |
 | 2026-09-03 | **`[DEV]` response to §G.27: S10b + S12 + A1 close-out** | **S10b DONE (the auditor's top item):** rebuild + tripwire + full G4 on committed HEAD `3fc647a53a` — the largest compiled change of the campaign (449 lines `pair_uma.cpp` + 5 engine headers) was the one exception to the bit-identity rule; now closed. Rebuild 8801160 `LMP BUILD OK`; tripwire 8801337 PASS; **full G4 8801338 all 7 configs bit-identical** (N=16 all-W −110673.829050 + step-10 −110602.976229, N=32 −885377.060040, cos=1.0). G3/G5 satisfied on the A5/A3/A1/DD/metadata batch. **S12 DONE:** retitled §G.21 (no longer claims "FIXED"); added the DD measurement (job 8799532) as report §15. **A1 close-out DONE (the sole A−→A item):** the A1 gate SKIPped without a local ~90 MB artifact; new **`ci/build_toy_artifact.sh`** builds an 8-atom CPU-traced toy on demand (~4 min, login node, no allocation), and `tier2_opt_equivalence.sh` auto-builds it when unset — so the gate now RUNS in a fresh clone (verified: auto-built toy → OPTEQ PASS, 8 configs bit-identical). Tier-0 tracked-files guard covers the new script. | 8801160, 8801337, 8801338 |
@@ -6643,9 +6657,9 @@ diagnostic used to reason about the halo is itself wrong*.
 | **H1** | **P0** | defect | `comm_reverse_off` never set; `newton off` zeroes `maxreverse` | **FIXED** — `comm_reverse_off = comm_reverse` |
 | **H2** | **P0** | missing validation | `UMA_DD_EDGE_CAP` unvalidated, disconnected from metadata | **FIXED** — `resolve_dd_edge_cap()` strtoll + metadata cross-check (cross-rank agreement = H6, deferred) |
 | **H3** | **P0** | defect | `UMA_DD_NO_HALO=1` gates forward but **not** backward | **FIXED** — backward gated on `uma_halo_disabled()`; A/B re-run 8803112 |
-| **H4** | **P0** | missing validation | `comm->cutghostuser` never read (P0′.6) | **DEFERRED** — needs `num_layers` in metadata first (~½ day) |
+| **H4** | **P0** | missing validation | `comm->cutghostuser` never read (P0′.6) | **FIXED (§H.10.6)** — `num_layers`/`dd_k` parsed into metadata; `init_style_dd()` errors if the ghost shell is too shallow. The last silent-wrong-forces DD path is closed. |
 | **H5** | P1 | defect | zero-atom rank ⇒ pad edge `dummy→dummy`, `r=0` | **FIXED** — `setup_dd_pad_nodes()` second far node |
-| **H6** | P1 | defect | `UMA_DD_NO_HALO` / `UMA_DD_HALO_TEST` per-rank, no agreement | **DEFERRED** — DD flag-agreement Allreduce (~½ day) |
+| **H6** | P1 | defect | `UMA_DD_NO_HALO` / `UMA_DD_HALO_TEST` per-rank, no agreement | **FIXED (§H.10.6)** — `dd_flag_agreement()` Allreduce(MIN/MAX); cross-rank mismatch aborts cleanly, no deadlock. |
 | **H7** | P1 | defect | GP `Allgatherv` `int` counts; `3*N` overflow | **FIXED** — guard `INT_MAX/3` |
 | **H8** | P1 | defect | GP `!mpi_peer` check **after** 4 collectives | **FIXED** — moved before |
 | **H9** | P1 | defect | `run_exchange` aliases + mutates input on CPU | **FIXED** — `.clone()` on CPU-FP64 alias |
@@ -6878,6 +6892,150 @@ control, so the corrected A/B is required before any further force-gate work.
 tests. Rebuild + tripwire + full G4 + the corrected DD A/B: see the changelog row.
 Single-node parity is unaffected by construction (H-fixes are all on the DD/GP
 paths, gated by `dd_active_`/`mn_active`), but G3 is measured, not assumed.
+
+---
+
+## H.10 Review of the PART H response  `[AUDIT 2026-09-04, 26th pass]` — verdict rev 32
+
+> Reviewing `5cb9d6c09e` + `c5bb2dee8d` + `f0066bbbcd`. Eight of fifteen findings
+> fixed in one cycle, including all four P0s. Verified in source, by running the
+> new tests, and by checking the mandated A/B re-run.
+
+### H.10.0 Verdict: multi-node **C+ → B**
+
+Every P0 is closed and validated (rebuild 8802866, tripwire 8802937, **full G4
+8802938 7/7 bit-identical**). The four remaining items are correctly scoped as
+deferred with named costs.
+
+### H.10.1 Verified  `[AUDIT 26th pass]`
+
+| # | Fix | Verified |
+|---|---|---|
+| **H1** | `comm_reverse_off = comm_reverse` (`:882`) | ✅ with a 10-line comment deriving the `Comm::init()` wipe and citing PairKIM. The reasoning is preserved where the next reader will need it |
+| **H3** | `if (uma_halo_disabled()) return {grad_outputs[0]};` (`halo_context.cpp:191`) | ✅ backward now gated on the same flag |
+| **H5** | separate `pad_nbr` node via `setup_dd_pad_nodes()` | ✅ **better than what I proposed** — I suggested guarding `nall == 0`; a second far pad node removes the dependency on real-atom indices entirely, so the `r=0` degeneracy cannot recur by construction |
+| **H2** | `resolve_dd_edge_cap()` — `strtoll` + metadata cross-check | ✅ |
+| **H7/H8/H9/H11** | `INT_MAX/3` limit; `!mpi_peer` moved before the gathers; `.clone()`; `error->all` | ✅ |
+| **H15** | `test_multinode_dd_contract.py` | ✅ **ran it: 6/6**, incl. `test_halo_adjointness ⟨Sx,y⟩=⟨x,Sᵀy⟩`, `test_pad_edges_zero_atom_rank_H5`, and `test_no_halo_control_is_self_adjoint` — a regression test for H3 itself |
+| Parity | G4 8802938 | ✅ 7/7 bit-identical; CI green (11 HARD, 7 Tier-1 files) |
+
+### H.10.2 The H-2 mandate: A/B re-run on a valid control  `[AUDIT 26th pass]`
+
+I required the halo A/B be re-run because H3 made the original control unsound.
+Done (job **8803112**): **cos = 0.7986, unchanged.**
+
+**That is the correct outcome and the reasoning is sound** — H3 corrupted only the
+`no_halo` *control* arm's gradient, so the halo-**ON** measurement was never
+affected. The thin-halo conclusion now rests on a valid experiment rather than
+coincidentally surviving a broken one. Re-running rather than arguing it was
+unnecessary was the right call.
+
+### H.10.3 A10×DD interaction — found by running, not reasoning  `[AUDIT 26th pass]`
+
+The first DD re-run (8803000) hit `OUT_OF_RESOURCES`: **DD needs AC on for
+capacity, and A10 had just made AC-off the default.** Fixed by pinning
+`UMA_AC=chunk` in the DD scripts.
+
+Worth recording because it is the predicted cost of the A10 directive landing on a
+real workload, caught immediately and handled the documented way (`UMA_AC=chunk`)
+rather than by reverting the default. It also validates A11's premise — the
+failure was a resource abort that a pre-flight estimate should have predicted;
+**worth checking whether A11's warning actually fired for this case**, since it is
+exactly the scenario A11 exists for.
+
+### H.10.4 Remaining, correctly scoped
+
+| # | Item | Disposition |
+|---|---|---|
+| **H4** | `cutghostuser` validation | DEFERRED — genuinely blocked: needs `num_layers` parsed into `ArtifactMetadata` first (~½ day). **Highest-value remainder** — it is the last silent-wrong-forces path in DD |
+| **H6** | DD flag-agreement `Allreduce` | DEFERRED (~½ day) — hang risk, not wrong results; GP's pattern is right there to copy |
+| **H10** | dummy `Z` in MoLE mean | DEFERRED — needs re-export; quantified at ~5e-5. Fine |
+| **H12–14** | halo round trip, GP wall, ghost centers | design limits, documented |
+
+I concur with all four. H4 and H6 should be one ~1-day piece of work — both are
+"DD lacks a guard GP already has."
+
+### H.10.5 Grades
+
+| Dimension | rev 31 | **rev 32** |
+|---|---|---|
+| DD correctness | C | **B** — H1/H3/H5 closed; H4 the last silent path |
+| GP correctness | B− | **B+** — H7/H8 closed |
+| Collective safety | C+ | **B** — H8/H11 closed; H6 remains |
+| Multi-node validation | D | **B−** — 6 real Tier-1 tests incl. adjointness; still no 2-rank runtime test |
+| **Multi-node overall** | **C+** | **B** |
+
+Single-node unchanged at **A**.
+
+### H.10.6 Instructions
+
+| # | Item | Effort |
+|---|---|---|
+| **H-11** | **H4 + H6 together**: parse `num_layers`/`dd_k` into metadata, validate `cutghostuser ≥ num_layers × cutoff`, and add the DD flag-agreement `Allreduce` mirroring GP's | ~1 day |
+| **H-12** | Confirm A11's pre-flight warning fires for the 8803000 AC-off DD case | ~1 h |
+| **H-13** | Then the force gate: deeper halo vs exact ghost gradients — now on a sound diagnostic | weeks |
+
+### H.10.7 Bottom line
+
+Eight findings in one cycle, all four P0s, each validated with the full G4 — and
+the mandated A/B re-run was actually run rather than reasoned away. H5's fix is
+better than my suggestion, and H15 turned the audit's own findings into six
+permanent tests.
+
+**Multi-node C+ → B.** The remaining gap to single-node's A is H4 (the last silent
+path), H6, and the absence of a runtime 2-rank test. The force-gate work can now
+proceed on a diagnostic that is known-correct.
+
+## H.11 Developer response to §H.10.6 — H-11 + H-12  `[DEV / SELF-REVIEW 2026-09-04]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Did H-11 (H4+H6) and H-12. Both remaining
+> silent/​hang DD paths are now closed and CI-covered; validated by full G4.
+
+**H-12 (confirm A11 fired for the AC-off DD OOM) — answer: it did NOT, and that
+was an A11 bug I have now fixed.** `preflight_memory_check()` began with
+`if (dd_active_) return;` — so for the 8803000 DD run (the exact
+resource-abort A11 exists to predict) it produced **no warning at all**. Fixed:
+the check now covers DD (per-rank load = `owned+ghost`), and its AC-on/off
+resolution is A10-consistent (default OFF unless `UMA_AC`/`UMA_CKPT` opts in), so
+an AC-off DD run above the ~12k atoms/tile ceiling now warns and names
+`UMA_AC=chunk`. So the honest answer to the audit's question is "no — and the
+reason is a gap A11 had, which is closed."
+
+**H-11 (H4 + H6, done together as one piece as advised):**
+
+- **H4 — the last silent-wrong-forces DD path — closed.** Added `num_layers` and
+  `dd_k` to `ArtifactMetadata` (`metadata.h`/`metadata.cpp`); the exporter already
+  wrote them, C++ just never read them. `init_style_dd()` now validates
+  `comm->cutghostuser ≥` the required shell (1·cutoff for the shipped per-layer
+  k=4 artifact, `num_layers·cutoff` for a k=1 artifact) and `error->all`s when the
+  shell is too shallow — the README's k=1 `comm_modify cutoff 24` case that
+  silently degraded to a 6.5 Å shell now fails loudly. Legacy artifacts (no
+  `num_layers`) warn but still run.
+- **H6 — DD flag agreement — closed.** `dd_flag_agreement()` does an
+  `Allreduce(MIN/MAX)` over `[UMA_DD_NO_HALO, UMA_DD_HALO_TEST, UMA_DD_EDGE_CAP]`;
+  any cross-rank disagreement aborts collectively with a named flag instead of
+  deadlocking on divergent per-rank collective counts. This is the GP
+  flag-agreement pattern the audit called exemplary, now applied to DD.
+
+**CI:** `test_multinode_dd_contract.py` grew 6 → **12** — added shell-depth
+(k=4 ⇒ 1·cutoff; k=1 ⇒ 24 Å required; legacy ⇒ not blocked) and flag-agreement
+(equal ⇒ ok; `no_halo`/`edge_cap` mismatch ⇒ rejected) as pure-logic replicas of
+the C++.
+
+**Validation:** rebuild 8804541 `LMP BUILD OK`; tripwire 8804577 PASS; **full G4
+8804578 all 7 bit-identical** — the changes are setup/DD-path only, so single-node
+and GP parity are untouched (measured, not assumed).
+
+**Remaining (unchanged disposition):** H10 (dummy Z in MoLE, needs re-export,
+~5e-5), H12–H14 (documented design limits), and a true runtime 2-rank automated
+test (the CPU-DD path needs the fxpu env + an allocation; the 12 pure-logic tests
+cover the arithmetic/algebra, but not an end-to-end 2-rank run). The force gate
+(H-13) is now unblocked on a known-correct diagnostic.
+
+
+---
+---
+
 
 ---
 ---
