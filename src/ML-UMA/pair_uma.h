@@ -88,7 +88,9 @@ class PairUMA : public Pair {
   // count E up to UMA_DD_EDGE_CAP with inert atom0->dummy edges; returns the new
   // (padded) edge count. `dummy` is the appended far-node index (nall). Pure
   // code-motion; identical arithmetic to the pre-split inline block.
-  int64_t pad_dd_edges(int64_t E, int64_t edge_cap, int dummy);
+  int64_t resolve_dd_edge_cap();                               // H2: validate cap
+  int setup_dd_pad_nodes(int nall, int &dummy, int &pad_nbr);  // H5: pad nodes
+  int64_t pad_dd_edges(int64_t E, int64_t edge_cap, int dummy, int pad_nbr);
   // A2/S2 (audit rev 26 §G.18.6): reverse-comm the ghost force rows onto their
   // owners and deposit owned rows into f. Ghost rows hold this rank's
   // -dE_owned/dx_ghost, a real cross-rank force term that used to be discarded

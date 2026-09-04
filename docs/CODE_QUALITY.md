@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.28 (verdict rev 30 = **A**)**
+**PART F = auditor replies; PART G = single-node problems (rev 30 = **A**); PART H = multi-node audit (rev 31, multi-node **C+**)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -274,7 +274,22 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > 7/7 with `UMA_AC=chunk` pinned proves only the default moved. **A11** is
 > warning-only as specified. **A applies to the single-node engine**; DD (A2)
 > remains open but its residual is now *characterised* as the k=4 thin-halo limit
-> (job 8800159), not a bug.** Also outstanding: retitle §G.21 (still says
+> (job 8800159), not a bug.
+>
+> **UPDATE 25 — PART H: multi-node audited on its own terms (rev 31).**
+> Single-node stays **A**; **multi-node is C+**. The DD force-gate miss is
+> genuinely *characterised* (thin-halo limit), but the audit found **4 P0/P1
+> defects the parity work could not see**: **H1** `comm_reverse_off` is never set
+> and `newton off` zeroes `maxreverse`, so DD reverse buffers are unsized — a
+> latent heap overflow masked only by the uniform-lattice test case (PairKIM
+> handles exactly this); **H3** `UMA_DD_NO_HALO=1` gates the forward but **not**
+> the backward, so **the halo A/B diagnostic is an invalid experiment** and the
+> conclusions drawn from it must be re-run; **H2/H4** DD preconditions
+> (`cutghostuser`, `UMA_DD_EDGE_CAP`) are still prose; **H5** a zero-atom rank
+> re-creates the `r=0` `dummy→dummy` edge. Also: **zero automated multi-node
+> tests**. One correction to P0′.6 — the `comm->style`/CommTiled concern is a
+> **false alarm** (verified against `comm_tiled.cpp:1279-1282`). **H-1…H-4 are
+> one-liners; do them before any further DD physics.**** Also outstanding: retitle §G.21 (still says
 > DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
@@ -365,6 +380,10 @@ results). This document is the standing verdict and is updated as the code chang
   problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
   responses; **§G.28 carries the current verdict (rev 30, **A**)** — A1 gate runs in a
   fresh clone; single-node engine at A; DD (A2) the remaining work.**
+- **Part H — Multi-node audit.** ★ GP and DD audited on their own terms at HEAD
+  `e7031807dd`: 15 findings (H1–H15) severity-ordered, what is verified *correct*,
+  the quantified halo round trip, and H-1…H-10 instructions. **Multi-node C+**;
+  single-node (PART G) is unaffected at **A**.
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -6582,6 +6601,283 @@ requiring a flag; A11 is warning-only as specified.
 is now a characterised design problem rather than an unexplained failure.
 
 Twenty-four passes. This is the appropriate place to stop auditing.
+
+---
+---
+
+# PART H — Multi-node audit  `[AUDIT 2026-09-04, 25th pass]` — verdict rev 31
+
+> **Requested: continue auditing the multi-node part.** PART G graded the
+> single-node engine at **A**; this part audits the two multi-node paths in their
+> own right — **GP** (`mn_active`, Allgatherv + XCCL peer) and **DD**
+> (`dd_active_`, LAMMPS domains + per-layer halo).
+>
+> Method: full read of `run_compute_gp` / `run_compute_dd` / `build_dd_graph` /
+> `pad_dd_edges` / `install_halo_callbacks` / `reduce_dd_ghost_forces`,
+> `halo_context.cpp`, `mpi_peer_predictor.cpp`, `xccl_peer.cpp`, `shared_peer.h`,
+> **against the LAMMPS `Comm`/`CommBrick`/`CommTiled` contracts they depend on**.
+> The four highest-severity findings below were each re-verified by hand.
+>
+> **Scope note:** DD is opt-in (`UMA_DD`) and single-tile/GP parity is bit-exact,
+> so nothing in PART H affects the published single-node results or the PART G
+> grade. These are defects in the multi-node paths themselves.
+
+## H.0 Verdict: multi-node is **C+** — the physics gap is understood, but there are 4 open P0/P1 defects
+
+The DD force-gate miss (cos = 0.7986) is now **characterised**, not mysterious —
+the ghost-shell scan (job 8800159: 6.5 Å → +10.09, 12.0 Å → +8.67 meV/atom,
+monotonic) identifies it as the **k=4 thin-halo edge-completeness limit**, a
+design property, not a bug. That is real progress.
+
+**But the audit found four defects that the parity investigation could not have
+seen**, one of which (**H1**) is a latent memory-corruption bug that the shipped
+test configuration happens to mask, and one of which (**H3**) means *the
+diagnostic used to reason about the halo is itself wrong*.
+
+| # | Sev | Class | Finding | Manifests as |
+|---|---|---|---|---|
+| **H1** | **P0** | defect | `comm_reverse_off` never set; `newton off` zeroes `maxreverse` | heap overflow / silent corruption |
+| **H2** | **P0** | missing validation | `UMA_DD_EDGE_CAP` unvalidated, disconnected from metadata, not agreed across ranks | crash at step 1 / ragged abort |
+| **H3** | **P0** | defect | `UMA_DD_NO_HALO=1` gates forward but **not** backward | silent wrong forces; **invalidates the A/B diagnostic** |
+| **H4** | **P0** | missing validation | `comm->cutghostuser` never read (P0′.6, still open) | silent wrong forces |
+| **H5** | P1 | defect | zero-atom rank ⇒ pad edge degenerates to `dummy→dummy`, `r=0` | NaN / poisoned batch |
+| **H6** | P1 | defect | `UMA_DD_NO_HALO` / `UMA_DD_HALO_TEST` per-rank, no agreement | hang |
+| **H7** | P1 | defect | GP `Allgatherv` counts are `int`; `3*N` overflows inside the accepted range | silent wrong result |
+| **H8** | P1 | defect | GP `!mpi_peer → error->all` placed **after** 4 collectives | deadlock |
+| **H9** | P1 | defect | `run_exchange` aliases and mutates its input on a CPU run | silent wrong grads (CPU) |
+| **H10** | P2 | defect | dummy pad node's `Z` enters the traced MoLE mean | tiny silent energy bias |
+| **H11** | P2 | missing validation | `pad_dd_edges` overflow uses `error->one` (GP does this right) | ragged abort |
+| **H12** | P2 | design limit | halo is a full device↔host FP64 round trip, **16 whole-tensor crossings/step** | throughput wall |
+| **H13** | P2 | design limit | GP `Allgatherv`s the whole system every step; ~88·N bytes/rank retained | scaling wall (documented) |
+| **H14** | P2 | design limit | every ghost is a graph center, **all ghost outputs discarded** under k=4 | ~40 % wasted edges |
+| **H15** | P2 | missing coverage | **zero** automated multi-node tests | regressions invisible |
+
+## H.1 ⛔ H1 — DD reverse-comm buffers are never sized  *(verified by hand)*
+
+**The defect.** `init_style` sets `comm_forward` and `comm_reverse`
+(`pair_uma.cpp:851,855`) but **never sets `comm_reverse_off`** (`Pair` default 0).
+LAMMPS then does, in `Comm::init()` (`src/comm.cpp:239-240`):
+
+```cpp
+if (force->newton == 0) maxreverse = 0;                      // wipes comm_reverse
+maxreverse = MAX(maxreverse, force->pair->comm_reverse_off); // = 0 for us
+```
+
+**DD requires newton off** (`pair_uma.cpp:747,1056`; `in.dd_sp:17` sets
+`newton off`), so `force->newton == 0` and **`maxreverse` ends at 0**. Reverse
+buffers are then sized only from `maxforward` (`comm_brick.cpp:975-977`), while
+the reverse exchange packs up to `rmax·w` doubles (`w = dd_halo_width`, e.g. 1152).
+
+**Why it has not crashed.** On a uniform NaCl lattice with a symmetric brick grid
+`smax ≈ rmax`, so the 1.5× `BUFFACTOR` slack absorbs the mismatch. It breaks on
+non-uniform density, an asymmetric `processors` grid, a slab/surface geometry, or
+CommTiled — i.e. on any realistic production system.
+
+**This is exactly the case `PairKIM` handles** (`KIM/pair_kim.cpp:584-585` sets
+`comm_reverse_off = 9` with the comment *"make sure comm_reverse expects (at most)
+9 values when newton is off"*). `PairUMA` is the newton-off pair style that forgot.
+
+**Fix:** `comm_reverse_off = comm_reverse;` in `init_style`. One line.
+
+**Note the guard at `:1436` gives false confidence** — it validates `per_node`
+against `self->comm_reverse`, a member LAMMPS has already discarded.
+
+## H.2 ⛔ H3 — the halo A/B diagnostic is not a valid experiment  *(verified by hand)*
+
+```cpp
+halo_context.cpp:149   if (no_halo) return x;                 // forward: identity
+halo_context.cpp:171   if (!hctx.active()) return {grad_outputs[0]};
+halo_context.cpp:174   return {hctx.reverse_exchange(g)};     // backward: NOT gated
+```
+
+With `UMA_DD_NO_HALO=1` the forward is the identity but the backward still applies
+`Sᵀ` (accumulate ghost→owner, zero ghosts) **and still issues 4
+`comm->reverse_comm` calls per step**. That is not the adjoint of the identity.
+
+**Consequence beyond the wrong forces:** the comment at `:142-148` states the
+inference rule — *"If parity is UNCHANGED vs the real exchange, the exchange is a
+no-op (bug); if WORSE, the exchange is working."* **That inference is unsound**,
+because the `no_halo` arm computes an incorrect gradient of its own. Any
+conclusion drawn from `run_dd_nohalo.pbs` about the cos = 0.644/0.7986
+investigation rests on a broken control.
+
+**Fix:** gate the backward on the same flag. Then re-run the A/B.
+
+## H.3 ⛔ H2 / H4 — DD preconditions (P0′.6) are still prose
+
+**H4 — `comm->cutghostuser`: zero references in `src/ML-UMA`.** The correctness
+argument at `pair_uma.cpp:1270-1279` depends on the ghost shell being deep enough,
+and nothing checks it. Benign for the shipped k=4 artifact (a 6.5 Å shell is what
+`cutoff + skin` gives anyway, making the `comm_modify cutoff 6.5` line in
+`in.dd_sp` a no-op) — but `README.md:61` still documents the **k=1** path with
+`comm_modify cutoff 24.0`, where omitting it silently produces a 6.5 Å shell.
+Result: **silent wrong forces**.
+
+**Compounding:** the exporter writes `num_layers` and `dd_k`
+(`export_blocks_xpu.py:1194,1365`) but `ArtifactMetadata` (`metadata.h:10-45`)
+**parses neither**, so the C++ side cannot compute `num_layers × cutoff` even if it
+wanted to. Closing P0′.6 needs a metadata change first.
+
+**H2 — `UMA_DD_EDGE_CAP`** (`pair_uma.cpp:1119-1120`, bare `atoll`): garbage → 0 →
+**padding silently skipped**; never cross-checked against `metadata.edge_pad_cap`
+(which the single-tile and GP paths *do* enforce — `predictor.cpp:397-410`,
+`mpi_peer_predictor.cpp:424-461` — while `predict_body_dd` has no cap handling at
+all); never agreed across ranks. The current validation mechanism is that seven
+`.pbs` files hardcode `917504` and the artifact directory name encodes it.
+
+**H1/H2/H4 correction to the ticket:** P0′.6 also lists *"`comm->style` unchecked,
+`pack_reverse_comm` assumes CommBrick"*. **That is a false alarm** — verified
+against `comm_tiled.cpp:1279-1282,1459-1464`: each CommTiled receive block is
+itself contiguous and is passed as `(recvnum[i], firstrecv[i])`, so the
+`first + i` indexing is correct under **both** comm styles. Drop it from P0′.6 so
+effort goes to H1/H2/H4, which are real.
+
+## H.4 What the audit confirms is *correct*
+
+Recording this because it is load-bearing for the DD investigation:
+
+- **`reduce_dd_ghost_forces` does not double-count.** The two cross-rank force
+  paths are genuinely disjoint: the *feature* path (adjoint = halo
+  `reverse_exchange`) and the *geometry* path (adjoint = `dd_force_[ghost]` via
+  `reverse_comm`). They are disjoint **because** the halo forward *overwrites*
+  ghost rows (`export_blocks_xpu.py:805`), severing the locally-computed ghost
+  feature. Adding them is correct, and the derivation at `pair_uma.cpp:1176-1205`
+  is sound.
+- **Per-layer exchange ordering is correct** — before each of `num_layers` blocks,
+  on `x_message` only; no exchange after the last block, which is right because
+  only owned rows feed `node_energy[0:nlocal]`.
+- **Empty shards (GP) are handled** — `all_gather_concat` pads to
+  `padded_local_size` (P0.4), and `all_reduce` on empty is a hard error, not a
+  mismatched collective.
+- **The GP flag-agreement collective is exemplary** — `ac_active`, `UMA_MN_CKPT`,
+  `UMA_ALLREDUCE_WITH_GRAD_BWD`, `UMA_SKIP_PRE_BWD_BARRIER`, `UMA_CHUNK_RETAIN_K`
+  folded into one `all_reduce` (`mpi_peer_predictor.cpp:258-300`). **DD has no
+  equivalent — that is H6.**
+- **Zero-ghost ranks are collective-safe** (CommBrick guards the MPI calls; all
+  ranks make the same number of `forward_comm` calls).
+
+## H.5 Quantified: the halo round trip (H12)
+
+`halo_context.cpp:56-109`. **No device-side path exists** — no NCCL/XCCL reference
+in the file; every exchange is unconditionally `.to(kCPU, kFloat64)`.
+
+Per MD step: **4 forward + 4 backward halo ops + 1 ghost-force reverse = 9**, each
+doing D2H at `:67` and H2D at `:108` → **16 whole-tensor device↔host crossings**.
+At the shipped 2-node N=32 config (~18.8k owned+ghost/rank, `per_node = 1152`):
+
+```
+18,801 × 1152 × 8 B ≈ 173 MB per exchange-direction
+× 2 × 8             ≈ 2.8 GB host↔device per rank per step
+```
+
+**The whole tensor crosses the bus while MPI moves only the ghost rows (~40 %).**
+A device-resident buffer with a ghost-row gather/scatter would cut ~2.5× before
+any XCCL work. FP64 is forced regardless of the feature dtype.
+
+## H.6 Grades — multi-node
+
+| Dimension | Grade | Basis |
+|---|---|---|
+| DD correctness | **C** | H1/H3/H5 defects; H4 unvalidated; force gate unmet (design limit, characterised) |
+| GP correctness | **B−** | H7/H8 real but narrow; empty-shard + flag agreement are exemplary |
+| Collective safety | **C+** | GP excellent; DD has no flag agreement (H6) and one `error->one` asymmetry (H11) |
+| Multi-node validation | **D** | H15: **zero** automated tests; PBS jobs only; and H3 means one key diagnostic was invalid |
+| Performance design | **C+** | H12/H13/H14 all known, documented, unaddressed |
+| **Multi-node overall** | **C+** | |
+
+(Single-node remains **A** — PART G §G.28. These are independent.)
+
+## H.7 Instructions
+
+Ordered by severity ÷ effort. **H1, H3, H5 are one-liners with real consequences.**
+
+| # | Item | Effort |
+|---|---|---|
+| **H-1** | `comm_reverse_off = comm_reverse;` in `init_style` (H1). Add a DD test on a **non-uniform / asymmetric** decomposition, which is where the current slack disappears | 1 line + test |
+| **H-2** | Gate `HaloExchangeFn::backward` on `no_halo` (H3), then **re-run the halo A/B** — the previous result is unsound | 2 lines + rerun |
+| **H-3** | Guard `nall == 0` in `build_dd_graph` (H5) | 3 lines |
+| **H-4** | Move the `!mpi_peer` check **before** the first `Allgather` (H8) | move 3 lines |
+| **H-5** | Parse `num_layers`/`dd_k` into `ArtifactMetadata`; validate `comm->cutghostuser ≥ num_layers × cutoff` at `init_style` (H4). Log the resolved shell vs required | ~half day |
+| **H-6** | Validate `UMA_DD_EDGE_CAP` with `strtoll`; cross-check against `metadata.edge_pad_cap`; fold it + `UMA_DD_NO_HALO` + `UMA_DD_HALO_TEST` into a DD flag-agreement `Allreduce` mirroring GP's (H2, H6) | ~half day |
+| **H-7** | `int64_t` counts in the GP gathers (H7); `.clone()` in `run_exchange` (H9); `error->all` + pre-collective agreement in `pad_dd_edges` (H11) | ~2 h |
+| **H-8** | Exclude the dummy node from the MoLE composition (H10) | ~1 h |
+| **H-9** | **Multi-node CI (H15):** a 2-rank CPU DD test — pack/unpack round trip, `pad_dd_edges` arithmetic including `nall=0`, halo forward/reverse adjointness (`⟨Sx,y⟩ = ⟨x,Sᵀy⟩`). None needs an XPU | ~1 day |
+| **H-10** | Only then resume the force-gate work (deeper halo vs exact ghost gradients) | weeks |
+
+**Do H-1 … H-4 before any further DD physics.** Three are one-liners, and **H-2
+invalidates the diagnostic the current DD conclusions rest on** — re-running the
+A/B on a correct control may change the picture.
+
+## H.8 Bottom line
+
+The DD residual being *characterised* as the thin-halo limit is genuine progress,
+and the `reduce_dd_ghost_forces` derivation is correct — the hard conceptual work
+holds up.
+
+But multi-node has had **none of the hardening the single-node path received**:
+no `comm_reverse_off`, no precondition validation, no cross-rank flag agreement,
+no automated tests, and a diagnostic flag that produces wrong gradients. PART G
+took the single-node engine from C− to A largely by making invariants mechanical;
+**multi-node is still where single-node was at rev 4** — correct in the cases that
+have been run, unguarded everywhere else.
+
+**Highest value: H-1 through H-4 (one-liners), then H-9 (multi-node CI).** The
+force gate is a design question and should wait for a trustworthy diagnostic.
+
+---
+
+## H.9 Developer response — PART H hardening batch  `[DEV / SELF-REVIEW 2026-09-04]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Worked the §H.7 list top-down. All P0
+> one-liners + the P1 defects + the multi-node CI gap are done; the two ~half-day
+> validation items (H4/H6) and H10 (needs a re-export) are scoped honestly below.
+
+**Done and in the tree:**
+
+| # | Fix | Where |
+|---|---|---|
+| **H1** | `comm_reverse_off = comm_reverse` in `init_style` — survives the newton-off `maxreverse=0` wipe (mirrors PairKIM). Was a latent heap overflow on non-uniform/asymmetric/CommTiled decompositions. | `pair_uma.cpp init_style` |
+| **H3** | `HaloExchangeFn::backward` now gated on `uma_halo_disabled()` — the no_halo control's adjoint is the identity, not Sᵀ. **This makes the A/B diagnostic valid.** Lifted the flag read to `uma_halo_disabled()` shared by forward+backward. | `halo_context.cpp` |
+| **H5** | zero-atom rank: `setup_dd_pad_nodes()` appends a **second far node** as the pad neighbour so pad edges are `far_nbr→dummy` (r≫cutoff), never `dummy→dummy` (r=0). `pad_dd_edges` takes `pad_nbr`. | `pair_uma.cpp` |
+| **H8** | `!mpi_peer` check **moved before** the 4 `MPI_Allgather(v)` collectives — no more deadlock when a rank fails to init the peer. | `run_compute_gp` |
+| **H7** | GP gather int-overflow: the binding limit is `3*natoms ≤ INT_MAX` (position gather ×3), not `natoms ≤ INT_MAX`; guard tightened to `INT_MAX/3`. | `run_compute_gp` |
+| **H9** | `run_exchange` forced an owning `.clone()` when the CPU-FP64 `.to()` aliases the input — was silently corrupting the autograd-saved tensor on CPU runs. | `halo_context.cpp` |
+| **H11** | `pad_dd_edges` overflow `error->one` → `error->all` (collective, no ragged abort), matching the GP path. | `pad_dd_edges` |
+| **H2** | `UMA_DD_EDGE_CAP` validated with `strtoll` (malformed/negative rejected) and **cross-checked against `metadata.edge_pad_cap`** (must match; defaults to it when unset) — no more silent pad-skip. Extracted to `resolve_dd_edge_cap()`. | `pair_uma.cpp` |
+| **H15/H-9** | **Multi-node DD CI** — `ci/tests/test_multinode_dd_contract.py` (6 Tier-1 tests): halo forward/reverse **adjointness `⟨Sx,y⟩=⟨x,Sᵀy⟩`**, `reverse` zeroes ghosts, `pad_dd_edges` incl. the **nall==0 (H5)** case (never `dummy→dummy`), pack/unpack round trip, and the **H3 no_halo self-adjoint control**. No XPU/MPI needed. | `ci/tests/` |
+
+Two new `PairUMA` helpers (`resolve_dd_edge_cap`, `setup_dd_pad_nodes`) keep
+`run_compute_dd` ≤130 under the A5 ratchet (max method still `init_style` 128).
+
+**Scoped, not yet done (honest):**
+
+- **H4 (P0) / H6 (P1) — metadata + flag agreement (~½ day each):** closing P0′.6
+  needs `num_layers`/`dd_k` parsed into `ArtifactMetadata` first (the exporter
+  writes them; `metadata.cpp` does not read them), then a `cutghostuser ≥
+  num_layers × cutoff` check at `init_style`, plus a DD flag-agreement `Allreduce`
+  mirroring GP's for `UMA_DD_EDGE_CAP`/`UMA_DD_NO_HALO`/`UMA_DD_HALO_TEST`. These
+  are real and next; they are metadata-schema changes, not one-liners.
+- **H10 (P2) — dummy Z in the MoLE mean:** the mean is computed **inside the
+  traced graph** over `atomic_numbers_full` (all `nnodes` rows), so excluding the
+  pad node requires a **re-export** where the MoLE mean is taken over real nodes
+  only. The bias is ~1/nnodes (≈5e-5 relative at the shipped size) — genuinely
+  tiny (P2). Recorded for the next DD artifact export rather than faked in C++.
+- **H12/H13/H14 (P2 design limits):** the host round-trip halo, whole-system
+  Allgatherv, and discarded ghost outputs are characterised design costs, not
+  bugs; they belong to the DD/GP redesign in `DEV_PLAN_node_parallelism.md`.
+
+**H-2 mandate (re-run the A/B on the fixed control):** submitted after the
+rebuild; the previous cos-0.644/0.7986 investigation rested on the H3-broken
+control, so the corrected A/B is required before any further force-gate work.
+
+**Validation:** Tier-0 0 HARD / 0 REPORT; Tier-1 green incl. the 6 new multi-node
+tests. Rebuild + tripwire + full G4 + the corrected DD A/B: see the changelog row.
+Single-node parity is unaffected by construction (H-fixes are all on the DD/GP
+paths, gated by `dd_active_`/`mn_active`), but G3 is measured, not assumed.
+
+---
+---
+
 
 ---
 ---

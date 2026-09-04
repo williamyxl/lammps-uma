@@ -64,7 +64,15 @@ torch::Tensor run_exchange(const torch::Tensor& x,
   const auto orig_device = x.device();
 
   // Contiguous [nall, per_node] on CPU in FP64.
-  auto x2d = x.reshape({nall, -1}).to(torch::kCPU, torch::kFloat64).contiguous();
+  // H9 FIX (audit PART H / rev 31): the callback `fn` MUTATES this buffer in
+  // place (comm pack/unpack writes ghost rows). On a CPU FP64 run, .to(kCPU,
+  // kFloat64) is a no-op and .contiguous() does not copy an already-contiguous
+  // tensor, so x2d would ALIAS x -- mutating the autograd-saved input and
+  // silently corrupting gradients. Force an owning copy so the exchange never
+  // writes through to x. (On XPU the device->host .to() already copies.)
+  auto x2d = x.reshape({nall, -1}).to(torch::kCPU, torch::kFloat64);
+  if (x2d.data_ptr() == x.data_ptr()) x2d = x2d.clone();  // CPU-FP64 aliasing guard
+  x2d = x2d.contiguous();
   const int64_t per_node = x2d.size(1);
 
   // Diagnostic (UMA_DD_DEBUG): relative L2 norm of the change the exchange makes
@@ -132,6 +140,21 @@ torch::Tensor HaloContext::reverse_exchange(const torch::Tensor& grad) {
   return run_exchange(grad, fn, nall);
 }
 
+// Diagnostic A/B: UMA_DD_NO_HALO=1 makes the halo op the identity at runtime
+// (ghosts stay frozen at their block outputs). H3 FIX (audit PART H / rev 31):
+// this MUST gate BOTH forward and backward. Previously only the forward returned
+// x while the backward still applied Sᵀ (accumulate ghost->owner + 4
+// reverse_comm calls) -- which is not the adjoint of the identity, so the no_halo
+// control computed a WRONG gradient of its own and the A/B inference
+// ("unchanged => exchange is a no-op; worse => it works") was unsound. Read once.
+bool uma_halo_disabled() {
+  static const bool no_halo = [] {
+    const char* e = std::getenv("UMA_DD_NO_HALO");
+    return e && e[0] == '1' && e[1] == '\0';
+  }();
+  return no_halo;
+}
+
 // Forward kernel (no autograd node).
 torch::Tensor uma_halo_op_exchange(const torch::Tensor& x) {
   auto& ctx = HaloContext::instance();
@@ -139,14 +162,7 @@ torch::Tensor uma_halo_op_exchange(const torch::Tensor& x) {
     // Single-rank / non-DD: identity (no ghosts to refresh).
     return x;
   }
-  // Diagnostic A/B: UMA_DD_NO_HALO=1 makes the op identity at runtime (ghosts
-  // stay frozen at their block outputs). If parity is UNCHANGED vs the real
-  // exchange, the exchange is a no-op (bug); if WORSE, the exchange is working.
-  static const bool no_halo = [] {
-    const char* e = std::getenv("UMA_DD_NO_HALO");
-    return e && e[0] == '1' && e[1] == '\0';
-  }();
-  if (no_halo) return x;
+  if (uma_halo_disabled()) return x;
   return ctx.forward_exchange(x);
 }
 
@@ -169,6 +185,10 @@ class HaloExchangeFn : public torch::autograd::Function<HaloExchangeFn> {
       torch::autograd::variable_list grad_outputs) {
     auto& hctx = HaloContext::instance();
     if (!hctx.active()) return {grad_outputs[0]};
+    // H3 FIX: the adjoint of the no_halo identity forward is the identity, NOT
+    // Sᵀ. Gate the backward on the same flag so the A/B control is a valid
+    // experiment (and issues no spurious reverse_comm collectives).
+    if (uma_halo_disabled()) return {grad_outputs[0]};
     at::AutoDispatchBelowADInplaceOrView guard;
     auto g = grad_outputs[0].contiguous();
     return {hctx.reverse_exchange(g)};

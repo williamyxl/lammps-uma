@@ -323,16 +323,32 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
   if (!use_f64)
     error->all(FLERR, "Pair style uma: multi-node requires precision double");
 
+  // H8 FIX (audit PART H / rev 31): validate the peer predictor BEFORE the four
+  // MPI_Allgather(v) collectives below. The check used to live after them, so a
+  // rank whose mpi_peer failed to initialise would abort while its siblings
+  // blocked inside the collectives -> deadlock. mpi_peer is built collectively in
+  // init_mpi_peer(), so all ranks agree here and error->all aborts cleanly.
+  if (!mpi_peer)
+    error->all(FLERR, "Pair style uma: multi-node peer predictor not initialized");
+
   // P7.2 (audit rev 26 §G.18.6 / A8): atom->natoms is a 64-bit bigint but the GP
   // gather path uses int counts/indices throughout (MPI_Allgatherv counts, vesin
   // indices). Rather than silently narrow >2^31 atoms into a negative/garbage int
   // (silent wrong physics), fail loudly. Full 64-bit GP support is deferred; the
   // guard makes the limit explicit and safe.
-  if (atom->natoms > static_cast<bigint>(std::numeric_limits<int>::max()))
+  // H7 FIX (audit PART H / rev 31): the MPI_Allgatherv counts/displacements are
+  // `int`, and the POSITION gather multiplies them by 3 (counts3/displs3 and
+  // nlocal*3). So the binding limit is 3*natoms <= INT_MAX, not natoms <= INT_MAX:
+  // a global count in (INT_MAX/3, INT_MAX] passes the old guard but silently
+  // overflows `counts3[r] *= 3` and `nlocal*3` into negative ints -> corrupt
+  // gather. Guard the ACTUAL limit. (Full 64-bit GP needs MPI_Allgatherv_c.)
+  const bigint gp_max = static_cast<bigint>(std::numeric_limits<int>::max()) / 3;
+  if (atom->natoms > gp_max)
     error->all(FLERR,
                "Pair style uma: multi-node global atom count {} exceeds the "
-               "int32 GP gather limit ({}); 64-bit GP is not yet supported",
-               atom->natoms, std::numeric_limits<int>::max());
+               "int32 GP gather limit ({}); the position Allgatherv uses int "
+               "counts x3, so the cap is INT_MAX/3. 64-bit GP is not yet supported",
+               atom->natoms, static_cast<long long>(gp_max));
   const int natoms_global = static_cast<int>(atom->natoms);
   if (natoms_global <= 0)
     error->all(FLERR, "Pair style uma: bad global atom count");
@@ -393,8 +409,8 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
   // systems too big for one GPU's activation memory run across nodes (e.g. NaCl
   // 8x8x8 = 4096); it is NOT a full O(N/world) memory/comm decomposition — that is
   // the DD path's goal.
-  if (!mpi_peer)
-    error->all(FLERR, "Pair style uma: multi-node peer predictor not initialized");
+  // (H8: the !mpi_peer guard now runs at the top of this function, before the
+  // Allgather collectives, so no post-collective check is needed here.)
   result = mpi_peer->predict_host(natoms_global, mn_pos_sorted.data(),
                                   mn_z_sorted.data(), cell_buf, pbc_buf,
                                   mn_force_sorted.data());
@@ -853,6 +869,17 @@ void PairUMA::init_style()
     // reverse_comm at the end of run_compute_dd, so it must be at least 3 wide.
     // dd_halo_width is O(1000), but assert rather than assume.
     comm_reverse = (w > 3) ? w : 3;
+    // H1 FIX (audit PART H / rev 31): DD requires `newton off`, and Comm::init()
+    // does `if (force->newton == 0) maxreverse = 0;` then
+    // `maxreverse = MAX(maxreverse, comm_reverse_off)` -- so a newton-off pair
+    // style that sets only comm_reverse gets reverse buffers sized to 0 and the
+    // reverse halo/ghost-force packs (up to rmax*w doubles) overflow the heap.
+    // It has not crashed only because a uniform brick grid keeps smax~=rmax and
+    // BUFFACTOR's 1.5x slack absorbs the mismatch; it breaks on non-uniform
+    // density, an asymmetric processors grid, a slab, or CommTiled. Mirror
+    // PairKIM (KIM/pair_kim.cpp: comm_reverse_off): set comm_reverse_off so
+    // maxreverse survives the newton-off wipe.
+    comm_reverse_off = comm_reverse;
     if (comm->me == 0 && screen)
       fprintf(screen, "uma DD: halo comm width = %d doubles/atom\n", w);
   } else {
@@ -1116,20 +1143,10 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   // cutoff; padded edges are dummy->dummy self-loops whose edge_distance >> cutoff
   // -> radial envelope = 0 -> zero message, zero contribution to real nodes and
   // zero force on real atoms. n_nodes passed to the engine is nall+1.
-  int64_t edge_cap = 0;
-  if (const char *e = std::getenv("UMA_DD_EDGE_CAP")) edge_cap = atoll(e);
+  const int64_t edge_cap = resolve_dd_edge_cap();   // H2: validated + metadata-checked
 
-  const int nnodes = nall + 1;              // +1 dummy padding node
-  const int dummy = nall;                   // index of the dummy node
-  // Dummy node placed far from all real atoms so any edge to it has r >> cutoff.
-  // Use a large offset from box origin along +x (absolute coords, offsets zero).
-  dd_pos_.resize(static_cast<size_t>(nnodes) * 3);
-  dd_z_.resize(static_cast<size_t>(nnodes));
-  const double far = 1.0e6;
-  dd_pos_[3 * dummy + 0] = far;
-  dd_pos_[3 * dummy + 1] = far;
-  dd_pos_[3 * dummy + 2] = far;
-  dd_z_[dummy] = dd_z_.empty() ? 1 : dd_z_[0];   // any valid Z; message is zeroed
+  int dummy = 0, pad_nbr = 0;
+  const int nnodes = setup_dd_pad_nodes(nall, dummy, pad_nbr);  // A5/H5 pad nodes
 
   const bool dd_dbg = (std::getenv("UMA_DD_DEBUG") != nullptr);
   if (dd_dbg && screen)
@@ -1142,7 +1159,7 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   if (dd_dbg && screen)
     fprintf(screen, "uma DD[%d]: build_dd_graph E=%lld (cap=%lld)\n",
             comm->me, (long long) E, (long long) edge_cap);
-  if (edge_cap > 0) E = pad_dd_edges(E, edge_cap, dummy);   // A5: P2.1 padding
+  if (edge_cap > 0) E = pad_dd_edges(E, edge_cap, dummy, pad_nbr);  // A5/H5 padding
 
   if (dd_dbg && screen)
     fprintf(screen, "uma DD[%d]: padded E=%lld; calling predict_host_extgraph_dd\n",
@@ -1231,10 +1248,79 @@ void PairUMA::reduce_dd_ghost_forces(int nlocal, int nall, double **f)
    up to edge_cap with inert atom0->dummy edges and returns the padded count.
    Identical arithmetic to the pre-split inline block.
 ------------------------------------------------------------------------- */
-int64_t PairUMA::pad_dd_edges(int64_t E, int64_t edge_cap, int dummy)
+/* ----------------------------------------------------------------------
+   H2 (audit PART H / rev 31): resolve + validate UMA_DD_EDGE_CAP. A bare atoll
+   turned garbage into 0 -> padding silently skipped -> traced chunk-count
+   mismatch -> crash at step 1. Parse with strtoll, reject malformed/negative,
+   and (when the artifact records edge_pad_cap) require the env to MATCH it since
+   the chunk count is baked at that cap. Returns the resolved cap (0 = no pad).
+------------------------------------------------------------------------- */
+int64_t PairUMA::resolve_dd_edge_cap()
 {
+  int64_t edge_cap = 0;
+  if (const char *e = std::getenv("UMA_DD_EDGE_CAP")) {
+    char *end = nullptr;
+    const long long v = std::strtoll(e, &end, 10);
+    if (end == e || *end != '\0' || v < 0)
+      error->all(FLERR,
+                 "Pair style uma: UMA_DD_EDGE_CAP='{}' is not a non-negative "
+                 "integer", e);
+    edge_cap = static_cast<int64_t>(v);
+  }
+  const int64_t meta_cap = predictor ? predictor->metadata().edge_pad_cap : 0;
+  if (meta_cap > 0) {
+    if (edge_cap == 0) edge_cap = meta_cap;          // default to the traced cap
+    else if (edge_cap != meta_cap)
+      error->all(FLERR,
+                 "Pair style uma: UMA_DD_EDGE_CAP={} != artifact edge_pad_cap={}; "
+                 "the traced chunk count is baked at edge_pad_cap, so they must "
+                 "match. Unset UMA_DD_EDGE_CAP to use the artifact's value.",
+                 static_cast<long long>(edge_cap),
+                 static_cast<long long>(meta_cap));
+  }
+  return edge_cap;
+}
+
+/* ----------------------------------------------------------------------
+   H5 (audit PART H / rev 31): allocate the dummy pad center (+ a far pad neighbour
+   when the rank has NO real atoms) and fill dd_pos_/dd_z_ for them. Returns the
+   total node count (nnodes). Pad edges are neighbour=pad_nbr -> center=dummy, both
+   far from everything so edge_distance >> cutoff (inert). On a zero-atom rank the
+   neighbour is a SECOND far node so the edge is never dummy->dummy (r=0).
+------------------------------------------------------------------------- */
+int PairUMA::setup_dd_pad_nodes(int nall, int &dummy, int &pad_nbr)
+{
+  const bool no_real = (nall == 0);
+  const int extra_pad = no_real ? 1 : 0;     // second far node only when needed
+  const int nnodes = nall + 1 + extra_pad;   // +1 dummy center (+1 far neighbour)
+  dummy = nall;                               // index of the dummy center node
+  pad_nbr = no_real ? (nall + 1) : 0;         // neighbour for pad edges
+  dd_pos_.resize(static_cast<size_t>(nnodes) * 3);
+  dd_z_.resize(static_cast<size_t>(nnodes));
+  const double far = 1.0e6;
+  dd_pos_[3 * dummy + 0] = far;
+  dd_pos_[3 * dummy + 1] = far;
+  dd_pos_[3 * dummy + 2] = far;
+  dd_z_[dummy] = dd_z_.empty() ? 1 : dd_z_[0];   // any valid Z; message is zeroed
+  if (no_real) {
+    // far neighbour at a DIFFERENT far point so |pad_nbr - dummy| >> cutoff (not 0)
+    dd_pos_[3 * pad_nbr + 0] = -far;
+    dd_pos_[3 * pad_nbr + 1] = -far;
+    dd_pos_[3 * pad_nbr + 2] = -far;
+    dd_z_[pad_nbr] = 1;
+  }
+  return nnodes;
+}
+
+int64_t PairUMA::pad_dd_edges(int64_t E, int64_t edge_cap, int dummy, int pad_nbr)
+{
+  // H11 FIX (audit PART H / rev 31): use error->all, not error->one. A single
+  // rank exceeding the cap with error->one leaves the others running -> ragged
+  // MPI_Abort. Whether the cap is exceeded is effectively global (all ranks share
+  // edge_cap and similar density), so a collective abort is the right behaviour,
+  // matching how the GP path handles its own limits.
   if (E > edge_cap)
-    error->one(FLERR,
+    error->all(FLERR,
                "Pair style uma: UMA_DD real edge count exceeds UMA_DD_EDGE_CAP "
                "(raise the cap and re-export the artifact traced at that cap)");
   const int64_t old = E;
@@ -1246,14 +1332,16 @@ int64_t PairUMA::pad_dd_edges(int64_t E, int64_t edge_cap, int dummy)
     ei[k] = dd_edge_index_[k];                       // row0 real
     ei[edge_cap + k] = dd_edge_index_[old + k];      // row1 real
   }
-  // Padded edges MUST be inert: neighbor=atom 0 (a real node), center=dummy.
-  // The dummy sits at (far,far,far), so edge_distance = |pos[dummy]-pos[0]| >>
-  // cutoff -> radial envelope = 0 -> zero message. Center is the dummy, whose
+  // Padded edges MUST be inert: neighbor=pad_nbr (a real node, atom 0, when the
+  // rank has atoms; a distinct FAR node when nall==0 -- H5), center=dummy.
+  // The dummy sits at (far,far,far), so edge_distance = |pos[dummy]-pos[pad_nbr]|
+  // >> cutoff -> radial envelope = 0 -> zero message. Center is the dummy, whose
   // energy/force are discarded (excluded from owned sum). A dummy->dummy
   // SELF-LOOP would have edge_distance = 0 (NOT > cutoff): r=0 poisons the edge
-  // basis (SO2/envelope) and corrupts the whole batch -- that was the bug.
+  // basis (SO2/envelope) and corrupts the whole batch -- that was the bug (and,
+  // on a zero-atom rank, pad_nbr==0==dummy would re-create it: H5).
   for (int64_t k = old; k < edge_cap; k++) {
-    ei[k] = 0;                                       // row0 = neighbor = atom 0
+    ei[k] = pad_nbr;                                 // row0 = neighbor (real/far)
     ei[edge_cap + k] = dummy;                        // row1 = center = dummy (far)
   }
   dd_edge_index_.swap(ei);
