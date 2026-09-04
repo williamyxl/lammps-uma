@@ -189,13 +189,16 @@ def required_shell(num_layers, dd_k, cutoff):
     return num_layers * cutoff if num_layers > 0 else cutoff
 
 
-def shell_ok(have_shell, num_layers, dd_k, cutoff):
-    """True if the configured shell is deep enough (or cannot be checked)."""
+def shell_ok(have_shell, num_layers, dd_k, cutoff, skin=2.0):
+    """True if the EFFECTIVE shell is deep enough (or cannot be checked).
+
+    H-14 (audit §H.14.5): when comm_modify cutoff is unset (have_shell==0) LAMMPS
+    uses cutoff+skin, NOT 0 -- so the check must test the effective shell, not
+    skip. This mirrors init_style_dd's eff_shell."""
     if num_layers <= 0:
         return True                      # legacy artifact: warn, don't block
-    if have_shell <= 0.0:
-        return True                      # user set nothing: not an error here
-    return have_shell + 1e-9 >= required_shell(num_layers, dd_k, cutoff)
+    eff = have_shell if have_shell > 0.0 else (cutoff + skin)
+    return eff + 1e-9 >= required_shell(num_layers, dd_k, cutoff)
 
 
 def test_shell_depth_per_layer_k4():
@@ -218,6 +221,17 @@ def test_shell_depth_legacy_metadata_not_blocked():
     # num_layers absent (0): cannot verify -> warn, never block
     assert shell_ok(6.5, 0, 0, 6.0)
     print("PASS test_shell_depth_legacy_metadata_not_blocked")
+
+
+def test_shell_depth_unset_cutoff_uses_effective_H14():
+    # H-14: comm_modify cutoff UNSET (have_shell=0) -> effective = cutoff+skin.
+    # k=4 per-layer needs 1*cutoff=6.0; cutoff+skin=8.0 >= 6.0 -> OK (not skipped).
+    assert shell_ok(0.0, 4, 4, 6.0, skin=2.0)
+    # but for a k=1 artifact needing 24 A, cutoff+skin=8.0 < 24 -> MUST be caught,
+    # NOT silently skipped as the pre-H-14 `have_shell>0` test did.
+    assert not shell_ok(0.0, 4, 1, 6.0, skin=2.0), \
+        "H-14: unset shell too shallow for k=1 must be rejected, not skipped"
+    print("PASS test_shell_depth_unset_cutoff_uses_effective_H14")
 
 
 # ---- H6: DD flag agreement (dd_flag_agreement, audit rev 32) -------------------
@@ -261,6 +275,7 @@ def main():
         test_shell_depth_per_layer_k4,
         test_shell_depth_k1_needs_deep_halo,
         test_shell_depth_legacy_metadata_not_blocked,
+        test_shell_depth_unset_cutoff_uses_effective_H14,
         test_flag_agreement_all_equal,
         test_flag_agreement_detects_no_halo_mismatch,
         test_flag_agreement_detects_cap_mismatch,
