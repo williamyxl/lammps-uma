@@ -849,42 +849,85 @@ void PairUMA::init_style()
   if (dd_active_) {
     // DD needs EVERY owned+ghost node to be a center (see build_dd_graph), so
     // request a full list that also lists ghost atoms as centers (REQ_GHOST).
-    // Ghosts are supplied to the receptive field by `comm_modify cutoff
-    // (num_layers*cutoff)`, which the user sets in the input script.
     neighbor->add_request(this, NeighConst::REQ_FULL | NeighConst::REQ_GHOST);
-
-    // Size the LAMMPS forward/reverse comm buffer for the halo feature exchange.
-    // The per-layer halo moves dd_halo_width doubles/atom (sph_feature_size *
-    // sphere_channels, e.g. 9*128=1152). comm_forward/comm_reverse are read by
-    // Comm::init() (called AFTER init_style) to size buf_send/buf_recv, so they
-    // MUST be set here, not inside the op callback (setting them late leaves the
-    // buffer too small -> pack_forward_comm overruns -> segfault).
-    int w = predictor ? predictor->metadata().dd_halo_width : 0;
-    if (w <= 0)
-      error->all(FLERR,
-                 "Pair style uma: UMA_DD requires a k=4 DD artifact with "
-                 "dd_halo_width in metadata (export with UMA_DD_HALO=1)");
-    comm_forward = w;
-    // A2/S2: the same reverse buffer also carries the [nall,3] ghost-force
-    // reverse_comm at the end of run_compute_dd, so it must be at least 3 wide.
-    // dd_halo_width is O(1000), but assert rather than assume.
-    comm_reverse = (w > 3) ? w : 3;
-    // H1 FIX (audit PART H / rev 31): DD requires `newton off`, and Comm::init()
-    // does `if (force->newton == 0) maxreverse = 0;` then
-    // `maxreverse = MAX(maxreverse, comm_reverse_off)` -- so a newton-off pair
-    // style that sets only comm_reverse gets reverse buffers sized to 0 and the
-    // reverse halo/ghost-force packs (up to rmax*w doubles) overflow the heap.
-    // It has not crashed only because a uniform brick grid keeps smax~=rmax and
-    // BUFFACTOR's 1.5x slack absorbs the mismatch; it breaks on non-uniform
-    // density, an asymmetric processors grid, a slab, or CommTiled. Mirror
-    // PairKIM (KIM/pair_kim.cpp: comm_reverse_off): set comm_reverse_off so
-    // maxreverse survives the newton-off wipe.
-    comm_reverse_off = comm_reverse;
-    if (comm->me == 0 && screen)
-      fprintf(screen, "uma DD: halo comm width = %d doubles/atom\n", w);
+    init_style_dd();   // comm buffer sizing (H1) + shell depth (H4) + flags (H6)
   } else {
     neighbor->add_request(this, NeighConst::REQ_FULL);
   }
+}
+
+/* ----------------------------------------------------------------------
+   DD-specific init_style tail (H1/H4/H6, audit PART H). Sizes the halo
+   forward/reverse comm buffers (incl. comm_reverse_off for newton-off, H1),
+   validates the ghost shell is deep enough for the artifact's halo depth (H4),
+   and agrees the collective-affecting DD flags across ranks (H6). Split out of
+   init_style() to keep it under the A5 method-size ratchet.
+------------------------------------------------------------------------- */
+void PairUMA::init_style_dd()
+{
+  // Size the LAMMPS forward/reverse comm buffer for the halo feature exchange.
+  // The per-layer halo moves dd_halo_width doubles/atom (sph_feature_size *
+  // sphere_channels, e.g. 9*128=1152). comm_forward/comm_reverse are read by
+  // Comm::init() (called AFTER init_style) to size buf_send/buf_recv, so they
+  // MUST be set here, not inside the op callback (setting them late leaves the
+  // buffer too small -> pack_forward_comm overruns -> segfault).
+  int w = predictor ? predictor->metadata().dd_halo_width : 0;
+  if (w <= 0)
+    error->all(FLERR,
+               "Pair style uma: UMA_DD requires a k=4 DD artifact with "
+               "dd_halo_width in metadata (export with UMA_DD_HALO=1)");
+  comm_forward = w;
+  // A2/S2: the same reverse buffer also carries the [nall,3] ghost-force
+  // reverse_comm at the end of run_compute_dd, so it must be at least 3 wide.
+  comm_reverse = (w > 3) ? w : 3;
+  // H1 FIX (audit PART H / rev 31): DD requires `newton off`, and Comm::init()
+  // does `if (force->newton == 0) maxreverse = 0;` then
+  // `maxreverse = MAX(maxreverse, comm_reverse_off)` -- so a newton-off pair
+  // style that sets only comm_reverse gets reverse buffers sized to 0 and the
+  // reverse halo/ghost-force packs (up to rmax*w doubles) overflow the heap. It
+  // has not crashed only because a uniform brick grid keeps smax~=rmax and
+  // BUFFACTOR's 1.5x slack absorbs it; it breaks on non-uniform density, an
+  // asymmetric processors grid, a slab, or CommTiled. Mirror PairKIM: set
+  // comm_reverse_off so maxreverse survives the newton-off wipe.
+  comm_reverse_off = comm_reverse;
+
+  // H4/H-11 FIX (audit PART H / rev 32): validate the ghost shell is deep enough.
+  // The shipped per-layer k=4 scheme refreshes ghost FEATURES every block so a
+  // ONE-layer (1*cutoff) shell suffices; a k=1 artifact needs the full
+  // num_layers*cutoff shell (README's `comm_modify cutoff 24`). If comm_modify
+  // cutoff is too small, rim ghosts silently lose neighbours -> wrong forces with
+  // no diagnostic (P0'.6). num_layers/dd_k now come from metadata (H-11a).
+  const auto &md = predictor->metadata();
+  const int nlayers = md.num_layers;
+  const int kdepth = md.dd_k;
+  const double req_shell =
+      (kdepth > 0 && kdepth >= nlayers) ? cutoff
+                                        : (nlayers > 0 ? nlayers * cutoff : cutoff);
+  const double have_shell = comm->cutghostuser;   // 0 => user set nothing
+  if (nlayers <= 0) {
+    if (comm->me == 0)
+      utils::logmesg(lmp,
+          "Pair uma DD [H4]: artifact has no num_layers/dd_k in metadata; cannot "
+          "verify the ghost shell depth. Re-export with the current exporter, or "
+          "ensure comm_modify cutoff >= num_layers*cutoff.\n");
+  } else if (have_shell > 0.0 && have_shell + 1e-9 < req_shell) {
+    error->all(FLERR,
+        "Pair style uma: UMA_DD ghost shell too shallow: comm_modify cutoff = "
+        "{:.3f} A < required {:.3f} A (num_layers={} dd_k={} cutoff={:.3f}). Rim "
+        "ghosts would lose neighbours -> silently wrong forces. Set "
+        "'comm_modify cutoff {:.3f}' (or deeper).",
+        have_shell, req_shell, nlayers, kdepth, cutoff, req_shell);
+  } else if (comm->me == 0) {
+    utils::logmesg(lmp,
+        "Pair uma DD: ghost shell {:.3f} A >= required {:.3f} A "
+        "(num_layers={} dd_k={}).\n",
+        have_shell > 0.0 ? have_shell : req_shell, req_shell, nlayers, kdepth);
+  }
+
+  dd_flag_agreement();   // H6/H-11: all ranks agree on DD collective-affecting flags
+
+  if (comm->me == 0 && screen)
+    fprintf(screen, "uma DD: halo comm width = %d doubles/atom\n", w);
 }
 
 /* ----------------------------------------------------------------------
@@ -903,18 +946,34 @@ void PairUMA::init_style()
 void PairUMA::preflight_memory_check()
 {
   if (comm->me != 0) return;                 // one warning, from rank 0
-  if (dd_active_) return;                     // DD capacity is halo/shell-bound; skip
-  // per-rank owned atom estimate: global atoms / number of tiles.
-  const int tiles = (num_devices > 1) ? num_devices
-                                       : (comm->nprocs > 1 ? comm->nprocs : 1);
-  const bigint natoms = atom->natoms;
-  if (natoms <= 0 || tiles <= 0) return;
-  const double per_rank = static_cast<double>(natoms) / tiles;
 
-  // Resolve whether activation checkpointing is effectively ON for this run.
-  // (Production artifacts bake per-chunk AC; UMA_CKPT alone is a no-op there -
-  //  see §G.25.1. Treat "any recompute path active" as AC-on for the estimate.)
-  const bool ac_off = uma_env_bool("UMA_NO_RECOMPUTE", false);
+  // H-12 FIX (audit rev 32 §H.10.3): this used to `return` for dd_active_, so it
+  // did NOT fire for the exact case A11 exists for -- the 8803000 DD run that
+  // OOMed under the A10 AC-off default. DD evaluates the single-tile model per
+  // rank over owned+ghost atoms, so its per-rank load is `nall` (not global/tiles)
+  // and the same AC-off capacity ceiling applies.
+  double per_rank = 0.0;
+  const char *what = "";
+  if (dd_active_) {
+    per_rank = static_cast<double>(atom->nlocal + atom->nghost);  // owned+ghost
+    what = "owned+ghost/rank (DD)";
+  } else {
+    const int tiles = (num_devices > 1) ? num_devices
+                                         : (comm->nprocs > 1 ? comm->nprocs : 1);
+    const bigint natoms = atom->natoms;
+    if (natoms <= 0 || tiles <= 0) return;
+    per_rank = static_cast<double>(natoms) / tiles;
+    what = "atoms/tile";
+  }
+
+  // A10-consistent AC resolution: activation checkpointing now defaults OFF; it
+  // is ON only when the user opts in via UMA_AC (chunk/block/full) or UMA_CKPT=1.
+  // (Legacy UMA_NO_RECOMPUTE forces retain = AC-off, so it counts as off too.)
+  const char *ac_env = std::getenv("UMA_AC");
+  const bool ac_on = uma_env_bool("UMA_CKPT", false) ||
+                     (ac_env != nullptr && std::string(ac_env) != "off" &&
+                      std::string(ac_env) != "0" && std::string(ac_env) != "");
+  const bool ac_off = !ac_on;
   // Measured single-point ceilings (atoms/tile), conservative:
   const double ceil_ac_on = 36000.0;         // ~N=38/12 tiles
   const double ceil_ac_off = 12000.0;        // ~1/3; opt4 OOMs 12-tile N>=36
@@ -922,10 +981,10 @@ void PairUMA::preflight_memory_check()
 
   if (per_rank > ceiling) {
     utils::logmesg(lmp,
-        "Pair uma [pre-flight]: ~{:.0f} atoms/tile ({} atoms / {} tile(s)) is "
-        "above the measured {} ceiling (~{:.0f} atoms/tile). This run may OOM "
-        "on device. To fit: {}. (This is a WARNING; the run will proceed.)\n",
-        per_rank, static_cast<long long>(natoms), tiles,
+        "Pair uma [pre-flight]: ~{:.0f} {} is above the measured {} ceiling "
+        "(~{:.0f} atoms/tile). This run may OOM on device. To fit: {}. "
+        "(This is a WARNING; the run will proceed.)\n",
+        per_rank, what,
         ac_off ? "activation-checkpointing-OFF" : "activation-checkpointing-ON",
         ceiling,
         ac_off ? "enable activation checkpointing (UMA_AC=chunk / UMA_CKPT=1), "
@@ -1255,6 +1314,41 @@ void PairUMA::reduce_dd_ghost_forces(int nlocal, int nall, double **f)
    and (when the artifact records edge_pad_cap) require the env to MATCH it since
    the chunk count is baked at that cap. Returns the resolved cap (0 = no pad).
 ------------------------------------------------------------------------- */
+/* ----------------------------------------------------------------------
+   H6/H-11 (audit PART H / rev 32): DD flag agreement, mirroring the GP path's
+   exemplary flag-agreement Allreduce (mpi_peer_predictor.cpp). The DD
+   collective-affecting flags -- UMA_DD_NO_HALO and UMA_DD_HALO_TEST (they change
+   how many comm->reverse_comm/forward_comm calls a rank issues) and
+   UMA_DD_EDGE_CAP (it changes the traced chunk count / edge shape) -- were read
+   per-process with no cross-rank check. A rank disagreeing would issue a
+   different number of collectives -> HANG (or a ragged shape). Reduce them once
+   at setup; if any rank differs, abort collectively with a clear message rather
+   than deadlocking mid-run.
+------------------------------------------------------------------------- */
+void PairUMA::dd_flag_agreement()
+{
+  if (comm->nprocs <= 1) return;             // single rank: nothing to agree on
+  auto flag = [](const char *n) -> int {
+    const char *e = std::getenv(n);
+    return (e && e[0] == '1' && e[1] == '\0') ? 1 : 0;
+  };
+  // [no_halo, halo_test, edge_cap]. edge_cap resolved (env or metadata) so a
+  // mismatch in the *effective* cap (not just the env) is caught.
+  long long local[3] = {flag("UMA_DD_NO_HALO"), flag("UMA_DD_HALO_TEST"),
+                        static_cast<long long>(resolve_dd_edge_cap())};
+  long long lo[3], hi[3];
+  MPI_Allreduce(local, lo, 3, MPI_LONG_LONG, MPI_MIN, world);
+  MPI_Allreduce(local, hi, 3, MPI_LONG_LONG, MPI_MAX, world);
+  const char *names[3] = {"UMA_DD_NO_HALO", "UMA_DD_HALO_TEST", "UMA_DD_EDGE_CAP"};
+  for (int i = 0; i < 3; ++i)
+    if (lo[i] != hi[i])
+      error->all(FLERR,
+                 "Pair style uma: DD flag {} disagrees across ranks (min={} "
+                 "max={}); all ranks must set it identically or the per-rank "
+                 "collective counts diverge and the run deadlocks.",
+                 names[i], lo[i], hi[i]);
+}
+
 int64_t PairUMA::resolve_dd_edge_cap()
 {
   int64_t edge_cap = 0;

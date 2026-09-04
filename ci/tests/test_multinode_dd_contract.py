@@ -179,6 +179,77 @@ def test_no_halo_control_is_self_adjoint():
     print("PASS test_no_halo_control_is_self_adjoint")
 
 
+# ---- H4: DD ghost-shell depth requirement (init_style_dd, audit rev 32) --------
+def required_shell(num_layers, dd_k, cutoff):
+    """Replica of the req_shell rule: a per-layer halo (dd_k>=num_layers) needs
+    1*cutoff; a shallower one needs num_layers*cutoff. num_layers<=0 -> 1*cutoff
+    (legacy artifact, warn-only)."""
+    if dd_k > 0 and dd_k >= num_layers:
+        return cutoff
+    return num_layers * cutoff if num_layers > 0 else cutoff
+
+
+def shell_ok(have_shell, num_layers, dd_k, cutoff):
+    """True if the configured shell is deep enough (or cannot be checked)."""
+    if num_layers <= 0:
+        return True                      # legacy artifact: warn, don't block
+    if have_shell <= 0.0:
+        return True                      # user set nothing: not an error here
+    return have_shell + 1e-9 >= required_shell(num_layers, dd_k, cutoff)
+
+
+def test_shell_depth_per_layer_k4():
+    # shipped k=4 per-layer artifact: dd_k==num_layers==4 -> 1*cutoff suffices
+    assert required_shell(4, 4, 6.0) == 6.0
+    assert shell_ok(6.5, 4, 4, 6.0)          # 6.5 >= 6.0 OK
+    assert shell_ok(0.0, 4, 4, 6.0)          # unset -> not blocked here
+    print("PASS test_shell_depth_per_layer_k4")
+
+
+def test_shell_depth_k1_needs_deep_halo():
+    # a k=1 artifact (single exchange) needs the full num_layers*cutoff = 24 A
+    assert required_shell(4, 1, 6.0) == 24.0
+    assert not shell_ok(6.5, 4, 1, 6.0), "6.5 A shell must be rejected for k=1"
+    assert shell_ok(24.0, 4, 1, 6.0)
+    print("PASS test_shell_depth_k1_needs_deep_halo")
+
+
+def test_shell_depth_legacy_metadata_not_blocked():
+    # num_layers absent (0): cannot verify -> warn, never block
+    assert shell_ok(6.5, 0, 0, 6.0)
+    print("PASS test_shell_depth_legacy_metadata_not_blocked")
+
+
+# ---- H6: DD flag agreement (dd_flag_agreement, audit rev 32) -------------------
+def flags_agree(per_rank_flags):
+    """per_rank_flags: list of [no_halo, halo_test, edge_cap] per rank. Returns
+    True iff every column is identical across ranks (else the run would deadlock)."""
+    if not per_rank_flags:
+        return True
+    ncol = len(per_rank_flags[0])
+    for c in range(ncol):
+        col = [r[c] for r in per_rank_flags]
+        if min(col) != max(col):
+            return False
+    return True
+
+
+def test_flag_agreement_all_equal():
+    assert flags_agree([[0, 0, 917504], [0, 0, 917504], [0, 0, 917504]])
+    print("PASS test_flag_agreement_all_equal")
+
+
+def test_flag_agreement_detects_no_halo_mismatch():
+    # rank 1 set UMA_DD_NO_HALO=1, others did not -> mismatched collective counts
+    assert not flags_agree([[0, 0, 917504], [1, 0, 917504]])
+    print("PASS test_flag_agreement_detects_no_halo_mismatch")
+
+
+def test_flag_agreement_detects_cap_mismatch():
+    assert not flags_agree([[0, 0, 917504], [0, 0, 1376256]])
+    print("PASS test_flag_agreement_detects_cap_mismatch")
+
+
 def main():
     tests = [
         test_halo_adjointness,
@@ -187,6 +258,12 @@ def main():
         test_pad_edges_zero_atom_rank_H5,
         test_pack_unpack_round_trip,
         test_no_halo_control_is_self_adjoint,
+        test_shell_depth_per_layer_k4,
+        test_shell_depth_k1_needs_deep_halo,
+        test_shell_depth_legacy_metadata_not_blocked,
+        test_flag_agreement_all_equal,
+        test_flag_agreement_detects_no_halo_mismatch,
+        test_flag_agreement_detects_cap_mismatch,
     ]
     for t in tests:
         t()

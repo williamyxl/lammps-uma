@@ -42,6 +42,14 @@ struct ArtifactMetadata {
   /// must size its forward/reverse comm buffer to this many doubles/atom before
   /// the run (via comm_forward/comm_reverse in init_style). 0 => not a DD artifact.
   int dd_halo_width = 0;
+  /// H4/H-11 (audit PART H): number of message-passing layers (blocks). The DD
+  /// receptive field is num_layers * cutoff; init_style validates the ghost shell
+  /// (comm->cutghostuser) is at least that deep so ghosts near the rim have a
+  /// complete neighbour set. The exporter writes "num_layers"; 0 => absent.
+  int num_layers = 0;
+  /// H4/H-11: DD halo depth k the artifact was exported with (exporter "dd_k").
+  /// For the shipped per-layer halo, dd_k == num_layers. 0 => absent / not DD.
+  int dd_k = 0;
 };
 
 ArtifactMetadata load_artifact_metadata(const std::string& metadata_path);

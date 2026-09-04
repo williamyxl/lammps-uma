@@ -140,6 +140,9 @@ ArtifactMetadata load_artifact_metadata(const std::string& metadata_path) {
   meta.edge_pad_cap = j.value("edge_pad_cap", 0);
   meta.edge_pad_atom = j.value("edge_pad_atom", 0);
   meta.dd_halo_width = j.value("dd_halo_width", 0);
+  // H4/H-11 (audit PART H): num_layers/dd_k for the DD ghost-shell depth check.
+  meta.num_layers = j.value("num_layers", 0);
+  meta.dd_k = j.value("dd_k", 0);
 
   // ---- P4'.3: read back what the exporter wrote and validate it ----------
   // edge_pad_cap must be a positive multiple of edge_ac_chunk when both are set

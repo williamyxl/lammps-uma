@@ -88,6 +88,8 @@ class PairUMA : public Pair {
   // count E up to UMA_DD_EDGE_CAP with inert atom0->dummy edges; returns the new
   // (padded) edge count. `dummy` is the appended far-node index (nall). Pure
   // code-motion; identical arithmetic to the pre-split inline block.
+  void init_style_dd();                                        // H1/H4/H6 DD init tail
+  void dd_flag_agreement();                                    // H6: cross-rank DD flags
   int64_t resolve_dd_edge_cap();                               // H2: validate cap
   int setup_dd_pad_nodes(int nall, int &dummy, int &pad_nbr);  // H5: pad nodes
   int64_t pad_dd_edges(int64_t E, int64_t edge_cap, int dummy, int pad_nbr);
