@@ -72,7 +72,7 @@ echo "=== (a) DD path (UMA_DD=1), 1 rank ==="
 rm -f log.lammps
 t0=$SECONDS
 mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
-  env UMA_ALLOW_LEGACY_METADATA=1 UMA_DD=1 \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
   "${LMP}" -in in.dd_sp -var artifact "${DD_ARTIFACT}" \
   -var datafile "data.nacl_n${N}" > lmp_dd.log 2>&1
 echo "  exit=$? wall=$((SECONDS-t0))s"
@@ -88,7 +88,7 @@ echo "=== (b) single-tile path (UMA_DD unset), 1 rank, same artifact ==="
 rm -f log.lammps
 t0=$SECONDS
 mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
-  env UMA_ALLOW_LEGACY_METADATA=1 \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk \
   "${LMP}" -in in.dd_sp -var artifact "${DD_ARTIFACT}" \
   -var datafile "data.nacl_n${N}" > lmp_st.log 2>&1
 echo "  exit=$? wall=$((SECONDS-t0))s"

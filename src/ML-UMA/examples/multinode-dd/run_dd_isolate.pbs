@@ -75,7 +75,7 @@ for RANKS in 1 2; do
   rm -f log.lammps
   t0=$SECONDS
   mpiexec -n ${RANKS} --ppn ${RANKS} gpu_tile_compact.sh \
-    env UMA_ALLOW_LEGACY_METADATA=1 UMA_DD=1 \
+    env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
     "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" -var datafile "data.nacl_n${N}" \
     > lmp_r${RANKS}.log 2>&1
   rc=$?

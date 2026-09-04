@@ -87,7 +87,7 @@ for SHELL in 6.5 12.0 24.0; do
   rm -f log.lammps
   t0=$SECONDS
   mpiexec -n ${RANKS} --ppn ${RANKS} gpu_tile_compact.sh \
-    env UMA_ALLOW_LEGACY_METADATA=1 UMA_DD=1 \
+    env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
     "${LMP}" -in "in.dd_shell_${SHELL}" -var artifact "${ARTIFACT}" \
     -var datafile "data.nacl_n${N}" > "lmp_shell_${SHELL}.log" 2>&1
   rc=$?

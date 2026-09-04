@@ -75,7 +75,7 @@ t0=$SECONDS
 # artifact is a separate job; the loader reads the same fields either way.
 mpiexec -n ${RANKS} --ppn ${TPN} \
   gpu_tile_compact.sh \
-  env UMA_ALLOW_LEGACY_METADATA=1 \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk \
   "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" -var datafile "data.nacl_n${N}" \
   > lmp.log 2>&1
 rc=$?

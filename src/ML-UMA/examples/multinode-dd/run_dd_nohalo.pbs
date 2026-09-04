@@ -71,8 +71,13 @@ cd "${RUNDIR}"
 echo "=== UMA DD single-point: N=${N} (${NAT} atoms), ${NODES} nodes x ${TPN} tiles = ${RANKS} ranks ==="
 t0=$SECONDS
 # one XPU tile per rank via gpu_tile_compact.sh; UMA_DD path builds owned+ghost graph per rank
+# UMA_ALLOW_LEGACY_METADATA=1: the k=4 DD artifact predates the P4'.1 metadata
+# gate (same as run_dd_parity.pbs). UMA_DD_NO_HALO=1 is set in the env above; H3
+# (audit PART H) now gates BOTH forward and backward on it, so this A/B control is
+# a valid experiment (its backward is the identity, not Sᵀ).
 mpiexec -n ${RANKS} --ppn ${TPN} \
   gpu_tile_compact.sh \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk \
   "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" -var datafile "data.nacl_n${N}" \
   > lmp.log 2>&1
 rc=$?
