@@ -1,0 +1,90 @@
+#!/bin/bash -l
+#PBS -N uma_dd_rscan
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# D4 (audit §H.13.3/§H.14.4): DD rank-count scan at FIXED N=16, one node, ranks
+# = 2 / 4 / 8. Separates a RIM error from a BULK error WITHOUT any code change:
+#   * rim (thin-halo edge incompleteness): error GROWS with rank count -- more
+#     ranks at fixed N => more surface per volume => bigger rim fraction.
+#   * bulk (e.g. per-rank MoLE composition, energy assembly): error is ~FLAT in
+#     rank count.
+# Reference: the N=16 single-tile ASE force oracle (forces_w01.npy = the exact
+# per-atom forces) and the validated single-tile PE -110673.829050 eV.
+#
+#   qsub run_dd_rankscan.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-16}
+NAT=$((8*N*N*N))
+ARTIFACT=${ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+ORACLE=${ORACLE:-${HEN}/pbs/out/ase_n16_parity}   # forces_w01.npy = single-tile ref
+RUNDIR=${RUNDIR:-${EX}/run_dd_rankscan_n${N}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+cp -f "${EX}/in.dd_sp" "${RUNDIR}/in.dd_sp"
+
+# Oracle dir the parity script expects (forces_w12.npy/summary_w12.json). The
+# N=16 single-tile reference is forces_w01 -- the EXACT per-atom forces. Symlink.
+OD=${RUNDIR}/oracle; mkdir -p "${OD}"
+ln -sf "${ORACLE}/forces_w01.npy"  "${OD}/forces_w12.npy"
+ln -sf "${ORACLE}/summary_w01.json" "${OD}/summary_w12.json"
+
+echo "### D4 DD rank-count scan: N=${N} (${NAT} atoms), ranks = 2 4 8 ###"
+echo "### rim error grows with ranks; bulk error is flat ###"
+echo
+
+for RANKS in 2 4 8; do
+  RD=${RUNDIR}/r${RANKS}; mkdir -p "${RD}"
+  cp -f "${RUNDIR}/data.nacl_n${N}" "${RD}/"; cp -f "${RUNDIR}/in.dd_sp" "${RD}/"
+  echo "=== ${RANKS} ranks ==="
+  rm -f "${RD}/log.lammps"
+  t0=$SECONDS
+  ( cd "${RD}" && mpiexec -n ${RANKS} --ppn ${RANKS} gpu_tile_compact.sh \
+      env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
+      "${LMP}" -in in.dd_sp -var artifact "${ARTIFACT}" \
+      -var datafile "data.nacl_n${N}" > lmp.log 2>&1 )
+  echo "  exit=$? wall=$((SECONDS-t0))s"
+  PE=$(grep -E "^\s*0\s" "${RD}/log.lammps" 2>/dev/null | head -1 | awk '{print $3}')
+  echo "  step0_PE=${PE:-<none>}"
+  if [ -f "${RD}/forces_step0.dump" ]; then
+    LMP_DIR="${RD}" ASE_DIR="${OD}" UMA_DD_SKIP_ENERGY=1 \
+      python "${LU}/scripts/parity_vs_asegp.py" 2>&1 | \
+      grep -E "force angle deviation|max\|dF\|" | sed 's/^/  /'
+  else
+    grep -iE "ERROR|exceeds|out of memory" "${RD}/lmp.log" | head -2 | sed 's/^/  /'
+  fi
+  echo
+done
+
+echo "### VERDICT (compare force angle mean across rank counts) ###"
+echo "  grows 2->4->8  => RIM-dominated (thin halo): deeper halo / exact ghost grad"
+echo "  ~flat          => BULK-dominated (MoLE composition C2 / energy assembly C5)"
+echo "DONE"
