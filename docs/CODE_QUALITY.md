@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.27 (verdict rev 29, current)**
+**PART F = auditor replies §F.5 → §F.22; PART G = standing problems + §G.28 (verdict rev 30 = **A**)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -261,7 +261,20 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > recorded G4 is 8795781, before 449 changed lines of `pair_uma.cpp` and five
 > engine headers — the **largest compiled change of the campaign is the one
 > exception to the bit-identity rule** it has held for 20 passes. **S10b (~1 h,
-> queue only) is now the top item.** Also outstanding: retitle §G.21 (still says
+> queue only) is now the top item. Also outstanding: retitle §G.21 and record 8799532.
+>
+> **UPDATE 24 — verdict rev 30: A− → A (§G.28).** Four items closed and verified.
+> **S10b:** full G4 **8801338** 7/7 bit-identical — the largest compiled change of
+> the campaign is no longer the exception to the bit-identity rule. **A1 CLOSED:**
+> `ci/build_toy_artifact.sh` builds an 8-atom CPU toy in ~4 min on a login node and
+> the gate auto-builds it, so **the numerical core is gated in a fresh clone** —
+> the sole A−→A blocker. **A10 (owner directive) done correctly**, including the
+> per-chunk half I warned would be a no-op: new `UMA_AC` master (default `off`),
+> and `fix npt` **auto-enables the virial** rather than needing a flag; G4 8801719
+> 7/7 with `UMA_AC=chunk` pinned proves only the default moved. **A11** is
+> warning-only as specified. **A applies to the single-node engine**; DD (A2)
+> remains open but its residual is now *characterised* as the k=4 thin-halo limit
+> (job 8800159), not a bug.** Also outstanding: retitle §G.21 (still says
 > DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
@@ -350,8 +363,8 @@ results). This document is the standing verdict and is updated as the code chang
   problem (G.9), and the one to fix first (G.10). Cross-references §D.10 states
   and §F.20 lifts; adds no new bookkeeping surface. **Read this if you want the
   problems without the history.** **`[AUDIT]` §G.12 and §G.14 review the
-  responses; **§G.27 carries the current verdict (rev 29, A−)** — batch committed;
-  **S10b: full G4 still not run on it.**
+  responses; **§G.28 carries the current verdict (rev 30, **A**)** — A1 gate runs in a
+  fresh clone; single-node engine at A; DD (A2) the remaining work.**
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -6427,6 +6440,152 @@ in code, and the A1 numeric gate is in the repository.
 **One thing to do: run G4.** The campaign has held a bit-identity gate on every
 compiled change for twenty passes; the largest change of all is currently the
 exception. It is a queue submission, not engineering.
+
+---
+
+## G.28 S10b, A1 close-out, A10+A11 — all verified  `[AUDIT 2026-09-04, 24th pass]` — verdict rev 30
+
+> Twenty-fourth pass, reviewing `e7031807dd` and the S10b validation of
+> `3fc647a53a`. Four items I had open all closed, including the owner directive.
+
+### G.28.0 Verdict: **A− → A**
+
+**The sole A−→A blocker is closed.** The A1 numeric gate now runs in a fresh
+clone, the largest compiled change of the campaign is bit-identity validated, and
+the owner directive (A10) landed with all six acceptance criteria met — including
+the one I expected to be missed.
+
+### G.28.1 S10b — the bit-identity exception is closed  `[AUDIT 24th pass]`
+
+`3fc647a53a` (449 lines of `pair_uma.cpp` + 5 engine headers) was the one compiled
+change in twenty passes without a G4. Now validated:
+
+- rebuild **8801160** `LMP BUILD OK`
+- tripwire **8801337** PASS
+- **full G4 8801338 — all 7 configs bit-identical** (N=16 all-W `−110673.829050`
+  and step-10 `−110602.976229`; N=32 `−885377.060040`; cos = 1.0)
+
+G3/G5 is satisfied across the A5/A3/A1/DD/metadata batch. The exception is gone.
+
+### G.28.2 A1 close-out — the gate runs in a fresh clone  `[AUDIT 24th pass]`
+
+The A1 gate previously SKIPped without a locally built ~90 MB artifact, so a fresh
+clone gained nothing. `ci/build_toy_artifact.sh` (committed, Tier-0 tracked) builds
+an **8-atom CPU-traced toy in ~4 min on a login node, no allocation**, and
+`tier2_opt_equivalence.sh` auto-builds it when unset.
+
+**This is the better solution.** I had framed the choice as *"commit a smaller
+artifact or add a CI step"*; building on demand avoids committing a binary blob
+entirely and keeps the repo clean. Verified: auto-built toy → **OPTEQ PASS, 8
+configs bit-identical**.
+
+**A1/S1 is closed.** The opt2/opt4/opt5 equivalence claims — asserted in comments
+since opt2 and previously exercised only by the expensive XPU G4 — are now gated on
+a login node.
+
+### G.28.3 A10 — the directive, implemented correctly  `[AUDIT 24th pass]`
+
+I flagged in §G.25.1 that flipping `UMA_CKPT` alone would be a **no-op**, because
+`predictor.cpp:429` short-circuits into the per-chunk path on every production
+artifact. **Both halves were done:**
+
+| Half | Implementation |
+|---|---|
+| whole-module | `checkpoint_enabled()` → `return false` when unset; the XPU special-case deleted |
+| **per-chunk/block/edge-degree** | new **`UMA_AC` master** (`off` default / `chunk` / `block` / `full`) inverts the recompute sense; `UMA_NO_RECOMPUTE*` kept as deprecated aliases |
+
+The single-knob design is what I recommended over four flags, and old scripts keep
+working.
+
+**Acceptance criteria — all six met**, including #1, which I expected to require a
+follow-up:
+
+> *A run with no `UMA_*` set computes a virial when a barostat is present.*
+
+Rather than making `UMA_COMPUTE_VIRIAL` default true (which would slow every
+NVE/NVT run), `pair_uma.cpp:796` **auto-enables the virial when a barostat is
+detected** on a single tile with AC off, and logs why:
+
+```
+Pair uma: barostat (fix npt) present on a single tile with activation
+checkpointing OFF -> virial auto-enabled (pos+cell autograd).
+Set UMA_COMPUTE_VIRIAL=0 to force it off.
+```
+
+That is better than what I specified: `fix npt` works out of the box, the
+force-only path stays byte-identical, and the behaviour is announced rather than
+implicit.
+
+**#4 met:** G4 **8801719** 7/7 bit-identical with `UMA_AC=chunk` pinned — proving
+only the *default* moved, not the numerics. **#5 met:** Tier-1 asserts the resolved
+default. **#3 met:** `ENV_VARS.md` documents `UMA_AC`.
+
+### G.28.4 A11 — pre-flight check, correctly scoped  `[AUDIT 24th pass]`
+
+Warning-only by construction, with the constraint stated in-code: *"it must NEVER
+change numerics or abort a run (a wrong estimate must not be a hard failure)."*
+That is the scoping I asked for — a wrong hard-fail would be worse than the OOM it
+replaces. The message **names the flag that restores capacity** (`UMA_AC=chunk`),
+which is what makes the smaller default legible rather than mysterious.
+
+### G.28.5 Grades — rev 30  `[AUDIT 24th pass]`
+
+| Dimension | rev 29 | **rev 30** | Basis |
+|---|---|---|---|
+| **Test & CI infrastructure** | A− | **A** | ↑ the numerical core is gated: A1 runs in a fresh clone; 12 Tier-1 files, 11 HARD, ASAN tier, CTest 5 |
+| **Process / bookkeeping** | B | **A−** | ↑ S10b closed the bit-identity exception; A10 pinned `UMA_AC=chunk` in the parity suite so the baseline could not silently move |
+| Resource & lifetime | A− | **A−** | unchanged |
+| Architecture | B+ | **B+** | unchanged |
+| Config surface | B | **B+** | ↑ `UMA_AC` collapses 5 flags into one documented knob with aliases |
+| Python export layer | C | **C** | unchanged (G6 deferred) |
+| Distributed correctness | B+ | **B+** | DD residual is now understood (§G.29.6) but the gate is unmet |
+| **Overall** | **A−** | **A** | |
+
+**Why A now:** the standing definition (§F.20.11) was *"every numerical claim is
+enforced by a test that fails when the claim breaks."* With A1 running in a fresh
+clone and G4 restored across the batch, that holds for the single-node engine.
+
+### G.28.6 What A does *not* mean here  `[AUDIT 24th pass]`
+
+Stated plainly so the grade is not over-read:
+
+- **Multi-node DD does not meet its gate.** cos = 0.7986 vs 1.0. But the residual
+  is now *characterised, not mysterious*: the ghost-shell scan (job 8800159) shows
+  dE decreasing monotonically with shell width (6.5 Å → +10.09, 12.0 Å → +8.67
+  meV/atom), which identifies it as the **k=4 thin-halo edge-completeness limit**,
+  not a code defect. Reaching 1.0 needs a deeper halo or the exact ghost-gradient
+  scheme — design work, correctly tracked in PART III. **A applies to the
+  single-node engine; A2 remains open.**
+- **Capacity dropped by design.** AC-off default trades N=38 for NPT-by-default.
+  A11 makes that legible; users needing capacity set `UMA_AC=chunk`.
+- **G6 (exporter split), G8 (second platform) remain deferred** with named
+  unblocking events.
+
+### G.28.7 Instructions  `[AUDIT 24th pass]`
+
+| # | Item | Effort | Status |
+|---|---|---|---|
+| **A2 / S2** | DD force gate. Now a *design* question (deeper halo vs exact ghost gradients), not a bug hunt — the thin-halo limit is measured | weeks | **OPEN — the main remaining work** |
+| **A8** | Second-platform CI; vendor hen shims; P7.1/P7.2 | days | OPEN |
+| **A6 / G6** | Exporter package split | days | DEFERRED — after A1 (now satisfied, so this is unblocked) |
+| — | Verify the new default at scale: one NVE/NVT run at a production size with `UMA_AC` unset, to confirm A11's estimate matches reality | ~1 h | suggested |
+
+### G.28.8 Bottom line
+
+Four open items closed in one cycle, each verified: S10b restored the bit-identity
+invariant on the largest change of the campaign; A1's gate now runs in a fresh
+clone via an on-demand toy build; A10 implemented the directive **including the
+per-chunk half I warned would be missed**, with NPT auto-enabling rather than
+requiring a flag; A11 is warning-only as specified.
+
+**The single-node engine is at A.** The remaining work is multi-node (A2), and it
+is now a characterised design problem rather than an unexplained failure.
+
+Twenty-four passes. This is the appropriate place to stop auditing.
+
+---
+---
+
 
 ---
 ---
