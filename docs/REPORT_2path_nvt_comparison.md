@@ -1545,3 +1545,53 @@ physics record is complete (per audit §G.27.3).
    thin-halo edge-completeness limit; reaching cos = 1.0 needs a deeper halo or the
    exact ghost-gradient scheme (`DEV_PLAN_node_parallelism.md` PART III), not a
    code fix. Jobs: DD parity 8799532; re-export 8799982; shell scan 8800159.
+
+### 15.1 DD diagnostic suite D1/D4 (audit §H.13/§H.14, 2026-09-04)
+
+The auditor pushed back on the single-cause "thin-halo" reading (it rested on a
+two-point shell scan where **86% of the error survived a doubled shell** — a bulk
+signature). D1/D4 were run to separate rim from bulk on evidence. **Both a bulk
+term and a rim term are real; the earlier pure-thin-halo conclusion was wrong.**
+
+**D1 — DD at 1 rank (N=6, 1728 atoms; job 8806686).** One rank ⇒ no cross-rank
+halo and an exact composition, so C2 (MoLE) and the cross-rank halo are switched
+off. Result:
+
+| | step-0 PE (eV) | dE |
+|---|---|---|
+| DD, 1 rank | −5804.807 | — |
+| ASE reference | −5836.319 | **+31.51 eV = +18.2 meV/atom** |
+
+Per the **pre-registered** interpretation (§H.14.2): a ~10+ meV/atom offset at
+1 rank means **the error is in DD's own forward/energy assembly (candidate C5),
+present with no decomposition at all — a bug, not a scheme trade-off.** (Caveat:
+periodic PBC still creates a 6.5 Å ghost shell even at 1 rank — Nghost=3185 — so
+the intra-rank periodic-ghost path is exercised; but there is no *cross-rank*
+halo and the composition is exact.) The single-tile control could not run
+(the k=4 artifact is not loadable by the non-DD path, exit 255), so the reference
+is the ASE oracle.
+
+**D4 — rank-count scan at fixed N=16 (jobs in 8806687).** Rim error grows with
+rank count (surface/volume rises); a bulk error is flat. Force-direction
+deviation (the non-saturating metric):
+
+| ranks | mean angle | median | p99 | max\|dF\| | cos |
+|---|---|---|---|---|---|
+| 2 | 28.4° | 20.6° | 126.9° | — | 0.814 |
+| 4 | 32.7° | 25.1° | 132.2° | 0.536 | 0.789 |
+| 8 | 36.3° | 28.7° | 137.9° | 0.460 | 0.766 |
+
+**The angle grows monotonically 28→33→36° as ranks 2→4→8.** That is a **rim/halo
+signature** (thin-halo edge incompleteness, C1) — and it argues **against** the
+auditor's C2-bulk-MoLE hypothesis, since C2 would be flat in rank count.
+
+**Synthesis — what limits DD (the one-line answer §H.14.8):** DD has **two**
+independent errors — a **bulk ~18 meV/atom offset in its own energy assembly
+(C5), present even at 1 rank**, plus a **rim/thin-halo term that grows with rank
+count (C1)**. Neither the pure-thin-halo reading (mine) nor the pure-MoLE reading
+(auditor's C2) is the whole story. **C5 must be fixed first** — it is a code bug
+reproducible on one rank and does not require any halo/PART III work — and only
+then does the rim term (C1, the deeper-halo-vs-exact-ghost-gradient design
+choice) become the binding constraint. **Force-direction deviation is now
+reported in degrees (mean/median/p99/max), not just cosine**, because cosine
+saturates near 1.

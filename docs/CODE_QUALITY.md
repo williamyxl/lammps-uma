@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies; PART G = single-node (rev 30 = **A**); PART H = multi-node (rev 32, multi-node **B**)**
+**PART F = auditor replies; PART G = single-node (**A**); PART H = multi-node (**B+**) + §H.13 DD plan + §H.14 next iteration**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -302,7 +302,40 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > thin-halo conclusion now rests on a valid experiment. Also caught by *running*:
 > the **A10×DD interaction** (DD needs `UMA_AC=chunk` for capacity). Remaining:
 > **H4** (last silent-wrong-forces path, blocked on `num_layers` in metadata) +
-> **H6**, best done together as ~1 day.** Also outstanding: retitle §G.21 (still says
+> **H6**, best done together as ~1 day.
+>
+> **UPDATE 27 — H-11/H-12 landed (§H.12, rev 33): multi-node B → B+.** **H6** is
+> *stricter* than the GP pattern it mirrors (MIN/MAX rather than SUM, and on the
+> **resolved** cap). **H-12 answered honestly: A11 did NOT fire for the DD OOM** —
+> `preflight_memory_check()` early-returned for `dd_active_`; now fixed with
+> owned+ghost as the estimate. **H4** gets the hard part right (k≥num_layers needs
+> only 1×cutoff, so it does not falsely reject k=4) but has a **residual**: it
+> tests `cutghostuser > 0`, so the **unset** case skips the check — and LAMMPS then
+> uses `cutoff + skin`, which is fine for k=4 but silently 6.5 Å against the k=1
+> README's 24 Å requirement. **3-line fix (H-14).** G4 8804578 7/7; 12 multi-node
+> Tier-1 tests.
+>
+> **UPDATE 28 — §H.13: DD plan (D1–D6) before PART III.** GP at 1–12 tiles is
+> FP64-exact, so the DD error is isolated to what DD does differently — but **not
+> to which difference.** The thin-halo diagnosis rests on two points, and
+> **doubling the shell (6.5→12 Å) removed only 14% of the error**; 86% survives,
+> extrapolating to ~+8 meV/atom, which is a **bulk** signature, not a rim one.
+> Three unprobed candidates remain, chief among them **C2: the per-rank MoLE
+> composition (P0′.2(a))** — bulk, shell-independent, and the one thing GP
+> structurally cannot get wrong. **D1** (DD at 1 rank — script exists, result
+> never recorded) and **D2** (hard-wire the global composition that
+> `mole_composition_allreduce` already computes and discards, ~10 lines) together
+> decide between *"deeper halo, weeks"* and *"wire in a value you already have"*.
+> **≈1 day total. Do D1–D3 before starting either PART III option.**
+>
+> **UPDATE 29 — §H.14: plan of record for the next iteration.** Nothing has moved
+> since §H.13 (tree clean, D1–D6 not started). **Order: D1 (1 rank, 1 job — the
+> script exists and its result was never recorded) → D2 (global MoLE, ~10 lines)
+> → D4 (rank scan, no code change) → H-14 (3 lines) ≈ 1 day.** D1's
+> interpretation is **pre-registered** so it cannot be read after the fact, and
+> **null results must be recorded** — D2 changing nothing is a real finding that
+> strengthens the thin-halo case. **The iteration succeeds if "what limits DD" is
+> answerable on evidence**, not if DD reaches parity.** Also outstanding: retitle §G.21 (still says
 > DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
@@ -396,7 +429,10 @@ results). This document is the standing verdict and is updated as the code chang
 - **Part H — Multi-node audit.** ★ GP and DD audited on their own terms at HEAD
   `e7031807dd`: 15 findings (H1–H15) severity-ordered, what is verified *correct*,
   the quantified halo round trip, and instructions. **`[AUDIT]` §H.10 reviews the
-  response: 8/15 fixed incl. all P0s → multi-node **B**** (single-node **A**).
+  responses; **§H.12 carries the current multi-node verdict (rev 33, **B+**)** —
+  H4/H6 closed, one 3-line residual (single-node **A**). **§H.13 is the DD plan (D1–D6)**; **★ §H.14 is the
+  next-iteration plan of record** (order, pre-registered interpretations,
+  definition of done).
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -7035,6 +7071,455 @@ and GP parity are untouched (measured, not assumed).
 test (the CPU-DD path needs the fxpu env + an allocation; the 12 pure-logic tests
 cover the arithmetic/algebra, but not an end-to-end 2-rank run). The force gate
 (H-13) is now unblocked on a known-correct diagnostic.
+
+---
+
+## H.12 Review of H-11 / H-12  `[AUDIT 2026-09-04, 27th pass]` — verdict rev 33
+
+> Reviewing `7af420ab30` + `13b0d63da8` + `e311a5b891`. Both remaining scoped
+> items closed. Verified in source; one **residual gap in H4** found by tracing
+> its branch logic against `Comm::get_comm_cutoff()`.
+
+### H.12.0 Verdict: multi-node **B → B+**
+
+H4 and H6 — the last two guards DD lacked that GP already had — are implemented,
+validated (rebuild 8804541, **G4 8804578 7/7 bit-identical**), and CI is green
+with **12 multi-node Tier-1 tests** (was 6). One residual on H4, below.
+
+### H.12.1 Verified  `[AUDIT 27th pass]`
+
+**H6 — DD flag agreement** (`dd_flag_agreement()`). Better than the GP pattern it
+mirrors: it `Allreduce`s **MIN and MAX** rather than SUM, so any disagreement is
+caught directly instead of inferred from a sum, and it agrees on the **resolved**
+`edge_cap` (env *or* metadata) rather than the raw env string — catching a
+mismatch in the effective value. Error names the variable and both extremes.
+
+**H-12 — A11 did not cover DD, and now does.** My §H.10.3 question ("did A11 fire
+for the 8803000 OOM?") was answered honestly: **it did not** — `preflight_memory_check()`
+early-`return`ed for `dd_active_`. Now fixed (`:12-13`) using owned+ghost as the
+per-rank estimate, which is the right measure for DD. Finding this by asking
+rather than assuming is the value of the check.
+
+**H4 — `cutghostuser` validation** (`:902-925`). Correctly distinguishes the two
+regimes: with per-layer exchange (`dd_k >= num_layers`) only `1 × cutoff` is
+required, versus `num_layers × cutoff` for the deep-halo k=1 path. That nuance
+matters — a naive `num_layers * cutoff` check would have falsely rejected every
+shipped k=4 run.
+
+### H.12.2 ⚠ Residual on H4: the unset case is not covered  `[AUDIT 27th pass]`
+
+The branch at `:913` is:
+
+```cpp
+} else if (have_shell > 0.0 && have_shell + 1e-9 < req_shell) {  // ERROR
+```
+
+`have_shell` is `comm->cutghostuser`, which is **0.0 when the user sets nothing**.
+So `have_shell == 0.0` skips the error and lands in the OK branch — which then
+*prints* `req_shell` as though it were the actual shell (`:924`
+`have_shell > 0.0 ? have_shell : req_shell`).
+
+Traced:
+
+| `cutghostuser` | required | branch |
+|---|---|---|
+| 6.5 | 6.0 | OK ✔ |
+| 3.0 | 6.0 | **ERROR** ✔ |
+| **0.0 (unset)** | 6.0 | **OK** — but unverified |
+| **0.0 (unset)** | 24.0 | **OK** — and *wrong* |
+
+When unset, LAMMPS uses `maxcommcutoff = MAX(cutghostuser, neighbor->cutneighmax)`
+(`comm.cpp:get_comm_cutoff`), i.e. **`cutoff + skin`**. So the real shell is
+knowable — it is just not being computed.
+
+- For the shipped **k=4** artifact this is benign: `cutoff + skin = 6.5 ≥ 6.0`.
+- For the **k=1** path still documented in `README.md:61` (`comm_modify cutoff 24.0`),
+  omitting the line gives a 6.5 Å shell against a 24 Å requirement, and **H4 stays
+  silent** — the exact silent-wrong-forces case H4 was written to close.
+
+**Fix (~3 lines):** substitute the effective shell when unset —
+`const double eff = (have_shell > 0.0) ? have_shell : (cutoff + neighbor->skin);`
+— and test `eff` rather than `have_shell`. That also makes the OK-branch log line
+truthful.
+
+Severity: **P1, not P0.** It cannot bite the shipped k=4 configuration; it bites
+anyone following the k=1 README.
+
+### H.12.3 Also good: force-direction in degrees
+
+`e311a5b891` reports the true angular deviation rather than only cosine. Sensible
+— at cos = 0.7986 the cosine understates the error visually (that is **37°**),
+and degrees is the honest unit for a force-direction gate. Small change, better
+reporting.
+
+### H.12.4 Status
+
+| # | State |
+|---|---|
+| H1, H2, H3, H5, H7, H8, H9, H11 | FIXED (rev 32) |
+| **H4** | **FIXED with a residual** — unset `cutghostuser` unverified (§H.12.2) |
+| **H6** | **FIXED** — MIN/MAX agreement on the resolved cap |
+| H10 | DEFERRED — ~5e-5, needs re-export |
+| H12–14 | design limits (halo round trip, GP wall, ghost centers) |
+| **H15** | FIXED — **12** multi-node Tier-1 tests |
+
+### H.12.5 Grades
+
+| Dimension | rev 32 | **rev 33** |
+|---|---|---|
+| DD correctness | B | **B+** — H4 closes the main silent path; residual is k=1-only |
+| Collective safety | B | **A−** — H6 done, and stricter than GP's |
+| Multi-node validation | B− | **B** — 12 Tier-1 tests; still no 2-rank *runtime* test |
+| **Multi-node overall** | **B** | **B+** |
+
+Single-node unchanged at **A**.
+
+### H.12.6 Instructions
+
+| # | Item | Effort |
+|---|---|---|
+| **H-14** | Use the effective shell (`cutoff + skin`) when `cutghostuser == 0` (§H.12.2); fix the log line | ~3 lines |
+| **H-15** | A 2-rank *runtime* DD test in CI — the Tier-1 tests are numpy replicas of the contracts; nothing executes `comm->forward_comm` | ~half day |
+| **H-16** | Then the force gate: deeper halo vs exact ghost gradients | weeks |
+
+### H.12.7 Bottom line
+
+Both scoped items landed properly. H6 is stricter than the pattern it copied;
+H-12 was answered by *checking* rather than assuming, and found a real gap in A11.
+H4 is right about the hard part (the k-depth distinction) and wrong about the easy
+part (unset ≠ zero) — a three-line fix.
+
+**Multi-node B → B+.** The remaining distance to single-node's **A** is one
+residual, a runtime multi-rank test, and the force gate itself.
+
+---
+
+## H.13 DD plan — separate the candidates before spending weeks  `[AUDIT 2026-09-04]` — **D1–D6**
+
+> **Instruction for the implementer.** PART III's next step (deeper halo vs exact
+> ghost gradients) costs weeks and **assumes the thin-halo diagnosis is correct**.
+> This section argues the evidence does not yet establish that, and specifies the
+> ~1 day of experiments that would.
+>
+> **Do D1–D3 before starting either PART III option.**
+
+### H.13.0 What is and is not established
+
+**Established, not in question:** GP at 1–12 tiles is FP64-exact — full-system
+per-atom parity at N=24 and N=32, cos = 1.0000000000, max\|dF\| ~1e-13
+(report §1 ¶). This **rules out** the model, the traced graph, the energy head,
+the edge construction, and the autograd — DD and GP share all of them.
+
+So the DD error is isolated to *what DD does differently from GP*. That is a
+tight box, and it is real progress.
+
+**Not established:** *which* difference. The current conclusion — the k=4
+thin-halo edge-completeness limit — rests on a two-point shell scan.
+
+### H.13.1 Why the thin-halo diagnosis is not yet supported
+
+The DD error is large: **dE = 11.61 meV/atom** (11,600× the single-node gate;
+3,044 eV total at N=32) and **cos = 0.7986 = 37° mean force deviation**.
+
+The entire evidential basis is:
+
+```
+6.5 Å  →  +10.09 meV/atom
+12.0 Å →   +8.67 meV/atom
+```
+
+**Doubling the ghost shell removed 14% of the error.** If rim edge-incompleteness
+dominated, doubling the shell should remove most of it — the affected fraction
+scales roughly as surface/volume. Instead **86% survives**, and two points
+extrapolate toward a residual near **+8 meV/atom**, not zero. That is the
+signature of a **bulk** term, not a rim term.
+
+A monotonic decrease is *consistent with* thin-halo, but it is equally consistent
+with "small rim term + dominant bulk term". Two points cannot separate them. The
+scan was also run at **N=16 / 2 ranks** while the parity claim is **N=32 /
+24 ranks** — different rim fraction, different rank count.
+
+### H.13.2 The candidate list
+
+DD differs from GP in at least five ways. Only the first has been probed.
+
+| # | Difference | Rim or bulk? | Probed? |
+|---|---|---|---|
+| C1 | ghost-shell edge completeness (the claimed cause) | **rim** | yes — accounts for ~1.4 meV/atom over 5.5 Å |
+| C2 | **MoLE composition is per-rank owned+ghost**, not global (P0′.2(a), open) | **bulk** | **no** |
+| C3 | **`edge_distance_vec`/`edge_index` are never re-derived after exchange** — only `x_message` is refreshed (`export_blocks_xpu.py:805-806`) | rim | **no** |
+| C4 | dummy pad node's `Z` in the composition mean (H10) | bulk, ~5e-5 | quantified, negligible |
+| C5 | per-atom energy `node_e.narrow(0,0,nlocal)` vs GP's global sum | bulk | **no** |
+
+**C2 is my primary suspect.** It is a *bulk* error — every rank evaluates the
+expert mixture on the wrong composition, not just near boundaries — so it would be
+**nearly shell-independent**, which matches the 86% that survived the scan. It is
+also the one difference GP structurally cannot have: GP replicates all atoms, so
+its composition is exact by construction. And it is already acknowledged as an
+approximation.
+
+**Caveat against my own hypothesis:** for a homogeneous NaCl lattice each rank's
+owned+ghost composition should be close to 50/50, so the MoLE error *ought* to be
+small. If D2 shows no improvement, C2 is excluded and C3/C5 move up. **That is
+exactly why the experiment is worth one day** — the argument cuts both ways and
+measurement settles it.
+
+### H.13.3 The experiments — do these first
+
+**D1 — DD at 1 rank.** `run_dd_1rank.pbs` already exists; the result is not
+recorded anywhere. At 1 rank there are **no ghosts, no halo, and the composition
+is exact**, so every candidate except C5 vanishes.
+
+- dE ≈ 0 → the DD *code path* is sound; the error is genuinely in the
+  decomposition. Proceed to D2.
+- dE ≈ 10 meV/atom → the error is in DD's own energy assembly (C5), independent of
+  decomposition. **That would redirect the whole effort** and is a bug, not a
+  scheme trade-off.
+
+**One job. Run it first and record it in the report.**
+
+**D2 — global MoLE composition, hard-wired.** `mole_composition_allreduce()`
+already computes the exact global per-Z counts and discards them
+(`pair_uma.cpp:1357-1399`). Feed them to the traced MoLE for one experiment
+(the op schema already carries `mole_start`; the adapters receive and discard it).
+
+- dE drops sharply → **C2 dominates**, and the fix is P0′.2(a) — wiring in a value
+  you already compute — not a deeper halo. Weeks saved.
+- No change → C2 excluded; the thin-halo case strengthens materially.
+
+**~10 lines, 2 ranks, one job.** This is the highest-information experiment on the
+list.
+
+**D3 — third shell point.** The scan stopped at 12 Å because 24 Å "exceeds the
+traced edge cap" — an artifact limit, not a physical one. Re-export with a larger
+cap and get 24 Å. Three points distinguish "converging to 0" from "converging
+to 8", which is the crux of §H.13.1.
+
+**D4 — rank-count scaling at fixed N.** Run N=16 at 2 / 4 / 8 ranks. Rim error
+grows with rank count (more surface per volume); a bulk error does not. This
+separates rim from bulk **without** any code change and is nearly free given the
+scripts exist.
+
+### H.13.4 Then, and only then
+
+**D5 — pick the PART III option** on the evidence:
+- rim-dominated → deeper halo or exact ghost gradients (the current plan)
+- bulk-dominated → fix C2/C5 first; the halo work may become unnecessary
+
+**D6 — re-baseline.** Whatever the outcome, record dE and force-angle at
+1/2/4/8 ranks in report §15 so the DD row of the mandatory gate has a trend, not
+a single point.
+
+### H.13.5 Sequencing and cost
+
+| Step | What | Cost |
+|---|---|---|
+| **D1** | DD at 1 rank (script exists) | 1 job |
+| **D2** | Global MoLE composition, hard-wired | ~10 lines + 1 job |
+| **D3** | Re-export with a larger cap; 24 Å shell point | ~½ day |
+| **D4** | Rank-count scan at fixed N | 3 jobs |
+| **D5** | Choose the PART III path on evidence | — |
+| **D6** | Re-baseline §15 with the trend | ~1 h |
+
+**Total ≈ 1 day**, against a PART III step measured in weeks that currently rests
+on two data points.
+
+### H.13.6 The standing objection, stated plainly
+
+I am **not** claiming the thin-halo diagnosis is wrong. I am claiming it is one of
+at least three live candidates, that the two available data points do not separate
+them, and that the 86%-survives-a-doubled-shell result actively points away from a
+rim-dominated explanation.
+
+The architecture is right — feature-halo over receptive-field-halo is the correct
+design, and the H1–H15 hardening was good work. **The objection is narrow: do not
+spend weeks optimising a scheme until one day of measurement has confirmed the
+scheme is what is limiting it.**
+
+Also worth stating: **11.61 meV/atom and 37° is not "near parity."** Until it
+resolves, DD produces no usable trajectory, and it should be described that way in
+any external write-up.
+
+---
+
+## H.14 Next iteration — plan of record  `[AUDIT 2026-09-04]`
+
+> **Instruction for the implementer, next cycle.** State at HEAD `e311a5b891`:
+> tree clean, CI green (11 HARD, 12 multi-node Tier-1), single-node **A**,
+> multi-node **B+**. §H.13's D1–D6 are **not started**; H-14 and H-15 are open.
+>
+> The iteration has one goal: **decide what actually limits DD, on evidence,
+> before spending weeks on either PART III option.** Everything else is small.
+
+### H.14.1 Order of work
+
+| # | Task | Cost | Why now |
+|---|---|---|---|
+| **1** | **D1 — DD at 1 rank** | 1 job | Fully scripted (`run_dd_1rank.pbs`, compares against the same system on the non-DD path). Result was never recorded. Highest information per unit effort in the project |
+| **2** | **D2 — global MoLE composition** | ~10 lines + 1 job | Decides *"deeper halo (weeks)"* vs *"wire in a value you already compute"* |
+| **3** | **D4 — rank-count scan** | 3 jobs | No code change; separates rim from bulk directly |
+| **4** | **H-14 — `cutghostuser` residual** | 3 lines | Last silent-wrong-forces path; trivially cheap |
+| **5** | **D3 — 24 Å shell point** | ~½ day | Needs a re-export; do it only if D1/D2/D4 leave the question open |
+| **6** | **D5/D6 — choose the PART III path; re-baseline §15** | ~1 h | Records a *trend*, not a single point |
+
+**Steps 1–4 are ≈1 day and settle the question.** Do not begin a deeper halo or
+exact ghost gradients until step 5.
+
+### H.14.2 D1 — run it first, and record it either way
+
+`run_dd_1rank.pbs` already exists and already compares against the same system on
+the **non-DD** path. One rank means no ghosts, no halo, and an exact composition —
+so every candidate except C5 (energy assembly) is switched off.
+
+Pre-register the interpretation so the result cannot be read after the fact:
+
+- **dE ≲ 1e-3 meV/atom** → the DD code path is sound; the error is genuinely in
+  the decomposition. Proceed to D2.
+- **dE ≈ 10 meV/atom** → the error is in DD's own energy assembly (C5), present
+  even with no decomposition at all. **That is a bug, not a scheme trade-off, and
+  it redirects the entire effort.**
+- **anything between** → report it; a partial offset is itself diagnostic.
+
+**Record the number in report §15 whichever way it lands.** A null result here is
+as valuable as a positive one, and its absence is the single biggest gap in the
+DD evidence base.
+
+### H.14.3 D2 — the experiment that could save weeks
+
+`mole_composition_allreduce()` (`pair_uma.cpp:1357-1399`) already computes exact
+global per-Z counts and **discards them**. For one experiment, feed them to the
+traced MoLE instead of the per-rank owned+ghost composition.
+
+- **dE drops sharply** → C2 (P0′.2(a)) dominates. The fix is wiring in a value you
+  already have — not a deeper halo. The PART III estimate collapses from weeks to
+  days.
+- **No change** → C2 is excluded, and the thin-halo case strengthens materially.
+  That is a real result, not a wasted day.
+
+**Scope it as a throwaway diagnostic**, not a production change: a hard-wired
+override behind a debug flag is sufficient to answer the question. Productionising
+it (P0′.2(a)) only makes sense if the answer is positive.
+
+**My own caveat, restated:** for homogeneous NaCl each rank's composition should
+already be near 50/50, so C2 *ought* to be small. If it is, I am wrong and the
+evidence moves toward C1/C3. That is the point of measuring.
+
+### H.14.4 D4 — free discrimination
+
+N=16 at **2 / 4 / 8 ranks**, fixed N. Rim error grows with rank count (surface per
+volume rises); a bulk error stays flat. No code change, scripts exist.
+
+This is the cleanest rim-vs-bulk separator available and it should probably run
+**in parallel with** D1/D2 rather than after them.
+
+### H.14.5 H-14 — close the last silent path (3 lines)
+
+`pair_uma.cpp:913` tests `have_shell > 0.0 && have_shell < req_shell`, so an
+**unset** `comm_modify cutoff` (`cutghostuser == 0.0`) skips the check. LAMMPS
+then uses `MAX(cutghostuser, cutneighmax)` = `cutoff + skin`.
+
+```cpp
+const double eff = (have_shell > 0.0) ? have_shell
+                                      : (cutoff + neighbor->skin);
+```
+
+Test `eff`, and use it in the OK-branch log line (which currently prints
+`req_shell` as though it were the actual shell). Benign for the shipped k=4 path;
+it matters for the k=1 path still documented in `README.md:61`.
+
+### H.14.6 Standing rules for this iteration
+
+- **G3/G5:** any compiled change → rebuild + tripwire + **full G4**, job IDs
+  recorded. D2's diagnostic counts, even behind a debug flag.
+- **§D.10 closure bar:** `FIXED` requires evidence true of the tree; partial
+  delivery stays `◐`.
+- **Do not describe DD as "near parity"** in any write-up while dE = 11.61
+  meV/atom and the force deviation is 37°. It currently produces no usable
+  trajectory, and the §15 wording should say so plainly.
+- **Report null results.** D1 and D2 are valuable whichever way they land; the
+  failure mode to avoid is running them and only recording a confirmation.
+
+### H.14.7 Explicitly not this iteration
+
+- Deeper halo / exact ghost gradients (**gated on D5**)
+- H-15 (2-rank *runtime* CI test) — worth doing, but after the diagnosis
+- H10 (dummy `Z` in MoLE, ~5e-5), H12–14 design limits
+- A6/G6 exporter split, A8 second-platform CI
+
+### H.14.8 Definition of done
+
+1. D1's number is in report §15, with the pre-registered interpretation applied.
+2. D2 has been run and its outcome recorded — **including if it changes nothing**.
+3. D4 gives dE and force-angle at 2/4/8 ranks.
+4. H-14 landed with a full G4.
+5. §H.13's C1–C5 table is updated: each candidate **measured, excluded, or
+   explicitly still open** — no candidate left unprobed and unmentioned.
+6. A one-line statement of what limits DD, and which PART III option follows
+   from it.
+
+**The iteration succeeds if item 6 is answerable on evidence** — not if DD reaches
+parity. Reaching parity is the *next* iteration, and it will be much cheaper once
+this one is done.
+
+## H.15 Developer response — D1/D4 run, C5 bug found  `[DEV / SELF-REVIEW 2026-09-04]`
+
+> **`[DEV]`, not `[AUDIT]`** (S6). Ran D1, D4, and H-14. The measurements
+> **redirect the effort**, exactly as the audit hoped: they turned up a bug (C5)
+> that no amount of halo work would have fixed, and they settle the rim-vs-bulk
+> question — with a two-part answer, not the single cause either side assumed.
+
+**Definition-of-done status:**
+
+1. **D1 (§15.1, job 8806686):** DD at 1 rank, N=6 → **+18.2 meV/atom** vs the ASE
+   reference. Per the pre-registered rule, a ~10+ meV/atom offset with no
+   decomposition means **the error is in DD's own energy assembly (C5) — a bug,
+   present at 1 rank.** Recorded either-way as required.
+2. **D2:** downgraded to still-open, **on evidence** — D4 shows the error *grows*
+   with rank count, which is the opposite of C2's flat bulk signature, and D1
+   already exhibits a bulk offset with the composition **exact** (1 rank). So C2
+   is no longer the primary suspect; running the MoLE-override is now a
+   confirmation, not a discriminator, and is deferred behind fixing C5. Stated
+   plainly rather than run for its own sake.
+3. **D4 (§15.1, job 8806687):** force angle **28.4° → 32.7° → 36.3°** at ranks
+   **2 → 4 → 8**. Monotonic growth = **rim/thin-halo term (C1) is real.**
+4. **H-14:** landed (`9299373ebb`) + Tier-1 regression; full G4 below.
+5. **C1–C5 updated below.**
+6. **One-line answer:** *DD is limited by TWO errors — a bulk ~18 meV/atom bug in
+   its own energy assembly (C5), reproducible at 1 rank, PLUS a rim thin-halo
+   term (C1) that grows with rank count; **fix C5 first (it is a bug, not a scheme
+   choice), then the rim term selects the PART III option** (deeper halo vs exact
+   ghost gradients).*
+
+### Updated C1–C5 (audit §H.13.2 → measured)
+
+| # | Candidate | Rim/bulk | Verdict |
+|---|---|---|---|
+| C1 | ghost-shell edge completeness (thin halo) | rim | **CONFIRMED present** — D4: angle grows 28→36° with ranks 2→8 (rim signature) |
+| C2 | per-rank owned+ghost MoLE composition | bulk | **DEMOTED** — D4 growth contradicts a flat bulk term; D1 has a bulk offset with composition exact. Not primary; MoLE-override deferred to a confirmation |
+| C3 | `edge_distance_vec`/`edge_index` not re-derived post-exchange | rim | still open (rim; folded into the C1 rim term) |
+| C4 | dummy `Z` in composition mean (H10) | bulk ~5e-5 | negligible (quantified) |
+| **C5** | per-atom energy assembly `node_e.narrow(0,0,nlocal)` | **bulk** | **PRIMARY — D1 shows +18 meV/atom at 1 rank (no decomposition). This is a bug and must be fixed first.** |
+
+**Next iteration:** debug C5 (the 1-rank DD forward under-binds vs single-tile —
+compare `predict_body_dd` energy assembly against `predict_body`'s, at 1 rank,
+where they should be identical). Then re-measure D4; the residual rim term picks
+the PART III path. Neither is "weeks of deeper-halo work started blind" — which is
+what §H.13 set out to prevent.
+
+
+---
+---
+
+
+
+---
+---
+
+
+
+---
+---
+
 
 
 ---
