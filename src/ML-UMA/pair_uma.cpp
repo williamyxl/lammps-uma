@@ -904,24 +904,34 @@ void PairUMA::init_style_dd()
       (kdepth > 0 && kdepth >= nlayers) ? cutoff
                                         : (nlayers > 0 ? nlayers * cutoff : cutoff);
   const double have_shell = comm->cutghostuser;   // 0 => user set nothing
+  // H-14 FIX (audit §H.14.5): when comm_modify cutoff is UNSET (cutghostuser==0),
+  // LAMMPS uses MAX(cutghostuser, cutneighmax) = cutoff + skin, NOT 0. The old
+  // `have_shell > 0.0 && ...` test skipped the check in that case, so an unset
+  // shell that is actually too shallow (the k=1 path in README) slipped through
+  // silently, and the OK-branch logged req_shell as if it were the real shell.
+  // Test the EFFECTIVE shell and log it.
+  const double eff_shell =
+      (have_shell > 0.0) ? have_shell : (cutoff + neighbor->skin);
   if (nlayers <= 0) {
     if (comm->me == 0)
       utils::logmesg(lmp,
           "Pair uma DD [H4]: artifact has no num_layers/dd_k in metadata; cannot "
           "verify the ghost shell depth. Re-export with the current exporter, or "
           "ensure comm_modify cutoff >= num_layers*cutoff.\n");
-  } else if (have_shell > 0.0 && have_shell + 1e-9 < req_shell) {
+  } else if (eff_shell + 1e-9 < req_shell) {
     error->all(FLERR,
-        "Pair style uma: UMA_DD ghost shell too shallow: comm_modify cutoff = "
-        "{:.3f} A < required {:.3f} A (num_layers={} dd_k={} cutoff={:.3f}). Rim "
-        "ghosts would lose neighbours -> silently wrong forces. Set "
-        "'comm_modify cutoff {:.3f}' (or deeper).",
-        have_shell, req_shell, nlayers, kdepth, cutoff, req_shell);
+        "Pair style uma: UMA_DD ghost shell too shallow: effective shell = "
+        "{:.3f} A < required {:.3f} A (num_layers={} dd_k={} cutoff={:.3f}; "
+        "comm_modify cutoff {}). Rim ghosts would lose neighbours -> silently "
+        "wrong forces. Set 'comm_modify cutoff {:.3f}' (or deeper).",
+        eff_shell, req_shell, nlayers, kdepth, cutoff,
+        have_shell > 0.0 ? "set" : "unset -> cutoff+skin", req_shell);
   } else if (comm->me == 0) {
     utils::logmesg(lmp,
-        "Pair uma DD: ghost shell {:.3f} A >= required {:.3f} A "
-        "(num_layers={} dd_k={}).\n",
-        have_shell > 0.0 ? have_shell : req_shell, req_shell, nlayers, kdepth);
+        "Pair uma DD: effective ghost shell {:.3f} A >= required {:.3f} A "
+        "(num_layers={} dd_k={}, comm_modify cutoff {}).\n",
+        eff_shell, req_shell, nlayers, kdepth,
+        have_shell > 0.0 ? "set" : "unset->cutoff+skin");
   }
 
   dd_flag_agreement();   // H6/H-11: all ranks agree on DD collective-affecting flags
