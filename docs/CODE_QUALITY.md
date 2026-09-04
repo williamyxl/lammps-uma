@@ -7482,7 +7482,7 @@ this one is done.
    plainly rather than run for its own sake.
 3. **D4 (§15.1, job 8806687):** force angle **28.4° → 32.7° → 36.3°** at ranks
    **2 → 4 → 8**. Monotonic growth = **rim/thin-halo term (C1) is real.**
-4. **H-14:** landed (`9299373ebb`) + Tier-1 regression; full G4 below.
+4. **H-14:** landed (`9299373ebb`) + Tier-1 regression; **validated: rebuild 8806609 `LMP BUILD OK`, tripwire 8806767 PASS, full G4 8806768 all 7 bit-identical** (N=16 all-W −110673.829050, N=32 −885377.060040).
 5. **C1–C5 updated below.**
 6. **One-line answer:** *DD is limited by TWO errors — a bulk ~18 meV/atom bug in
    its own energy assembly (C5), reproducible at 1 rank, PLUS a rim thin-halo
