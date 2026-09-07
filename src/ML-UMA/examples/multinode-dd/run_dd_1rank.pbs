@@ -68,11 +68,17 @@ echo "### A2/S2 one-rank DD isolation: N=${N} (${NAT} atoms), NO ghosts, NO halo
 echo
 
 # ---- (a) DD path, 1 rank -----------------------------------------------------
-echo "=== (a) DD path (UMA_DD=1), 1 rank ==="
+# D7 (audit §H.16.2/§H.16.7): NO_HALO=1 sets UMA_DD_NO_HALO=1 (a VALID control
+# since H3 gates both fwd+bwd) to disambiguate C5 (energy assembly) from C3 (local
+# halo / stale edge geometry). dE unchanged from the halo-ON D1 => C5 confirmed;
+# dE moves => C3/local-halo implicated.
+NO_HALO_ENV=""
+[ "${NO_HALO:-0}" = "1" ] && NO_HALO_ENV="UMA_DD_NO_HALO=1"
+echo "=== (a) DD path (UMA_DD=1${NO_HALO_ENV:+, +${NO_HALO_ENV}}), 1 rank ==="
 rm -f log.lammps
 t0=$SECONDS
 mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
-  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 ${NO_HALO_ENV} \
   "${LMP}" -in in.dd_sp -var artifact "${DD_ARTIFACT}" \
   -var datafile "data.nacl_n${N}" > lmp_dd.log 2>&1
 echo "  exit=$? wall=$((SECONDS-t0))s"
