@@ -1224,10 +1224,24 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
 
   // Build the owned+ghost edge graph (row0=neighbor, row1=center; every node a
   // center for k=4). Then pad to edge_cap with dummy self-loops.
+  dd_dropped_edges_ = 0;                    // C5b: reset per build
   int64_t E = build_dd_graph(nall);
   if (dd_dbg && screen)
     fprintf(screen, "uma DD[%d]: build_dd_graph E=%lld (cap=%lld)\n",
             comm->me, (long long) E, (long long) edge_cap);
+  // C5b (audit §H.18.2): dropped j>=nall neighbours are real interactions
+  // discarded. Report a global count so it is never silent; a nonzero value is a
+  // correctness concern to be justified or fixed (D8b).
+  if (dd_dropped_edges_ > 0) {
+    long long dropped_all = 0, loc = dd_dropped_edges_;
+    MPI_Allreduce(&loc, &dropped_all, 1, MPI_LONG_LONG, MPI_SUM, world);
+    if (comm->me == 0)
+      error->warning(FLERR,
+                     "Pair style uma (DD): dropped {} neighbour edge(s) with "
+                     "j>=nall (ghost-of-ghost/extended region) -- real "
+                     "interactions discarded (C5b). Deepen comm_modify cutoff or "
+                     "investigate if this count is large.", dropped_all);
+  }
   if (edge_cap > 0) E = pad_dd_edges(E, edge_cap, dummy, pad_nbr);  // A5/H5 padding
 
   if (dd_dbg && screen)
@@ -1507,10 +1521,12 @@ int64_t PairUMA::build_dd_graph(int nall)
     const double xi = x[i][0], yi = x[i][1], zi = x[i][2];
     for (int jj = 0; jj < jnum; jj++) {
       int j = jlist[jj] & NEIGHMASK;
-      // BOUNDS CHECK BEFORE x[j]: a REQ_GHOST full list can list neighbors that
-      // are outside [0,nall) (ghost-of-ghost / extended region). Those are NOT
-      // graph nodes we hold, so skip them. Reading x[j] first would segfault.
-      if (j < 0 || j >= nall) continue;
+      // C5b (audit §H.18.2): a REQ_GHOST full list can list neighbors outside
+      // [0,nall) (ghost-of-ghost / extended region). Dropping them silently is a
+      // correctness bug (real interactions discarded). They are rare (only for
+      // centers within skin of the ghost-region edge) but must be COUNTED so a
+      // nonzero count is visible, not swept under the rug.
+      if (j < 0 || j >= nall) { dd_dropped_edges_++; continue; }
       const double dx = x[j][0] - xi;
       const double dy = x[j][1] - yi;
       const double dz = x[j][2] - zi;

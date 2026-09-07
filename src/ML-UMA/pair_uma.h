@@ -107,6 +107,7 @@ class PairUMA : public Pair {
   void install_halo_callbacks();            // bind HaloContext to LAMMPS comm
   bool dd_active_;                           // UMA_DD=1
   int64_t dd_edge_count_;
+  int64_t dd_dropped_edges_ = 0;            // C5b: neighbours dropped (j>=nall)
   std::vector<int64_t> dd_edge_index_;      // [2,E] row0=neighbor row1=center
   std::vector<double> dd_cell_offsets_;     // [E,3] zeros (ghosts are absolute)
   std::vector<double> dd_pos_;              // [nall,3] owned+ghost, boxlo-shifted
