@@ -61,7 +61,7 @@ export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
 
 python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
 # free-boundary variant of the input
-sed 's/^boundary        p p p/boundary        f f f/' "${EX}/in.dd_sp" \
+sed 's/^boundary        p p p/boundary        s s s/' "${EX}/in.dd_sp" \
   > "${RUNDIR}/in.dd_pbcoff"
 cd "${RUNDIR}"
 
