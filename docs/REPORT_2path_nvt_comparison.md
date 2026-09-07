@@ -1667,3 +1667,25 @@ artifact (which also carries num_layers/dd_k for the H4 check).
 
 **Valid reference (N=6 periodic ASE): −5836.319 eV = −3377.5 meV/atom.**
 DD N=6 halo-off (D7): −5802.375 eV = −3357.9 meV/atom ⇒ **+19.6 meV/atom** under-binding.
+
+**D8b result (N=6, cap-1376256 v2 artifact, 1 rank, job 8809658)** vs ASE
+periodic −5836.319 eV:
+
+| shell | DD step-0 PE (eV) | dE (meV/atom) | Nghost |
+|---|---|---|---|
+| 6.5 Å (production) | −5804.798 | **+18.24** | 3185 |
+| 24 Å (= num_layers·cutoff) | −5818.085 | **+10.55** | 22661 |
+
+**The +18.2 meV/atom SPLITS into two terms:** the deep 24 Å halo (every ghost has
+a complete depth-4 neighbourhood) removed **7.7 meV/atom (42%)** — a real rim/
+ghost-neighbourhood term (C1) — but **+10.5 meV/atom SURVIVES a perfect halo**.
+That residual is a **bulk energy-assembly term (C5) that is NOT the ghost
+neighbourhood**: with a complete-neighbourhood graph the DD owned energies are
+still off by ~10 meV/atom, so the remaining error is in `predict_body_dd`'s
+per-node energy head / denorm / per-atom assembly, not the halo.
+
+**C5 fix target narrowed:** the ~10 meV/atom residual is in the energy assembly
+(head/denorm/refs on the DD per-node path), debuggable by comparing
+`predict_body_dd` against `predict_body` on an identical complete-neighbourhood
+graph. The rim term (C1, ~8 meV/atom) is the halo-depth/PART III question and
+stays gated behind the C5 head fix.
