@@ -1,0 +1,88 @@
+#!/bin/bash -l
+#PBS -N uma_dd_pbcoff
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# D8a (audit §H.16.7 / D8 first step): isolate C5 to the PERIODIC-GHOST path.
+#
+# D7 confirmed the +18 meV/atom bulk error is in DD's energy assembly (C5), not
+# the cross-rank halo. C5 was localised to a graph-representation difference:
+# build_dd_graph represents periodic neighbours as DISTINCT ghost nodes with
+# cell_offset=0, while single-tile build_ext_graph maps them back to the owned
+# atom + an integer cell offset. This test removes periodicity so the two
+# representations coincide (nall == nlocal, no ghosts):
+#
+#   run DD at 1 rank with `boundary f f f` (free surfaces, no periodic images).
+#
+#   * dE(pbc-off) ~ dE(pbc-on, +18)  => C5 is in the energy HEAD / denorm /
+#     per-atom reference, independent of ghosts. Fix target = predict_body_dd
+#     post-processing.
+#   * dE(pbc-off) ~ 0                 => C5 is entirely the periodic-ghost
+#     representation (ghosts-as-nodes vs owned+offset). Fix target =
+#     build_dd_graph / the halo ghost-feature convergence.
+#
+# Reference: an ASE single-point on the SAME free-boundary cluster (computed here
+# on CPU), so the comparison is exact for this geometry.
+#
+#   qsub -v N=4 run_dd_pbcoff.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-4}
+NAT=$((8*N*N*N))
+DD_ARTIFACT=${DD_ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+RUNDIR=${RUNDIR:-${EX}/run_dd_pbcoff_n${N}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+# free-boundary variant of the input
+sed 's/^boundary        p p p/boundary        f f f/' "${EX}/in.dd_sp" \
+  > "${RUNDIR}/in.dd_pbcoff"
+cd "${RUNDIR}"
+
+echo "### D8a: 1-rank DD, FREE boundaries (no periodic ghosts): N=${N} (${NAT} atoms) ###"
+rm -f log.lammps
+t0=$SECONDS
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
+  "${LMP}" -in in.dd_pbcoff -var artifact "${DD_ARTIFACT}" \
+  -var datafile "data.nacl_n${N}" > lmp.log 2>&1
+echo "  exit=$? wall=$((SECONDS-t0))s"
+PE_DD=$(grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1 | awk '{print $3}')
+echo "  DD (pbc off) step0_PE = ${PE_DD:-<none>}"
+grep -iE "Nghost:" log.lammps 2>/dev/null | head -1
+[ -z "${PE_DD}" ] && grep -iE "ERROR|exceeds|out of memory" lmp.log | head -3
+
+echo "### INTERPRETATION ###"
+echo "  Compare DD(pbc off) dE/atom vs the pbc-ON 1-rank result (D1/D7: +18-20 meV/atom)."
+echo "  Nghost -> 0 confirms free boundaries removed periodic ghosts."
+echo "  If dE stays ~18 -> C5 is in the energy HEAD/denorm (fix predict_body_dd)."
+echo "  If dE -> small -> C5 is the periodic-ghost representation (fix build_dd_graph/halo)."
+echo "  (ASE free-cluster reference: run scripts-side with the same geometry; the"
+echo "   PRIMARY signal here is Nghost and the dE SHAPE vs the pbc-on runs.)"
+echo "DONE"
