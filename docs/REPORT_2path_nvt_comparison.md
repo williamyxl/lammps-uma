@@ -1654,3 +1654,16 @@ with the single-tile owned-node+offset graph so 1-rank DD owned energies match t
 single-tile reference. The diagnosis is complete (§15.2, C5 confirmed & localised,
 C3 exonerated by D7); the fix is a model/graph-representation change requiring XPU
 iteration, not a login-node edit.
+
+### 15.4 D8b deep-halo discriminator — N=4 invalid, redone at N=6 (2026-09-07)
+
+First attempt at N=4 (512 atoms, job 8809650) is **invalid**: the ASE N=4 periodic
+reference came out at −838.9 meV/atom, ~4× smaller than the bulk value (ASE N=6 =
+−3377 meV/atom), i.e. the small-cell ASE reference is the outlier, not DD. DD
+itself was self-consistent (N=4: −3352 meV/atom; N=6 halo-off: −3358 meV/atom),
+and the 24 Å shell WRAPS the 22.6 Å N=4 box, so N=4 cannot test halo depth. Rerun
+at N=6 (box 33.8 Å; 24 Å shell fits without wrapping) with the cap-1376256 v2
+artifact (which also carries num_layers/dd_k for the H4 check).
+
+**Valid reference (N=6 periodic ASE): −5836.319 eV = −3377.5 meV/atom.**
+DD N=6 halo-off (D7): −5802.375 eV = −3357.9 meV/atom ⇒ **+19.6 meV/atom** under-binding.
