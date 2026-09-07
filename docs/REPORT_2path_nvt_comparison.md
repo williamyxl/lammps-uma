@@ -1634,3 +1634,23 @@ independent of the cross-rank halo.
 **D8 (next):** make the DD owned-atom energies match the single-tile reference at
 1 rank. This is genuine debugging (the two graphs are structurally different by
 design), not a one-liner; it must be fixed before the rim term (C1) can be sized.
+
+### 15.3 D8a attempt — free-boundary isolation blocked by LAMMPS setup (2026-09-07)
+
+To split C5 into "energy head/denorm" vs "periodic-ghost representation", I tried
+running 1-rank DD with free boundaries (no periodic ghosts ⇒ nall==nlocal, so the
+DD and single-tile graph representations coincide). The ASE free-boundary N=4
+reference computed cleanly on CPU (E = −136.188 eV, 512 atoms). **But LAMMPS
+rejects the free-boundary DD setup** (`boundary f f f` and `s s s` both:
+"Did not assign all atoms correctly") — the rattled lattice atoms sit on/над the
+box faces and `comm_modify cutoff 6.5` with non-periodic boundaries does not
+domain-decompose them. This is a harness/domain-setup issue, not a physics
+result; a padded-box free-boundary input would be needed. Recorded so the attempt
+is not silently repeated.
+
+**D8 remains the next iteration's work** (auditor-scoped "days"): the C5 fix is
+architectural — reconcile DD's ghosts-as-distinct-nodes (`cell_offset=0`) graph
+with the single-tile owned-node+offset graph so 1-rank DD owned energies match the
+single-tile reference. The diagnosis is complete (§15.2, C5 confirmed & localised,
+C3 exonerated by D7); the fix is a model/graph-representation change requiring XPU
+iteration, not a login-node edit.
