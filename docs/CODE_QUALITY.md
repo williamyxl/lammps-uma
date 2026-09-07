@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies; PART G = single-node (**A**); PART H = multi-node (**B+**) + §H.13 DD plan + §H.14 next iteration**
+**PART F = auditor replies; PART G = single-node (**A**); PART H = multi-node (**B+**), current §H.16 (rev 34)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -335,7 +335,20 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > interpretation is **pre-registered** so it cannot be read after the fact, and
 > **null results must be recorded** — D2 changing nothing is a real finding that
 > strengthens the thin-halo case. **The iteration succeeds if "what limits DD" is
-> answerable on evidence**, not if DD reaches parity.** Also outstanding: retitle §G.21 (still says
+> answerable on evidence**, not if DD reaches parity.
+>
+> **UPDATE 30 — §H.16: the iteration succeeded and refuted my hypothesis (rev 34).**
+> **D1 (1 rank, N=6): +18.2 meV/atom** — the pre-registered rule fired, so the
+> dominant DD error is a **bulk bug in DD's own energy assembly (C5), present with
+> no decomposition at all**. **D4 (2/4/8 ranks): angle 28→33→36°** — monotonic
+> growth is a **rim** signature, which **refutes my C2 (per-rank MoLE) hypothesis**
+> (C2 would be flat) *and* the original pure-thin-halo reading. **Two independent
+> errors: C5 bulk (dominant) + C1 rim (secondary).** H-14 closed (G4 8806768 7/7);
+> 13 multi-node Tier-1 tests. **One caveat before fixing C5:** D1 still had 3,185
+> PBC ghosts and the halo op *runs* at 1 rank, so C3 (stale edge geometry) is not
+> yet separated from C5 — **re-run D1 with `UMA_DD_NO_HALO=1` (D7, one job)**
+> before aiming a fix. **Do not start PART III**: the rim term cannot be sized
+> under an 18 meV/atom bulk error.** Also outstanding: retitle §G.21 (still says
 > DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
@@ -431,8 +444,9 @@ results). This document is the standing verdict and is updated as the code chang
   the quantified halo round trip, and instructions. **`[AUDIT]` §H.10 reviews the
   responses; **§H.12 carries the current multi-node verdict (rev 33, **B+**)** —
   H4/H6 closed, one 3-line residual (single-node **A**). **§H.13 is the DD plan (D1–D6)**; **★ §H.14 is the
-  next-iteration plan of record** (order, pre-registered interpretations,
-  definition of done).
+  next-iteration plan of record**; **★ §H.16 carries the current multi-node
+  verdict (rev 34)** — D1/D4 found **C5 bulk + C1 rim**, refuting both prior
+  hypotheses; next is D7 (disambiguate) → D8 (fix C5).
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -7505,6 +7519,166 @@ compare `predict_body_dd` energy assembly against `predict_body`'s, at 1 rank,
 where they should be identical). Then re-measure D4; the residual rim term picks
 the PART III path. Neither is "weeks of deeper-halo work started blind" — which is
 what §H.13 set out to prevent.
+
+---
+
+## H.16 Review of D1/D4 + H-14  `[AUDIT 2026-09-07, 28th pass]` — verdict rev 34
+
+> Reviewing `9299373ebb` → `8449d338e1`. The §H.14 iteration ran as specified and
+> **answered its question**: item 6 of the definition of done is met.
+
+### H.16.0 Verdict: multi-node **B+** held — the iteration succeeded, and I was partly wrong
+
+D1 and D4 were run, the pre-registered interpretation was applied honestly, and
+the result **contradicts my C2 hypothesis while also contradicting the developer's
+original pure-thin-halo reading**. Both priors were wrong; the data says
+*two independent errors*. That is exactly what the iteration was for.
+
+### H.16.1 The findings, verified  `[AUDIT 28th pass]`
+
+**D1 — DD at 1 rank (N=6, job 8806686): +18.2 meV/atom.**
+
+The pre-registered rule (§H.14.2) was *"dE ≈ 10 meV/atom → the error is in DD's
+own energy assembly (C5), a bug, not a scheme trade-off — it redirects the entire
+effort."* At **+18.2 meV/atom** that rule fires unambiguously, and it was applied
+rather than explained away. **This is the most valuable single result of the DD
+campaign**: it establishes that the largest DD error term has nothing to do with
+decomposition at all.
+
+**D4 — rank scan at fixed N=16 (job 8806687):**
+
+| ranks | mean angle | cos |
+|---|---|---|
+| 2 | 28.4° | 0.814 |
+| 4 | 32.7° | 0.789 |
+| 8 | 36.3° | 0.766 |
+
+Monotonic growth 28→33→36° is a **rim signature**. C2 (per-rank MoLE) would be
+flat in rank count. **My C2 hypothesis is refuted** — and by the cleanest possible
+test, which is the right outcome for a hypothesis that was offered as one of three
+candidates.
+
+**Synthesis accepted:** DD has a **bulk C5 bug (~18 meV/atom, reproducible on one
+rank)** *plus* a **rim C1 term that grows with rank count**. Neither single-cause
+reading was correct. C5 must be fixed first — it needs no halo or PART III work.
+
+### H.16.2 One caveat that matters for the next step  `[AUDIT 28th pass]`
+
+The report notes D1 still had **Nghost = 3185** from PBC at 1 rank, and correctly
+flags it. I want to sharpen why it matters: at 1 rank `HaloContext::active()` is
+still true (`nall > 0`), so `uma_halo::exchange` **runs** — as a purely local
+scatter/gather. So D1 does *not* isolate "no halo"; it isolates "no **cross-rank**
+halo".
+
+**Consequence:** the +18.2 meV/atom is attributable to C5 (energy assembly) **or**
+to the local halo/ghost path — including C3 (`edge_distance_vec`/`edge_index` are
+never re-derived after the exchange), which is a *rim* mechanism that PBC ghosts
+exercise even on one rank.
+
+**Cheap disambiguation before fixing C5 (D7, below):** re-run D1 with
+`UMA_DD_NO_HALO=1`, which is now a *valid* control since H3. If dE stays ~18, the
+halo path is exonerated and C5 is confirmed as pure energy assembly. If dE moves,
+C3/local-halo is implicated and the fix target changes. **One job, and it prevents
+a fix aimed at the wrong subsystem.**
+
+Also worth noting: the single-tile control could not run (the k=4 artifact is not
+loadable by the non-DD path, exit 255), so D1's reference is the ASE oracle rather
+than the same-binary non-DD path. That is acceptable, but it means D1 compares
+across two code paths, not one. A non-DD artifact at N=6 would make the comparison
+airtight.
+
+### H.16.3 H-14 — closed  `[AUDIT 28th pass]`
+
+`pair_uma.cpp:914` now uses `(have_shell > 0.0) ? have_shell : (cutoff + neighbor->skin)`
+— exactly the 3-line fix specified. Regression test added (**13/13** multi-node
+Tier-1, was 12). Validated: rebuild 8806609, tripwire 8806767, **full G4 8806768
+7/7 bit-identical**. The last silent-wrong-forces path in DD is closed.
+
+### H.16.4 Process note — this is how the campaign should run  `[AUDIT 28th pass]`
+
+Recording it because it is a first: an experiment was **pre-registered**, run,
+and its result applied **against the runner's own prior**. The developer's stated
+position was pure-thin-halo; mine was C2-MoLE; the data refuted both and the
+write-up says so plainly, including *"argues against the auditor's C2 hypothesis"*.
+Null and disconfirming results were recorded as §H.14.6 required.
+
+The switch to reporting **mean/median/p99 angle** rather than cosine is also
+right — cos = 0.766 sounds close to 1; **36°** does not.
+
+### H.16.5 Status
+
+| Candidate | State after D1/D4 |
+|---|---|
+| **C5** energy assembly | **CONFIRMED, dominant** — +18.2 meV/atom at 1 rank |
+| **C1** thin halo | **CONFIRMED, secondary** — angle grows with rank count |
+| **C2** per-rank MoLE | **REFUTED** — would be flat in rank count |
+| **C3** stale edge geometry | **still open** — not separated from C5 by D1 (§H.16.2) |
+| C4 dummy Z | quantified ~5e-5, negligible |
+
+### H.16.6 Grades — rev 34
+
+| Dimension | rev 33 | **rev 34** |
+|---|---|---|
+| DD correctness | B+ | **B+** — H-14 closed, but a confirmed bulk bug is now *known* rather than suspected; the grade does not move until C5 is fixed |
+| Multi-node validation | B | **A−** — 13 Tier-1 tests; pre-registered experiments; disconfirming results recorded |
+| **Multi-node overall** | **B+** | **B+** |
+
+Single-node unchanged at **A**.
+
+### H.16.7 Next iteration
+
+| # | Item | Cost |
+|---|---|---|
+| **D7** | **Disambiguate C5 vs C3 first:** re-run D1 with `UMA_DD_NO_HALO=1` (valid control since H3). Optionally add a non-DD N=6 artifact so D1 compares within one binary | 1 job |
+| **D8** | **Fix C5.** Reproducible at 1 rank ⇒ debuggable without an allocation. Prime suspects, in order: the `node_e.narrow(0,0,nlocal)` owned-energy sum vs GP's global sum; the dummy pad node's participation; element-reference/denormalisation on the DD path | days |
+| **D9** | Re-run D1 + D4 after the C5 fix. **Only then** is the residual C1 term measurable, and only then is the PART III choice (deeper halo vs exact ghost gradients) informed | 2 jobs |
+| **D10** | H-15: a 2-rank *runtime* CI test — still the gap; all 13 multi-node tests are numpy replicas | ~½ day |
+
+**Do not start PART III.** The rim term cannot be sized while an 18 meV/atom bulk
+error sits on top of it. Fix C5, re-measure, then choose.
+
+### H.16.8 Bottom line
+
+The iteration did what it was for: **"what limits DD" is now answerable on
+evidence** — two errors, one bulk and dominant, one rim and secondary. My C2
+hypothesis was refuted by exactly the test designed to refute it, which is the
+system working.
+
+The one thing I would add before D8 is the `UMA_DD_NO_HALO` re-run (D7, one job):
+D1 isolates *cross-rank* halo, not the local ghost path, so C3 is still folded
+into the +18.2 meV/atom. Fixing C5 without separating them risks aiming at the
+wrong subsystem.
+
+## H.17 Developer response — D7 done, C5 confirmed and localised  `[DEV / SELF-REVIEW 2026-09-07]`
+
+> **`[DEV]`.** Ran D7 (the `UMA_DD_NO_HALO` re-run) before touching C5, as advised.
+
+**D7 (job 8809592, N=6, 1 rank, `UMA_DD_NO_HALO=1`):** dE = **+19.64 meV/atom**,
+vs +18.24 halo-ON (D1). **The halo moved it 1.4 meV/atom** — so per §H.16.2 the
+local halo/C3 is exonerated and **C5 (energy assembly) is confirmed** as the ~18
+meV/atom dominant bulk term. Report §15.2.
+
+**C5 localised (code read, not yet fixed).** `build_dd_graph` and the single-tile
+`build_ext_graph` build **structurally different graphs** from the same LAMMPS
+list: single-tile maps every ghost neighbour back to its **owned** atom via
+`tag[j]` + an integer **cell offset** (⇒ `nlocal` nodes, periodic edges = the
+vesin graph); DD keeps ghosts as **distinct nodes** with `cell_offset = 0` and
+drops `j >= nall`. So DD runs message passing on `nall` nodes with ghost
+duplicates as separate centers — a different topology — and its owned per-node
+energies do not match the single-tile per-atom energies. That is the +18 meV/atom,
+reproducible on one rank, halo-independent.
+
+**Honest scope for D8:** this is not a one-liner — the two graphs differ *by
+design* (ghosts-as-nodes is the DD receptive-field scheme). Making the 1-rank DD
+owned energies equal the single-tile reference is the real fix and the next
+iteration's work. Updated C-table: **C3 exonerated by D7**; C5 dominant/confirmed;
+C1 secondary (D4). Not starting PART III — the rim term cannot be sized under an
+18 meV/atom bulk error (§H.16.7).
+
+
+---
+---
+
 
 
 ---

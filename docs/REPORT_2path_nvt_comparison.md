@@ -1595,3 +1595,42 @@ then does the rim term (C1, the deeper-halo-vs-exact-ghost-gradient design
 choice) become the binding constraint. **Force-direction deviation is now
 reported in degrees (mean/median/p99/max), not just cosine**, because cosine
 saturates near 1.
+
+### 15.2 D7 — C5 vs C3 disambiguation (audit §H.16.2/§H.16.7, 2026-09-07)
+
+The auditor noted D1 does not isolate "no halo" — at 1 rank `HaloContext::active()`
+is still true (PBC ghosts), so the LOCAL halo runs. D7 re-ran D1 at N=6, 1 rank
+with `UMA_DD_NO_HALO=1` (a valid control since H3 gates fwd+bwd) to separate C5
+(energy assembly) from C3 (local halo / stale edge geometry). Job 8809592:
+
+| N=6, 1 rank | step-0 PE (eV) | dE vs ASE (meV/atom) |
+|---|---|---|
+| halo ON (D1) | −5804.807 | +18.24 |
+| **halo OFF (D7)** | **−5802.375** | **+19.64** |
+| ASE reference | −5836.319 | 0 |
+
+**The halo moved dE by only ~1.4 meV/atom.** Per the pre-registered rule
+(§H.16.2): dE stays ~18 ⇒ **the halo path is exonerated and C5 (energy assembly)
+is CONFIRMED** as the dominant bulk term. C3 is not the cause of the +18.
+
+**C5 localised (code read).** `build_dd_graph` and `build_ext_graph` (single-tile)
+construct *different graphs* from the same LAMMPS list:
+
+- `build_ext_graph` (single-tile, the reference): centers = local atoms
+  `[0,nlocal)`; each ghost neighbour `j` is mapped back to its **owned** atom via
+  `tag[j]` with an integer **cell offset** — i.e. `nlocal` nodes with periodic
+  edges, reproducing the vesin graph edge-for-edge.
+- `build_dd_graph` (DD): centers = **all** `nall` nodes; ghost neighbours are kept
+  as **distinct ghost node indices** with `cell_offset = 0`, and any `j >= nall`
+  is **dropped**.
+
+So at 1 rank the DD path runs message passing on `nall = nlocal + nghost` nodes
+with ghost *duplicates as separate centers*, a different topology from the
+single-tile `nlocal`-node periodic graph. The owned-row per-node energies
+therefore do not equal the single-tile per-atom energies — the +18 meV/atom. This
+is a property of the ghosts-as-nodes DD construction, reproducible on ONE rank,
+independent of the cross-rank halo.
+
+**D8 (next):** make the DD owned-atom energies match the single-tile reference at
+1 rank. This is genuine debugging (the two graphs are structurally different by
+design), not a one-liner; it must be fixed before the rim term (C1) can be sized.
