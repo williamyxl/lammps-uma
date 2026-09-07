@@ -1689,3 +1689,28 @@ per-node energy head / denorm / per-atom assembly, not the halo.
 `predict_body_dd` against `predict_body` on an identical complete-neighbourhood
 graph. The rim term (C1, ~8 meV/atom) is the halo-depth/PART III question and
 stays gated behind the C5 head fix.
+
+### 15.5 The +10.5 meV/atom bulk residual is the MoLE node set (C2 reinterpreted)
+
+Code read of why the +10.5 meV/atom survives a perfect 24 Å halo: the traced DD
+model computes the MoLE expert-mixing coefficients in `set_MOLE_coefficients(
+atomic_numbers_full=...)` over **atomic_numbers_full = ALL nall nodes**
+(owned + ghost + dummy), not the true system. At a 24 Å shell that is 24,443
+nodes for a 1728-atom system — the composition mean is dominated by **ghost
+duplicates**. The `include_self` (+1 denominator) normalisation and the dummy pad
+node (H10) make this node-count-dependent, so it does not cancel even for
+homogeneous NaCl.
+
+**This reconciles D4 and D8b:** both a rank increase (D4) and a deeper halo (D8b)
+**add ghost nodes**, both inflate the MoLE node set, and both change dE — so the
+term is not purely rank-scaling (which is why D4 alone looked like a pure rim
+signature) nor purely halo-depth. **C2 is not refuted; it is the composition
+being taken over the ghost-inflated `nall` node set** rather than the true system.
+
+**C5 residual reclassified → C2 (MoLE node set), P0′.2(a).** The fix is to feed the
+**global** composition (which `mole_composition_allreduce()` already computes and
+discards) to the traced MoLE, instead of the per-rank owned+ghost+dummy set. That
+is the D2 experiment the audit proposed (§H.14.3) — now strongly motivated: the
++10.5 meV/atom bulk term points directly at it. Updated candidate roles:
+C2 (MoLE node set) = the bulk residual; C1 (thin halo) = the ~7.7 meV/atom rim
+term the deep halo removed.
