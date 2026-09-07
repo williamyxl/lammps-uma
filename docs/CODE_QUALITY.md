@@ -8,7 +8,7 @@ the hardening campaign.** This document merges the former
 **Date:** 2026-08-29 (verdict rev 4 / plan rev 2);
 **post-sprint independent audit 2026-08-31 → PART E (verdict rev 5);
 re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
-**PART F = auditor replies; PART G = single-node (**A**); PART H = multi-node (**B+**), current §H.16 (rev 34)**
+**PART F = auditor replies; PART G = single-node (**A**); PART H = multi-node (**B+**), current §H.18 (rev 35)**
 **Scope:** `src/ML-UMA/` — the LAMMPS pair style (`pair_uma.{cpp,h}`), the C++
 `uma-engine`, and the Python export layer — plus the `scripts/` validation harness.
 **Repo state:** Parts A–D written at HEAD `36df00564d`;
@@ -348,7 +348,21 @@ re-audits → §E.7 (rev 6), §E.8 (rev 7), §E.9 (rev 8), §E.10 (rev 9);
 > PBC ghosts and the halo op *runs* at 1 rank, so C3 (stale edge geometry) is not
 > yet separated from C5 — **re-run D1 with `UMA_DD_NO_HALO=1` (D7, one job)**
 > before aiming a fix. **Do not start PART III**: the rim term cannot be sized
-> under an 18 meV/atom bulk error.** Also outstanding: retitle §G.21 (still says
+> under an 18 meV/atom bulk error.
+>
+> **UPDATE 31 — §H.18: D7 done, DD diagnosis COMPLETE (rev 35).** Halo OFF gives
+> **+19.64** vs halo ON **+18.24** meV/atom — the halo moved 1.4 of ~18, so per the
+> pre-registered rule **C3 is exonerated and C5 is confirmed**. **C5 localized
+> (I verified both builders):** `build_ext_graph` folds ghosts back to their owned
+> atom via tags and records integer **cell offsets** (N nodes, exact);
+> `build_dd_graph` keeps ghosts as **distinct nodes with cell_offsets all zero**
+> and **drops `j >= nall` neighbours**. Two different graphs of the same system —
+> sufficient to explain a bulk offset, reproducible on 1 rank, halo-independent.
+> **New: C5b** — the dropped edges are a separate correctness defect.
+> **The candidate table is fully resolved** (C1 confirmed secondary, C2 refuted,
+> C3 exonerated, C5 confirmed). **D8 caution:** ghosts-as-nodes exists *because*
+> it is rank-local; folding ghosts back re-introduces a cross-rank dependency —
+> **fix and validate at 1 rank first**, where the target (dE ≈ 0 vs ASE) is exact.** Also outstanding: retitle §G.21 (still says
 > DD "FIXED" at cos 0.7986) and record job 8799532 in the report.
 
 > **UPDATE 20 — `[DEV]` §G.20: the whole §G.18.6 list worked in one pass.**
@@ -444,9 +458,9 @@ results). This document is the standing verdict and is updated as the code chang
   the quantified halo round trip, and instructions. **`[AUDIT]` §H.10 reviews the
   responses; **§H.12 carries the current multi-node verdict (rev 33, **B+**)** —
   H4/H6 closed, one 3-line residual (single-node **A**). **§H.13 is the DD plan (D1–D6)**; **★ §H.14 is the
-  next-iteration plan of record**; **★ §H.16 carries the current multi-node
-  verdict (rev 34)** — D1/D4 found **C5 bulk + C1 rim**, refuting both prior
-  hypotheses; next is D7 (disambiguate) → D8 (fix C5).
+  next-iteration plan of record**; **★ §H.18 carries the current multi-node
+  verdict (rev 35)** — D1/D4/D7 resolved every candidate: **C5 bulk (localized to
+  graph topology) + C1 rim**; C2 refuted, C3 exonerated. Next is D8 (fix C5).
 - **Appendix — Provenance.** The rev 1–3 verdict history, kept for the record.
 
 ---
@@ -7674,6 +7688,191 @@ owned energies equal the single-tile reference is the real fix and the next
 iteration's work. Updated C-table: **C3 exonerated by D7**; C5 dominant/confirmed;
 C1 secondary (D4). Not starting PART III — the rim term cannot be sized under an
 18 meV/atom bulk error (§H.16.7).
+
+---
+
+## H.18 Review of D7 — C5 confirmed and localized  `[AUDIT 2026-09-07, 29th pass]` — verdict rev 35
+
+> Reviewing `e71cedda8e` + `dd90d2bd82`. D7 ran as specified, the second
+> pre-registered rule fired, and C5 is now localized to a specific code
+> difference. Verified the localization by reading both graph builders.
+
+### H.18.0 Verdict: multi-node **B+** held — the diagnosis is now complete and actionable
+
+D7 answered the §H.16.2 caveat cleanly. **C3 is exonerated, C5 is confirmed and
+localized.** DD's diagnosis is finished; what remains is a fix, not an
+investigation.
+
+### H.18.1 D7 — the disambiguation  `[AUDIT 29th pass]`
+
+Job 8809592, N=6, 1 rank:
+
+| | step-0 PE (eV) | dE vs ASE |
+|---|---|---|
+| halo ON (D1) | −5804.807 | +18.24 meV/atom |
+| **halo OFF (D7)** | −5802.375 | **+19.64 meV/atom** |
+
+**The halo moved dE by 1.4 meV/atom out of ~18.** Per the §H.16.2 rule — *"if dE
+stays ~18, the halo path is exonerated and C5 is confirmed"* — **C3 is not the
+cause.** The second pre-registered interpretation in two iterations, applied as
+written.
+
+Worth noting the sign: halo OFF is *slightly worse*, which is the expected
+direction (the local exchange does something useful, just not 18 meV/atom worth).
+
+### H.18.2 The localization — verified independently  `[AUDIT 29th pass]`
+
+I read both builders rather than accept the summary. The difference is real and
+is sufficient to explain a bulk offset:
+
+**`build_ext_graph` (single-tile, FP64-exact vs ASE):** builds a tag→owned-index
+map, then for every ghost neighbour `j` folds it **back onto its owned atom**
+`owned_of_tag[tag[j]]` and records the integer periodic image as a **cell offset**
+(`std::lround((x[j][0]-bx)*invLx)`, exact for orthorhombic). Result: **N graph
+nodes** — one per real atom — with periodicity carried in `cell_offsets`.
+
+**`build_dd_graph` (DD):** ghosts are **distinct graph nodes**, `cell_offsets` is
+**all zeros** (`:54`), and any neighbour with `j >= nall` is **dropped**
+(`:38`).
+
+So the two paths hand the model **different graphs of the same physical system**:
+
+| | nodes | periodicity | dropped edges |
+|---|---|---|---|
+| ext (exact) | N real atoms | integer cell offsets | none |
+| DD | N + ghosts (duplicates as separate centers) | none (zeros) | `j >= nall` |
+
+For a message-passing network the node set *is* the graph — duplicating an atom as
+several independent ghost nodes gives each copy its own partial neighbourhood, so
+per-atom energies cannot equal the single-tile values. **That is a sufficient
+mechanism for +18 meV/atom, it is reproducible on one rank, and it is independent
+of any halo.** The localization is sound.
+
+**The dropped `j >= nall` edges are a second, separate defect** in the same
+function: those are real interactions being silently discarded (the comment says
+"ghost-of-ghost / extended region"). Even after the topology question is settled,
+dropping neighbours is a correctness bug in its own right and needs its own fix or
+an explicit guarantee that the set is empty.
+
+### H.18.3 What this means for the fix  `[AUDIT 29th pass]`
+
+The obvious repair is **make DD use the ext-graph topology**: fold ghosts back to
+their owning atom via tags and emit real cell offsets, exactly as
+`build_ext_graph` does. But there is a structural obstacle worth stating before
+D8 starts:
+
+- Under DD a ghost's owner may live **on another rank**, so `owned_of_tag` cannot
+  be built from local atoms alone. Single-rank DD can do the fold today; multi-rank
+  cannot without a tag→(rank, index) resolution.
+- The whole point of the ghosts-as-nodes construction is that each rank can build
+  its subgraph **locally**. Folding ghosts back re-introduces a cross-rank
+  dependency into graph construction.
+
+So D8 has two plausible shapes, and they differ a lot in cost:
+
+1. **Fold ghosts to owners locally where possible** (all periodic images of
+   locally-owned atoms) and keep genuine cross-rank ghosts as nodes. Fixes the
+   1-rank case entirely and shrinks the multi-rank error to the true cross-rank
+   part. Moderate.
+2. **Keep ghosts-as-nodes and correct the energy assembly instead** — e.g. weight
+   or deduplicate per-atom energies so duplicated atoms are not double-counted.
+   Cheaper, but it treats a topology error as a bookkeeping error and may not
+   converge.
+
+**Recommend (1), and validate it at 1 rank first** — where the fold is
+unambiguous and D1/D7 give an exact target (dE should go to ~0, matching ASE).
+
+### H.18.4 Status
+
+| Candidate | State |
+|---|---|
+| **C5** energy assembly / graph topology | **CONFIRMED + LOCALIZED** — ghosts-as-nodes + zero cell offsets |
+| **C5b** dropped `j >= nall` edges | **NEW** — separate defect in the same function |
+| **C1** thin halo | CONFIRMED secondary (angle grows with ranks) |
+| **C3** stale edge geometry / local halo | **EXONERATED** (D7) |
+| **C2** per-rank MoLE | REFUTED (D4) |
+| C4 dummy Z | negligible (~5e-5) |
+
+**The candidate table is now fully resolved** — every hypothesis is measured,
+confirmed, or excluded. That was §H.14.8 item 5, and it is met.
+
+### H.18.5 Grades — rev 35
+
+Unchanged: **multi-node B+**, single-node **A**. No production code changed
+(D7 added a control flag to a `.pbs`); CI green (13 multi-node Tier-1).
+
+The grade will move when C5 is fixed, not when it is diagnosed — but the
+diagnosis is now complete, which is what the last two iterations were for.
+
+### H.18.6 Next
+
+| # | Item | Cost |
+|---|---|---|
+| **D8** | **Fix C5**, shape (1) above: fold periodic ghosts back to owned nodes with real cell offsets. **Validate at 1 rank against ASE (target dE ≈ 0)** before touching multi-rank | days |
+| **D8b** | Fix or justify the dropped `j >= nall` edges (C5b) | with D8 |
+| **D9** | Re-run D1 + D4 after the fix; only then is the C1 rim term measurable | 2 jobs |
+
+## H.19 Developer response to §H.18 — C5 decomposed; C5b landed; D8 shape (1) scoped  `[DEV / SELF-REVIEW 2026-09-07]`
+
+> **`[DEV]`.** Took the §H.18.3 recommendation (shape 1, validate at 1 rank) as
+> the plan. Before the big refactor I ran one more decomposition experiment and
+> landed the companion C5b defect.
+
+**D8b — deep-halo discriminator (job 8809658, N=6, cap-1376256 v2, 1 rank).**
+Against ASE periodic −5836.319 eV:
+
+| shell | dE (meV/atom) |
+|---|---|
+| 6.5 Å (production) | +18.24 |
+| 24 Å (= num_layers·cutoff) | +10.55 |
+
+A full 24 Å halo (every ghost has a complete depth-4 neighbourhood) removed
+**7.7 meV/atom (42%)** but **+10.5 survives**. So the +18 is TWO terms: a
+**~7.7 meV/atom rim/ghost-neighbourhood term (C1)** the deep halo fixes, and a
+**~10.5 meV/atom bulk term that survives a perfect halo**. The bulk residual traces
+to the traced model taking the MoLE composition over `atomic_numbers_full` = ALL
+`nall` nodes (owned+ghost+dummy); at a deep halo that is ~24k nodes for a
+1728-atom system, ghost-duplicate-dominated. This reconciles D4 (grows with ranks)
+and D8b (grows with halo depth): **both add ghost nodes.** (First attempt at N=4
+was invalid — the small-cell ASE ref was a 4× outlier and 24 Å wraps the 22.6 Å
+box; §15.4.)
+
+**Note vs §H.18.4:** C2 is therefore not cleanly "REFUTED" — the composition-over-
+`nall` mechanism is a real bulk term that also scales with rank count, which is
+why D4 alone read as a pure rim signature. Both the shape-(1) fold AND a global-
+composition MoLE would fix it; the fold is the auditor's recommendation and fixes
+both the topology and the node-set-composition in one change.
+
+**C5b landed (`565e82d03c`).** The dropped `j >= nall` edges are now counted
+(`dd_dropped_edges_`), Allreduced, and warned once from rank 0 — no longer silent.
+Validated with rebuild + full G4 (below).
+
+**D8 (shape 1) — scoped, not yet landed.** Fold periodic ghosts back to owned
+nodes with real cell offsets (as `build_ext_graph` does), keeping only genuine
+cross-rank ghosts as nodes. This restructures the DD node set (`nall` →
+`nlocal` + cross-rank-ghosts), cascading into `dd_pos_`/`dd_z_`/nnodes/halo/energy
+sum — the auditor's "days" estimate is right. It is the next iteration's work,
+validated at 1 rank against ASE (target dE ≈ 0). It fixes C1 (complete owned
+neighbourhoods), the C2/MoLE node set (fewer, correct nodes), and C5b (no
+`j>=nall` drop) together.
+| **D10** | H-15: 2-rank *runtime* CI test (all 13 multi-node tests are still numpy replicas) | ~½ day |
+| — | **PART III stays gated** until D9 | — |
+
+### H.18.7 Bottom line
+
+Two iterations, two pre-registered experiments, both applied against their
+runners' priors — and DD's diagnosis is now complete: **a bulk graph-topology bug
+(C5), a secondary rim term (C1), everything else excluded.**
+
+The one thing I would flag going into D8: the ghosts-as-nodes construction exists
+*because* it is rank-local, so folding ghosts back re-introduces the cross-rank
+dependency it was designed to avoid. Fix and validate at 1 rank first, where the
+answer is unambiguous and the target is exact.
+
+
+---
+---
+
 
 
 ---
