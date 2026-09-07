@@ -1,0 +1,90 @@
+#!/bin/bash -l
+#PBS -N uma_dd_deep
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# D8b (audit §H.16.7 / D8): decisive C5 discriminator via a DEEP halo at 1 rank.
+#
+# C5 (the +18 meV/atom bulk error at 1 rank) is a graph-representation difference:
+# DD represents periodic neighbours as ghost NODES and relies on the k=4 halo to
+# make each ghost's features equal its owner's. If the ghost features are wrong
+# because a ghost near the shell rim has an INCOMPLETE neighbourhood, then giving
+# EVERY ghost a complete neighbourhood must remove the error.
+#
+# At 1 rank, `comm_modify cutoff 24` (= num_layers*cutoff) makes the ghost shell
+# deep enough that every ghost within the receptive field has ALL its neighbours
+# to depth 4. N=4 (512 atoms) keeps the 24 A-shell edge count (~632k) under the
+# 917504 cap.
+#
+#   * dE(24 A) -> ~0     => C5 is ghost-neighbourhood incompleteness (a HALO-DEPTH
+#     / representation issue). The k=4 thin halo is not actually exact; the fix is
+#     in the halo scheme, and the shipped `comm_modify cutoff 6.5` is too shallow.
+#   * dE(24 A) ~ +18     => C5 is NOT the ghost neighbourhood; it is the energy
+#     head / denorm / per-atom assembly in predict_body_dd. Fix target moves there.
+#
+# Reference: ASE periodic N=4 single point (computed separately, CPU).
+#
+#   qsub -v N=4 run_dd_deephalo.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+EX=${LU}/src/ML-UMA/examples/multinode-dd
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-4}
+NAT=$((8*N*N*N))
+DD_ARTIFACT=${DD_ARTIFACT:-${LU}/scripts/out/dd/n32_k4_cap917504}
+SHELLS=${SHELLS:-"6.5 24.0"}
+RUNDIR=${RUNDIR:-${EX}/run_dd_deephalo_n${N}}; mkdir -p "${RUNDIR}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT
+export FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_DD_EDGE_CAP=${UMA_DD_EDGE_CAP:-917504}
+
+python "${EX}/make_data.py" --n ${N} --out "${RUNDIR}/data.nacl_n${N}"
+cd "${RUNDIR}"
+
+echo "### D8b: 1-rank DD deep-halo scan, N=${N} (${NAT} atoms), shells: ${SHELLS} ###"
+echo "### reference: ASE periodic N=${N} (compute separately) ###"
+echo
+for SHELL in ${SHELLS}; do
+  sed "s/^comm_modify     cutoff 6.5 vel no/comm_modify     cutoff ${SHELL} vel no/" \
+    "${EX}/in.dd_sp" > "in.dd_${SHELL}"
+  grep -q "cutoff ${SHELL}" "in.dd_${SHELL}" || { echo "sed failed ${SHELL}"; continue; }
+  echo "=== comm_modify cutoff = ${SHELL} A ==="
+  rm -f log.lammps
+  t0=$SECONDS
+  mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
+    env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=chunk UMA_DD=1 \
+    "${LMP}" -in "in.dd_${SHELL}" -var artifact "${DD_ARTIFACT}" \
+    -var datafile "data.nacl_n${N}" > "lmp_${SHELL}.log" 2>&1
+  echo "  exit=$? wall=$((SECONDS-t0))s"
+  PE=$(grep -E "^\s*0\s" log.lammps 2>/dev/null | head -1 | awk '{print $3}')
+  grep -iE "Nghost:" log.lammps 2>/dev/null | head -1 | sed 's/^/  /'
+  echo "  step0_PE = ${PE:-<none>}"
+  [ -z "${PE}" ] && grep -iE "ERROR|exceeds|out of memory" "lmp_${SHELL}.log" | head -2 | sed 's/^/  /'
+  echo
+done
+echo "### VERDICT ###"
+echo "  dE(24 A) -> ~0  => C5 = ghost-neighbourhood incompleteness (halo depth/scheme)"
+echo "  dE(24 A) ~ +18  => C5 = energy head/denorm in predict_body_dd"
+echo "DONE"
