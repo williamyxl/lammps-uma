@@ -7843,9 +7843,10 @@ why D4 alone read as a pure rim signature. Both the shape-(1) fold AND a global-
 composition MoLE would fix it; the fold is the auditor's recommendation and fixes
 both the topology and the node-set-composition in one change.
 
-**C5b landed (`565e82d03c`).** The dropped `j >= nall` edges are now counted
-(`dd_dropped_edges_`), Allreduced, and warned once from rank 0 — no longer silent.
-Validated with rebuild + full G4 (below).
+**C5b landed (`565e82d03c`), G3-validated.** The dropped `j >= nall` edges are now
+counted (`dd_dropped_edges_`), Allreduced, and warned once from rank 0 — no longer
+silent. Parity-neutral: rebuild 8809674 `LMP BUILD OK`, tripwire 8809684 PASS,
+**full G4 8809685 all 7 bit-identical** (a counter/warning changes no numerics).
 
 **D8 (shape 1) — scoped, not yet landed.** Fold periodic ghosts back to owned
 nodes with real cell offsets (as `build_ext_graph` does), keeping only genuine
