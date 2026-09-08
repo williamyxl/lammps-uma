@@ -1714,3 +1714,54 @@ is the D2 experiment the audit proposed (§H.14.3) — now strongly motivated: t
 +10.5 meV/atom bulk term points directly at it. Updated candidate roles:
 C2 (MoLE node set) = the bulk residual; C1 (thin halo) = the ~7.7 meV/atom rim
 term the deep halo removed.
+
+## 16. Single-tile, no-checkpointing (UMA_AC=off) max-N sweep (2026-09-08)
+
+One XPU tile (64 GB, `ZE_FLAT_DEVICE_HIERARCHY=FLAT` — a Max 1550 exposes its two
+stacks as two 64 GB devices; a single process/allocation cannot span both), all
+activations RETAINED (`UMA_AC=off`), NaCl rocksalt. Per-N **unpadded** single-tile
+artifacts (`opt2/n{6,12,16,18}_chunk65536_1tile`, `edge_pad_cap=None`) so
+activation memory tracks the real edge count. (A first attempt with the padded
+`n16_fast_1tile`, cap=1.08M edges, OOMed even at N=4 because it allocates for the
+padded graph regardless of N — invalid for this measurement.)
+
+| N | atoms | single-point | 10-step NVT | 10-step NPT |
+|---|---|---|---|---|
+| **6** | 1,728 | ✅ (17 s wall) | ✅ (loop 5.0 s) | ❌ ERR (not OOM — see below) |
+| 12 | 13,824 | ❌ **XPU OOM** (62.9/64 GiB) | — | — |
+
+**Max N without checkpointing on a single tile (64 GB):**
+- single-point & NVT: **N=6 (1,728 atoms) works; N=12 OOMs.** True ceiling is
+  bracketed **6 ≤ Nmax < 12** — no unpadded 1-tile artifacts exist at N=7–11 to
+  pin it exactly (would need a per-N re-export).
+- NPT: **not achievable on any current artifact** — see the bug below.
+
+Jobs: 8811289 (padded artifact, N=8 OOM — invalidated), 8811332/8811377
+(N=4–7 padded — invalidated), **8811456 (unpadded, the valid result)**.
+
+### 16.1 NPT bug found: A10 "NPT out of the box" fails on per-block artifacts
+
+At N=6 the barostat correctly auto-enabled the virial (A10), then the engine
+threw:
+
+> `uma-engine: virial (UMA_COMPUTE_VIRIAL=1) requires a non-checkpointed run
+> (plain artifact + UMA_CKPT=0).`
+
+The guard (`predictor.cpp:379-385`) rejects the virial whenever block/chunk/
+edgedeg sub-modules are **loaded**, because the traced custom checkpoint Functions
+differentiate only `pos`, not `cell`. **`UMA_AC=off` bypasses recompute at runtime
+but does not remove the traced ops**, so *every per-block/per-chunk artifact*
+(i.e. all the shipped single-tile artifacts) cannot compute the stress — NPT is
+impossible on them regardless of the A10 default flip.
+
+**Consequence:** A10's "NPT works out of the box on a single tile" holds only for
+a **plain (non-per-chunk) traced artifact** with a cell-differentiable graph.
+None of the shipped artifacts are that. To actually run single-tile NPT: export a
+plain artifact whose traced forward differentiates `cell`, or extend the checkpoint
+Functions to carry the strain leaf (P0'.1 step 2 scope). Recorded as a real gap
+between the A10 promise and the artifact format.
+
+**Bottom line:** single-tile without checkpointing is memory-limited to ~1–2k
+atoms (N=6 ok, N=12 OOM) — checkpointing is effectively mandatory for any useful
+single-tile system size, and single-tile NPT needs a cell-differentiable artifact
+that does not yet exist.
