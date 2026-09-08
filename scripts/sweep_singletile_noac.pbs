@@ -85,12 +85,12 @@ write_in() {  # $1=mode(sp|nvt|npt) $2=N $3=datafile $4=steps $5=outfile
 units           metal
 atom_style      atomic
 boundary        p p p
+newton          off
 read_data       ${DATA}
 mass            1 22.989769
 mass            2 35.453
 pair_style      uma precision double
 pair_coeff      * * ${ART} Na Cl
-newton          off
 neighbor        2.0 bin
 neigh_modify    delay 0 every 1 check yes
 timestep        0.001
