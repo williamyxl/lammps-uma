@@ -33,14 +33,26 @@ HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
 ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
 ENG=${LU}/src/ML-UMA/uma-engine
 LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
-ART=${ART:-${LU}/scripts/out/n16_fast_1tile}
-NLIST=${NLIST:-"8 9 10 11 12 13 14"}
+# PER-N single-tile artifacts (UNPADDED: edge_pad_cap=None), so activation memory
+# tracks the REAL edge count, not a huge fixed pad. A single padded artifact
+# (n16_fast_1tile, cap=1.08M) allocated for the padded graph even at N=4 and
+# OOMed with UMA_AC=off regardless of N -- wrong tool for an AC-off ceiling.
+# Map N -> artifact; only N with an unpadded 1-tile artifact are sweepable.
+art_for_N() {
+  case "$1" in
+    6)  echo "${LU}/scripts/out/opt2/n6_chunk65536_1tile" ;;
+    12) echo "${LU}/scripts/out/opt2/n12_chunk65536_1tile" ;;
+    16) echo "${LU}/scripts/out/opt2/n16_chunk65536_1tile" ;;
+    18) echo "${LU}/scripts/out/opt2/n18_chunk65536_1tile" ;;
+    *)  echo "" ;;
+  esac
+}
+NLIST=${NLIST:-"6 12 16 18"}
 STEPS=${STEPS:-10}
 RUNROOT=${RUNROOT:-${LU}/scripts/out/noac_sweep}; mkdir -p "${RUNROOT}"
 
 source "${ACTIVATE}"
 [ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
-[ -f "${ART}/model_traced.pt" ] || { echo "missing artifact: ${ART}"; exit 1; }
 
 TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
 ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
@@ -140,13 +152,18 @@ run_one() {  # $1=mode $2=N $3=indir  -> echoes "OK loop wall" or "OOM"/"ERR"
 }
 
 echo "############ single-tile UMA_AC=off max-N sweep ############"
-echo "artifact: ${ART}"
+echo "per-N unpadded single-tile artifacts (UMA_AC=off)"
 printf "%4s %9s | %-22s | %-22s | %-22s\n" "N" "atoms" "single-point" "NVT ${STEPS} steps" "NPT ${STEPS} steps"
 printf "%4s %9s | %-22s | %-22s | %-22s\n" "----" "-------" "----------------------" "----------------------" "----------------------"
 
 MAX_SP=0 MAX_NVT=0 MAX_NPT=0
 for N in ${NLIST}; do
   NAT=$((8*N*N*N))
+  ART=$(art_for_N ${N})
+  if [ -z "${ART}" ] || [ ! -f "${ART}/model_block_0.pt" -a ! -f "${ART}/model_traced.pt" ]; then
+    printf "%4d %9d | %-22s (no unpadded 1-tile artifact for this N)\n" ${N} ${NAT} "SKIP"
+    continue
+  fi
   RD=${RUNROOT}/n${N}; mkdir -p "${RD}"
   gen_data ${N} "${RD}/data.nacl" >/dev/null 2>&1
   write_in sp  ${N} data.nacl 0       "${RD}/in.sp"
