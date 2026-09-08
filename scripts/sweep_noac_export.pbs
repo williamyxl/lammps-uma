@@ -1,0 +1,149 @@
+#!/bin/bash -l
+#PBS -N uma_noac_full
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# Full single-tile UMA_AC=off sweep N=4..12 with the DEFINED items
+# (single-point, 10-step NVT, 10-step NPT), each N using its OWN unpadded 1-tile
+# artifact so activation memory tracks the real edge count.
+#
+# opt2/n{6,12,16,18}_chunk65536_1tile already exist; this job first EXPORTS the
+# missing N (4,5,7,8,9,10,11) as unpadded single-tile artifacts (export_blocks_xpu
+# .py, EDGE_AC_CHUNK=65536, W=1, no edge_pad_cap), then runs the sweep.
+#
+#   qsub scripts/sweep_noac_export.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+ARTROOT=${ARTROOT:-${LU}/scripts/out/noac_arts}
+STEPS=${STEPS:-10}
+NLIST=${NLIST:-"4 5 6 7 8 9 10 11 12"}
+RUNROOT=${RUNROOT:-${LU}/scripts/out/noac_sweep_full}; mkdir -p "${RUNROOT}" "${ARTROOT}"
+
+source "${HEN}/scripts/activate_fxpu.sh"
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "missing lmp"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNROOT}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+
+# existing unpadded artifacts
+art_for_N() {
+  case "$1" in
+    6)  echo "${LU}/scripts/out/opt2/n6_chunk65536_1tile" ;;
+    12) echo "${LU}/scripts/out/opt2/n12_chunk65536_1tile" ;;
+    16) echo "${LU}/scripts/out/opt2/n16_chunk65536_1tile" ;;
+    18) echo "${LU}/scripts/out/opt2/n18_chunk65536_1tile" ;;
+    *)  echo "${ARTROOT}/n$1_1tile" ;;
+  esac
+}
+
+echo "############ export missing unpadded 1-tile artifacts ############"
+for N in ${NLIST}; do
+  A=$(art_for_N ${N})
+  if [ -f "${A}/model_traced.pt" ]; then echo "N=${N}: artifact present (${A})"; continue; fi
+  echo "N=${N}: exporting -> ${A}"
+  OUT="${A}" N_LIST="${N}" EDGE_AC_CHUNK=65536 EXPORT_WORLD=1 EXPORT_RANK=0 \
+    TRACE_DEV=xpu UMA_CKPT="${UMA_CHECKPOINT}" \
+    python -u "${ENG}/python/export_blocks_xpu.py" > "${A%.pt}.export.log" 2>&1 \
+    && echo "  OK" || { echo "  EXPORT FAILED (see ${A}.export.log)"; tail -5 "${A%.pt}.export.log" 2>/dev/null; }
+done
+
+gen_data() { python - "$1" "$2" <<'PY'
+import sys, numpy as np
+N=int(sys.argv[1]); out=sys.argv[2]; a=5.64; rng=np.random.default_rng(0)
+base=np.array([[0,0,0],[0.5,0.5,0],[0.5,0,0.5],[0,0.5,0.5]])
+Na=[];Cl=[]
+for i in range(N):
+ for j in range(N):
+  for k in range(N):
+   o=np.array([i,j,k])
+   for b in base:
+    Na.append((o+b)*a); Cl.append((o+b+np.array([0.5,0,0]))*a)
+pos=np.array(Na+Cl); typ=[1]*len(Na)+[2]*len(Cl); pos+=rng.normal(0,0.05,pos.shape); L=N*a
+with open(out,'w') as f:
+ f.write(f"NaCl {N}\n\n{len(pos)} atoms\n2 atom types\n0 {L} xlo xhi\n0 {L} ylo yhi\n0 {L} zlo zhi\n\nMasses\n\n1 22.989769\n2 35.453\n\nAtoms\n\n")
+ for idx,(p,t) in enumerate(zip(pos,typ),1): f.write(f"{idx} {t} {p[0]:.6f} {p[1]:.6f} {p[2]:.6f}\n")
+PY
+}
+write_in() { local MODE=$1 DATA=$2 ST=$3 OUT=$4 ART=$5
+  cat > "${OUT}" <<EOF
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+read_data       ${DATA}
+mass            1 22.989769
+mass            2 35.453
+pair_style      uma precision double
+pair_coeff      * * ${ART} Na Cl
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+timestep        0.001
+EOF
+  if [ "${MODE}" = sp ]; then echo "thermo 1
+thermo_style custom step temp pe etotal
+run 0" >> "${OUT}"
+  elif [ "${MODE}" = nvt ]; then echo "velocity all create 300.0 4928459 mom yes rot yes dist gaussian
+fix 1 all nvt temp 300.0 300.0 0.1
+thermo 1
+thermo_style custom step temp pe etotal
+run ${ST}" >> "${OUT}"
+  else echo "velocity all create 300.0 4928459 mom yes rot yes dist gaussian
+fix 1 all npt temp 300.0 300.0 0.1 iso 1.0 1.0 1.0
+thermo 1
+thermo_style custom step temp pe etotal press
+run ${ST}" >> "${OUT}"; fi
+}
+run_one() { local MODE=$1 RD=$2; rm -f "${RD}/log.lammps"; local t0=$SECONDS
+  ( cd "${RD}" && mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
+      env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=off UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+      "${LMP}" -in "in.${MODE}" > "lmp_${MODE}.log" 2>&1 )
+  local rc=$? wall=$((SECONDS-t0)); local loop=$(grep -E "Loop time" "${RD}/lmp_${MODE}.log" 2>/dev/null|head -1|awk '{print $4}')
+  if grep -qiE "out of memory|OUT_OF_RESOURCES|bad alloc|OUT_OF" "${RD}/lmp_${MODE}.log"; then echo "OOM"
+  elif [ "${rc}" -ne 0 ] || [ -z "${loop}" ]; then echo "ERR"
+  else echo "OK ${loop} ${wall}"; fi
+}
+fmt() { local s="$1"; if [[ "$s" == OK* ]]; then set -- $s; printf "loop=%ss wall=%ss" "$2" "$3"; else echo "$s"; fi; }
+
+echo
+echo "############ single-tile UMA_AC=off sweep (SP / NVT${STEPS} / NPT${STEPS}) ############"
+printf "%4s %9s | %-24s | %-24s | %-24s\n" N atoms single-point "NVT ${STEPS}" "NPT ${STEPS}"
+MSP=0 MNVT=0 MNPT=0
+for N in ${NLIST}; do
+  NAT=$((8*N*N*N)); A=$(art_for_N ${N})
+  if [ ! -f "${A}/model_traced.pt" ]; then printf "%4d %9d | %-24s\n" ${N} ${NAT} "NO ARTIFACT"; continue; fi
+  RD=${RUNROOT}/n${N}; mkdir -p "${RD}"; gen_data ${N} "${RD}/data.nacl"
+  write_in sp  data.nacl 0       "${RD}/in.sp"  "${A}"
+  write_in nvt data.nacl ${STEPS} "${RD}/in.nvt" "${A}"
+  write_in npt data.nacl ${STEPS} "${RD}/in.npt" "${A}"
+  SP=$(run_one sp "${RD}"); NVT="skip"; NPT="skip"
+  if [[ "${SP}" == OK* ]]; then MSP=${N}
+    NVT=$(run_one nvt "${RD}"); [[ "${NVT}" == OK* ]] && MNVT=${N}
+    NPT=$(run_one npt "${RD}"); [[ "${NPT}" == OK* ]] && MNPT=${N}
+  fi
+  printf "%4d %9d | %-24s | %-24s | %-24s\n" ${N} ${NAT} "$(fmt "${SP}")" "$(fmt "${NVT}")" "$(fmt "${NPT}")"
+  [[ "${SP}" != OK* ]] && { echo "  -> single point failed at N=${N}; stopping."; break; }
+done
+echo
+echo "### MAX N (single tile, UMA_AC=off) ###"
+echo "  single-point : N=${MSP} ($((8*MSP*MSP*MSP)) atoms)"
+echo "  NVT ${STEPS}     : N=${MNVT} ($((8*MNVT*MNVT*MNVT)) atoms)"
+echo "  NPT ${STEPS}     : N=${MNPT} ($((8*MNPT*MNPT*MNPT)) atoms)"
+echo "DONE"
