@@ -1725,15 +1725,23 @@ activation memory tracks the real edge count. (A first attempt with the padded
 `n16_fast_1tile`, cap=1.08M edges, OOMed even at N=4 because it allocates for the
 padded graph regardless of N — invalid for this measurement.)
 
-| N | atoms | single-point | 10-step NVT | 10-step NPT |
+| N | atoms | single-point (loop / wall) | 10-step NVT (loop) | 10-step NPT |
 |---|---|---|---|---|
-| **6** | 1,728 | ✅ (17 s wall) | ✅ (loop 5.0 s) | ❌ ERR (not OOM — see below) |
-| 12 | 13,824 | ❌ **XPU OOM** (62.9/64 GiB) | — | — |
+| 4 | 512 | ✅ 4.6e-6 s / 11 s | ✅ 9.04 s | ❌ ERR (virial bug) |
+| 5 | 1,000 | ✅ 4.3e-6 s / 6 s | ✅ 7.85 s | ❌ ERR |
+| **6** | **1,728** | ✅ 6.5e-6 s / 8 s | ✅ 4.93 s | ❌ ERR |
+| 7 | 2,744 | ❌ **XPU OOM** | — | — |
+| 12 | 13,824 | ❌ XPU OOM (62.9/64 GiB) | — | — |
 
-**Max N without checkpointing on a single tile (64 GB):**
-- single-point & NVT: **N=6 (1,728 atoms) works; N=12 OOMs.** True ceiling is
-  bracketed **6 ≤ Nmax < 12** — no unpadded 1-tile artifacts exist at N=7–11 to
-  pin it exactly (would need a per-N re-export).
+(single-point "loop" is ~0 because `run 0` does one force eval; wall includes
+model load. Per-N unpadded artifacts: `opt2/n6…` shipped; N=4/5/7 exported here.
+Exports for N=8–11 OOMed *during trace* — the reconstruct check itself exceeds the
+tile — so they are not needed: N=7 already OOMs at runtime.)
+
+**Max N without checkpointing on a single tile (64 GB) = N=6 (1,728 atoms).**
+Single-point and 10-step NVT complete at N≤6; **N=7 (2,744 atoms) OOMs** even at a
+single point. So the AC-off ceiling is exactly N=6 — an order of magnitude smaller
+than the AC-on single-tile ceiling (N≈16 for NVT). Jobs: 8811540 (+8811456).
 - NPT: **not achievable on any current artifact** — see the bug below.
 
 Jobs: 8811289 (padded artifact, N=8 OOM — invalidated), 8811332/8811377
