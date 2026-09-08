@@ -374,15 +374,34 @@ Prediction Predictor::predict_body() {
   torch::Tensor cell_used = cell_;
   torch::Tensor cell_grad;
   if (want_virial_) {
-    // The whole-module CheckpointModuleFn custom autograd Function only tracks
-    // `pos`; it cannot yield dE/dcell. Require a non-checkpointed run for stress.
-    const bool ckpt_active =
-        BlockContext::instance().num_chunks() > 0 ||
-        BlockContext::instance().num_blocks() > 0 ||
-        BlockContext::instance().edgedeg_loaded() || checkpoint_enabled();
-    TORCH_CHECK(!ckpt_active,
-                "uma-engine: virial (UMA_COMPUTE_VIRIAL=1) requires a "
-                "non-checkpointed run (plain artifact + UMA_CKPT=0).");
+    // NPT fix (report §16.1): dE/dcell is available on the per-block/chunk/edeg
+    // path. Those ops (uma_ckpt::block/chunk/edge_degree) are registered
+    // CompositeExplicitAutograd, so the traced graph contains the REAL sub-module
+    // forwards differentiating edge_distance_vec, and edge_distance_vec =
+    // pos_j + offset@cell - pos_i carries grad back to `cell`. Running the top
+    // module normally (line ~438, the per-chunk branch) keeps that graph live, so
+    // the strain gradient threads through -- retained (UMA_AC=off) OR recomputed.
+    //
+    // The ONLY path that cannot yield dE/dcell is the WHOLE-MODULE
+    // CheckpointModuleFn (checkpoint_enabled(), UMA_CKPT=1): that custom Function
+    // captures pos/cell by value and returns a pos-grad only. Refuse just that.
+    // (Previously this refused ANY loaded sub-module, which wrongly blocked NPT on
+    // every per-block artifact -- the shipped format.)
+    TORCH_CHECK(!checkpoint_enabled(),
+                "uma-engine: virial (UMA_COMPUTE_VIRIAL=1) is not supported with "
+                "WHOLE-MODULE checkpointing (UMA_CKPT=1): that path yields no "
+                "dE/dcell. Use a per-block artifact (the default) with UMA_CKPT "
+                "unset so the strain gradient threads through the live graph.");
+    // The strain gradient also requires every AC level RETAINED: a recomputed
+    // chunk/block backward uses create_graph=false, so its edge_distance_vec->cell
+    // path is not rebuilt for the outer grad({E},{cell}). Under UMA_AC=off (the
+    // A10 default) this holds. Refuse clearly if the user turned AC back on.
+    TORCH_CHECK(all_activations_retained(),
+                "uma-engine: virial (UMA_COMPUTE_VIRIAL=1) requires activation "
+                "checkpointing OFF (UMA_AC=off, the default) so the strain "
+                "gradient dE/dcell threads through the retained graph. A "
+                "recomputed chunk/block does not rebuild the cell path. Unset "
+                "UMA_AC / UMA_CHUNK_RETAIN_K, or use NVE/NVT.");
     cell_grad = cell_.detach().clone().set_requires_grad(true);
     cell_used = cell_grad;
   }

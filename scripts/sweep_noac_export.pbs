@@ -7,6 +7,7 @@
 #PBS -l walltime=01:00:00
 #PBS -j oe
 #PBS -k doe
+set -uo pipefail
 # ---------------------------------------------------------------------------
 # Full single-tile UMA_AC=off sweep N=4..12 with the DEFINED items
 # (single-point, 10-step NVT, 10-step NPT), each N using its OWN unpadded 1-tile

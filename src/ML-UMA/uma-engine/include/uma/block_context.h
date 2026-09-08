@@ -76,6 +76,15 @@
 
 namespace uma {
 
+// NPT fix (report §16.1): true iff NO activation-checkpointing recompute is
+// active at any level (block/chunk/edge-degree) -- i.e. every sub-module ran
+// under the live autograd graph with its activations retained. The virial
+// (dE/dcell) requires this: a recomputed chunk's backward uses create_graph=false,
+// so the edge_distance_vec->cell path is not rebuilt for the outer grad({E},{cell})
+// call. Under the A10 default (UMA_AC=off) this is true. Defined in
+// block_context.cpp alongside no_recompute_{block,chunk,edeg}.
+bool all_activations_retained();
+
 // Process-wide registry of the per-block TorchScript sub-modules. Mirrors the
 // PeerContext singleton pattern: one instance for the whole process, protected
 // by a mutex, storing raw jit modules + the device they live on.
