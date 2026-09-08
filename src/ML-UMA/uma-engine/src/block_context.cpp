@@ -98,13 +98,6 @@ bool no_recompute_edeg() {
   return v;
 }
 
-// NPT fix (report §16.1): all AC levels retained (no recompute anywhere). The
-// virial needs the full live graph so grad({E},{cell}) can reach cell through
-// edge_distance_vec. See the header for why recompute breaks the strain path.
-bool all_activations_retained() {
-  return no_recompute_block() && no_recompute_chunk() && no_recompute_edeg();
-}
-
 // opt5 P-1: SELECTIVE per-chunk retain. Full UMA_NO_RECOMPUTE_CHUNK=1 OOMs
 // (retains every chunk's SO2 + [Ec,25,25] wigner at once). UMA_CHUNK_RETAIN_K=k
 // retains only the first k edge-chunks PER BLOCK under autograd (no backward
@@ -141,6 +134,15 @@ bool retain_this_chunk(int block_idx) {
   return retain;
 }
 }  // namespace
+
+// NPT fix (report §16.1): all AC levels retained (no recompute anywhere). Defined
+// in namespace uma (external linkage) so predictor.cpp's virial guard can call it;
+// it forwards to the anonymous-namespace no_recompute_* above. The virial needs
+// the full live graph so grad({E},{cell}) can reach cell through
+// edge_distance_vec; a recomputed chunk/block (create_graph=false) breaks it.
+bool all_activations_retained() {
+  return no_recompute_block() && no_recompute_chunk() && no_recompute_edeg();
+}
 
 BlockContext& BlockContext::instance() {
   static BlockContext ctx;
