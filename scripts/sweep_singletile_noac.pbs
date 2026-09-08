@@ -1,0 +1,180 @@
+#!/bin/bash -l
+#PBS -N uma_noac_sweep
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# Single-tile, NO activation checkpointing (UMA_AC=off) max-N sweep.
+#
+# For each N, on ONE XPU tile, with all activations RETAINED (UMA_AC=off):
+#   (a) single point   (run 0)
+#   (b) 10-step NVT     (fix nvt)
+#   (c) 10-step NPT     (fix npt iso; virial auto-enabled at AC-off single tile, A10)
+# Report wall + LAMMPS Loop time for each, and the max N that completes each
+# without OOM. Stops escalating N once single-point OOMs.
+#
+# Artifact: n16_fast_1tile (per-block, single-tile, edge_pad_cap=1081344 -> valid
+# to ~N=14 by edge count; the AC-off OOM is expected to bind first, which is the
+# point of the sweep). Uses the padded traced chunk count so one artifact serves
+# every N in the sweep.
+#
+#   qsub -v NLIST="8 9 10 11 12 13 14" scripts/sweep_singletile_noac.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ACTIVATE=${ACTIVATE:-${HEN}/scripts/activate_fxpu.sh}
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+ART=${ART:-${LU}/scripts/out/n16_fast_1tile}
+NLIST=${NLIST:-"8 9 10 11 12 13 14"}
+STEPS=${STEPS:-10}
+RUNROOT=${RUNROOT:-${LU}/scripts/out/noac_sweep}; mkdir -p "${RUNROOT}"
+
+source "${ACTIVATE}"
+[ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
+[ -f "${ART}/model_traced.pt" ] || { echo "missing artifact: ${ART}"; exit 1; }
+
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNROOT}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+
+# one geometry generator (NaCl rocksalt, a=5.64, matches make_data)
+gen_data() {  # $1=N  $2=outfile
+  python - "$1" "$2" <<'PY'
+import sys, numpy as np
+N=int(sys.argv[1]); out=sys.argv[2]; a=5.64; rng=np.random.default_rng(0)
+# rocksalt: Na fcc + Cl fcc shifted by half-cell
+base_fcc=np.array([[0,0,0],[0.5,0.5,0],[0.5,0,0.5],[0,0.5,0.5]])
+Na=[]; Cl=[]
+for i in range(N):
+  for j in range(N):
+    for k in range(N):
+      o=np.array([i,j,k])
+      for b in base_fcc:
+        Na.append((o+b)*a)
+        Cl.append((o+b+np.array([0.5,0,0]))*a)
+pos=np.array(Na+Cl); typ=[1]*len(Na)+[2]*len(Cl)
+pos=pos+rng.normal(0,0.05,pos.shape)
+L=N*a
+with open(out,'w') as f:
+  f.write(f"NaCl {N}x{N}x{N}\n\n{len(pos)} atoms\n2 atom types\n")
+  f.write(f"0 {L} xlo xhi\n0 {L} ylo yhi\n0 {L} zlo zhi\n\n")
+  f.write("Masses\n\n1 22.989769\n2 35.453\n\nAtoms\n\n")
+  for idx,(p,t) in enumerate(zip(pos,typ),1):
+    f.write(f"{idx} {t} {p[0]:.6f} {p[1]:.6f} {p[2]:.6f}\n")
+print(f"wrote {out}: {len(pos)} atoms")
+PY
+}
+
+write_in() {  # $1=mode(sp|nvt|npt) $2=N $3=datafile $4=steps $5=outfile
+  local MODE=$1 N=$2 DATA=$3 ST=$4 OUT=$5
+  cat > "${OUT}" <<EOF
+units           metal
+atom_style      atomic
+boundary        p p p
+read_data       ${DATA}
+mass            1 22.989769
+mass            2 35.453
+pair_style      uma precision double
+pair_coeff      * * ${ART} Na Cl
+newton          off
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+timestep        0.001
+EOF
+  if [ "${MODE}" = "sp" ]; then
+    cat >> "${OUT}" <<EOF
+thermo          1
+thermo_style    custom step temp pe etotal
+run             0
+EOF
+  elif [ "${MODE}" = "nvt" ]; then
+    cat >> "${OUT}" <<EOF
+velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
+fix             1 all nvt temp 300.0 300.0 0.1
+thermo          1
+thermo_style    custom step temp pe etotal
+run             ${ST}
+EOF
+  else  # npt (virial auto-enabled at AC-off single tile, A10)
+    cat >> "${OUT}" <<EOF
+velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
+fix             1 all npt temp 300.0 300.0 0.1 iso 1.0 1.0 1.0
+thermo          1
+thermo_style    custom step temp pe etotal press
+run             ${ST}
+EOF
+  fi
+}
+
+run_one() {  # $1=mode $2=N $3=indir  -> echoes "OK loop wall" or "OOM"/"ERR"
+  local MODE=$1 N=$2 RD=$3
+  rm -f "${RD}/log.lammps"
+  local t0=$SECONDS
+  ( cd "${RD}" && mpiexec -n 1 --ppn 1 gpu_tile_compact.sh \
+      env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=off UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+      "${LMP}" -in "in.${MODE}" > "lmp_${MODE}.log" 2>&1 )
+  local rc=$? wall=$((SECONDS-t0))
+  local loop=$(grep -E "Loop time" "${RD}/lmp_${MODE}.log" 2>/dev/null | head -1 | awk '{print $4}')
+  if grep -qiE "out of memory|OUT_OF_RESOURCES|bad alloc|failed to allocate|UR_RESULT_ERROR_OUT_OF" "${RD}/lmp_${MODE}.log"; then
+    echo "OOM - ${wall}"
+  elif [ "${rc}" -ne 0 ] || [ -z "${loop}" ]; then
+    echo "ERR - ${wall}"
+    grep -iE "ERROR|exceed" "${RD}/lmp_${MODE}.log" | head -1 | sed 's/^/      /'
+  else
+    echo "OK ${loop} ${wall}"
+  fi
+}
+
+echo "############ single-tile UMA_AC=off max-N sweep ############"
+echo "artifact: ${ART}"
+printf "%4s %9s | %-22s | %-22s | %-22s\n" "N" "atoms" "single-point" "NVT ${STEPS} steps" "NPT ${STEPS} steps"
+printf "%4s %9s | %-22s | %-22s | %-22s\n" "----" "-------" "----------------------" "----------------------" "----------------------"
+
+MAX_SP=0 MAX_NVT=0 MAX_NPT=0
+for N in ${NLIST}; do
+  NAT=$((8*N*N*N))
+  RD=${RUNROOT}/n${N}; mkdir -p "${RD}"
+  gen_data ${N} "${RD}/data.nacl" >/dev/null 2>&1
+  write_in sp  ${N} data.nacl 0       "${RD}/in.sp"
+  write_in nvt ${N} data.nacl ${STEPS} "${RD}/in.nvt"
+  write_in npt ${N} data.nacl ${STEPS} "${RD}/in.npt"
+
+  SP=$(run_one sp  ${N} "${RD}")
+  # only run NVT/NPT if single point succeeded (else they will OOM too)
+  if [[ "${SP}" == OK* ]]; then
+    MAX_SP=${N}
+    NVT=$(run_one nvt ${N} "${RD}"); [[ "${NVT}" == OK* ]] && MAX_NVT=${N}
+    NPT=$(run_one npt ${N} "${RD}"); [[ "${NPT}" == OK* ]] && MAX_NPT=${N}
+  else
+    NVT="skip"; NPT="skip"
+  fi
+  fmt() { local s="$1"; if [[ "$s" == OK* ]]; then set -- $s; printf "loop=%ss wall=%ss" "$2" "$3"; else echo "$s"; fi; }
+  printf "%4d %9d | %-22s | %-22s | %-22s\n" ${N} ${NAT} "$(fmt "${SP}")" "$(fmt "${NVT}")" "$(fmt "${NPT}")"
+
+  # stop escalating once single point OOMs/errs (larger N will only be worse)
+  if [[ "${SP}" != OK* ]]; then
+    echo "  -> single point failed at N=${N}; stopping the sweep."
+    break
+  fi
+done
+
+echo
+echo "### MAX N (single tile, UMA_AC=off, no OOM) ###"
+echo "  single-point : N=${MAX_SP}  ($((8*MAX_SP*MAX_SP*MAX_SP)) atoms)"
+echo "  NVT ${STEPS}-step  : N=${MAX_NVT}  ($((8*MAX_NVT*MAX_NVT*MAX_NVT)) atoms)"
+echo "  NPT ${STEPS}-step  : N=${MAX_NPT}  ($((8*MAX_NPT*MAX_NPT*MAX_NPT)) atoms)"
+echo "DONE"
