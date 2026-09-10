@@ -1825,3 +1825,42 @@ atom capacity is the AC-off ceiling (~1–2k atoms/tile). N=32 W=12 OOMs under
 AC-off (job 8816620) — large-system NPT would need either more tiles or the
 strain gradient threaded through the checkpoint (future work). NVT/single-point
 retain the full AC-on capacity (N=38 at 12 tiles). DD NPT remains unsupported.
+
+## 18. 12-tile chunk-ON vs chunk-OFF x NVT/NPT max-N sweep (2026-09-10)
+
+12 tiles (1 node), NaCl, 10-step runs, per-N GP W=12 artifacts. "Chunking ON" =
+UMA_AC=chunk (per-chunk recompute, min memory); "chunking OFF" = UMA_AC=off (all
+activations retained, needed for the virial/NPT). Jobs 8817208 (+ prior N=38 AC-on
+ceiling from §13).
+
+| N | atoms | NVT chunk-ON | NVT chunk-OFF | NPT chunk-ON | NPT chunk-OFF |
+|---|---|---|---|---|---|
+| 12 | 13,824 | loop 12.59 s | loop 9.18 s | **refused** | loop 9.20 s |
+| 16 | 32,768 | loop 25.10 s | **OOM** | refused | **OOM** |
+
+**Max N (12 tiles, 10-step, no OOM):**
+
+| | chunking ON (recompute) | chunking OFF (retain) |
+|---|---|---|
+| **NVT** | **N=38** (438,976 atoms; §13 ceiling; N=16 = 25.1 s here) | **N=12** (13,824 atoms; N=16 OOMs) |
+| **NPT** | **refused** (recompute breaks dE/dcell) | **N=12** (13,824 atoms; N=16 OOMs) |
+
+**Findings:**
+1. **NPT + chunking ON is impossible and correctly refused** — the strain gradient
+   cannot thread a recomputed chunk (`pair_uma.cpp:844`: "activation
+   checkpointing is ON … incompatible with the strain gradient"). NPT is therefore
+   chunking-OFF-only, and its ceiling equals the NVT chunk-OFF ceiling.
+2. **Chunking OFF caps 12-tile NVT/NPT at N=12** (~1,152 atoms/tile) vs N=38 with
+   chunking ON — a ~3× smaller ceiling, the price of retaining activations. This
+   is why NPT (which needs chunk-OFF) is memory-limited while NVT/single-point can
+   use chunk-ON to reach N=38.
+3. **Chunking OFF is slightly FASTER per step where it fits** (N=12: NVT 9.18 s vs
+   12.59 s chunk-ON) — retaining activations avoids the backward recompute. So the
+   trade is pure memory-for-speed: chunk-OFF is faster but caps at N=12; chunk-ON
+   is ~35% slower but reaches N=38.
+4. **NPT costs the same as NVT at chunk-OFF** (N=12: 9.20 vs 9.18 s) — the
+   all-reduced GP virial adds negligible time.
+
+(N=20/24 not run: N=16 chunk-OFF already OOMs, so they only add chunk-ON points;
+the chunk-ON NVT ceiling N=38 is established in §13. Job hit the 1 h wall after
+N=16.)
