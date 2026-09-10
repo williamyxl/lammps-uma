@@ -142,12 +142,15 @@ hard-code copies in comparators or `.pbs` scripts.
   `pair_uma.cpp` now guards `atom->natoms > INT_MAX` with an explicit
   `error->all` naming the limit, instead of silently narrowing >2^31 atoms into a
   garbage int. Converts silent-wrong-physics into a clear, actionable abort.
-- **NPT/stress now works OUT OF THE BOX on a single tile** (A10, §G.25): activation
-  checkpointing defaults OFF (`UMA_AC=off`), so the fully-differentiable virial path
-  is the default; a barostat on a single tile auto-enables `UMA_COMPUTE_VIRIAL`. The
-  GP/DD paths still refuse a barostat (no virial there), and enabling AC
-  (`UMA_AC=chunk/…`) makes the virial unavailable (strain grad can't thread the
-  checkpoint) — refused with a clear message. Capacity is lower by default; the A11
-  pre-flight check warns and names `UMA_AC=chunk` when a run may OOM.
+ - **NPT/stress works OUT OF THE BOX on single tile AND the GP multi-tile path**
+  (A10 + GP-virial): activation checkpointing defaults OFF (`UMA_AC=off`), so the
+  fully-differentiable virial path is the default; a barostat auto-enables
+  `UMA_COMPUTE_VIRIAL` on **both** single-tile and GP. On GP the virial is computed
+  per rank (dE/dpos + dE/dcell) and **all-reduced across tiles** — the global
+  strain gradient, identical on every rank, deposited once (mirrors force/energy
+  reduction). **DD** still has no virial and refuses a barostat. Enabling AC
+  (`UMA_AC=chunk/…`) makes the virial unavailable on any path (a recomputed chunk's
+  backward does not rebuild the cell path) — refused with a clear message. Capacity
+  is lower by default; the A11 pre-flight check warns and names `UMA_AC=chunk`.
 - **DD multi-species energies are approximate** (P0'.2): the traced MoLE mixture uses
   each rank's local composition; a one-time warning is emitted (R4). DD is deferred.

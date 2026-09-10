@@ -306,10 +306,12 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   return self;
 }
 
+// (signature continues on the next lines in-file; virial arg threaded through)
 Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
                                           const int* atomic_numbers,
                                           const double* cell_3x3, const int* pbc_3,
-                                          double* forces_out_optional) {
+                                          double* forces_out_optional,
+                                          bool want_virial) {
   // P0.3 (revised): exception safety is handled by agreeing on the DETERMINISTIC,
   // pre-collective failure conditions BEFORE any rank enters the model's mid-graph
   // collectives (see the shard/pad-cap agreement inside predict_host_body). A
@@ -320,13 +322,14 @@ Prediction MpiPeerPredictor::predict_host(int n, const double* pos_xyz,
   // For mid-collective failures a clean collective abort is impossible; letting the
   // exception propagate to LAMMPS -> MPI_Abort is the correct (fast) behavior.
   return predict_host_body(n, pos_xyz, atomic_numbers, cell_3x3, pbc_3,
-                           forces_out_optional);
+                           forces_out_optional, want_virial);
 }
 
 Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
                                           const int* atomic_numbers,
                                           const double* cell_3x3, const int* pbc_3,
-                                          double* forces_out_optional) {
+                                          double* forces_out_optional,
+                                          bool want_virial) {
   auto& I = *impl_;
   const auto dev = I.device;
   const auto dtype = compute_dtype_;
@@ -464,6 +467,22 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   auto charge = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(dev));
   auto spin = torch::zeros({}, torch::TensorOptions().dtype(torch::kLong).device(dev));
 
+  // GP virial (multi-tile NPT): make `cell` a differentiable leaf so dE/dcell is
+  // available. The model computes edge_distance_vec = pos_j + offset@cell - pos_i,
+  // so cell flows into the energy; cell_offsets are integers (no grad). Requires
+  // AC OFF -- a recomputed chunk's backward (create_graph=false) does not rebuild
+  // the cell path (same constraint as single-tile, predictor.cpp). The caller
+  // guarantees UMA_AC=off before setting want_virial, but assert defensively.
+  torch::Tensor cell_leaf;
+  if (want_virial) {
+    if (I.ac_active && !all_activations_retained())
+      throw std::runtime_error(
+          "uma-engine (GP): virial requires activation checkpointing OFF "
+          "(UMA_AC=off) so the strain gradient threads the retained graph.");
+    cell_leaf = cell.detach().clone().set_requires_grad(true);
+    cell = cell_leaf;   // feed the leaf to graph build + model below
+  }
+
 #if defined(UMA_ENGINE_USE_CUDA)
   if (perf) cudaDeviceSynchronize();
 #endif
@@ -517,7 +536,10 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   const char* skip_bar = std::getenv("UMA_SKIP_PRE_BWD_BARRIER");
   if (!(skip_bar && skip_bar[0] == '1'))
     PeerContext::instance().slot().barrier(rank_);
-  auto grads = torch::autograd::grad({e_for_grad}, {pos_grad}, {}, false, false, false);
+  std::vector<torch::Tensor> grad_inputs = {pos_grad};
+  if (want_virial) grad_inputs.push_back(cell_leaf);
+  auto grads = torch::autograd::grad({e_for_grad}, grad_inputs, {}, false, false,
+                                     /*allow_unused=*/want_virial);
   auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
 #if defined(UMA_ENGINE_USE_CUDA)
   if (perf) cudaDeviceSynchronize();
@@ -527,6 +549,33 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   // Sum force shards across all W GPUs (NCCL).
   forces = PeerContext::instance().slot().all_reduce(rank_, forces);
   forces = forces.to(torch::kFloat64).contiguous();
+
+  // GP virial (multi-tile NPT). Each rank differentiated e_for_grad = E/world, so
+  // its dE/dpos and dE/dcell are 1/world-scaled SHARD contributions; the force
+  // all_reduce(SUM) above already reconstructed the global dE/dpos (= -forces).
+  // Do the SAME all_reduce(SUM) on the [3,3] dE/dcell to reconstruct the global
+  // strain gradient, then assemble the virial with the single-tile formula
+  //   W_ab = -1/2 ( sum_i pos_i,a (dE/dpos_i)_b + sum_k cell_k,a (dE/dcell_k)_b ).
+  // pos^T @ dE/dpos uses the GLOBAL (reduced) dE/dpos = -forces; cell^T @ dE/dcell
+  // uses the GLOBAL (reduced) dE/dcell. Result is identical on every rank.
+  torch::Tensor virial_W;   // [3,3], filled iff want_virial
+  if (want_virial) {
+    torch::Tensor dE_dcell_local =
+        (grads.size() > 1 && grads[1].defined())
+            ? grads[1].to(torch::kFloat64)
+            : torch::zeros({3, 3}, torch::TensorOptions().dtype(torch::kFloat64)
+                                       .device(dev));
+    // reduce the cell gradient across ranks (same collective as forces)
+    auto dE_dcell = PeerContext::instance().slot().all_reduce(
+        rank_, dE_dcell_local.to(forces.dtype())).to(torch::kFloat64);
+    // dE/dpos GLOBAL = -forces (already reduced). pos is the same on every rank.
+    auto pos64 = pos_grad.detach().to(torch::kFloat64);        // [N,3]
+    auto dE_dpos = (-forces).to(torch::kFloat64);              // [N,3] GLOBAL
+    auto Wp = torch::matmul(pos64.t(), dE_dpos);               // [3,3]
+    auto cell64 = cell_leaf.detach().to(torch::kFloat64);      // [3,3]
+    auto Wc = torch::matmul(cell64.t(), dE_dcell);             // [3,3]
+    virial_W = (-0.5) * ((Wp + Wc) + (Wp + Wc).t());           // symmetrize + sign
+  }
 #if defined(UMA_ENGINE_USE_CUDA)
   if (perf) cudaDeviceSynchronize();
 #endif
@@ -552,6 +601,17 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   Prediction out;
   out.energy = energy.reshape({-1})[0].item<double>();
   out.forces = forces;
+  if (want_virial && virial_W.defined()) {
+    auto Wc = virial_W.to(torch::kCPU).contiguous();
+    auto a = Wc.accessor<double, 2>();
+    out.has_virial = true;
+    out.virial[0] = a[0][0];  // xx
+    out.virial[1] = a[1][1];  // yy
+    out.virial[2] = a[2][2];  // zz
+    out.virial[3] = a[0][1];  // xy
+    out.virial[4] = a[0][2];  // xz
+    out.virial[5] = a[1][2];  // yz
+  }
   if (forces_out_optional) {
     auto f_cpu = forces.to(torch::kCPU).contiguous();
     std::memcpy(forces_out_optional, f_cpu.data_ptr<double>(),

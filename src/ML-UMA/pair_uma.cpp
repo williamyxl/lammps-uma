@@ -413,7 +413,8 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
   // Allgather collectives, so no post-collective check is needed here.)
   result = mpi_peer->predict_host(natoms_global, mn_pos_sorted.data(),
                                   mn_z_sorted.data(), cell_buf, pbc_buf,
-                                  mn_force_sorted.data());
+                                  mn_force_sorted.data(),
+                                  /*want_virial=*/want_virial_flag_);
 
   // Scatter forces back to owners. all_reduce returns the fully reduced global
   // force array on every rank, so each rank simply picks out the atoms it owns
@@ -432,6 +433,12 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
   // Energy is global and identical on every rank; LAMMPS sums eng_vdwl over
   // ranks, so only one rank may contribute it.
   if (eflag_global && mn_rank == 0) eng_vdwl += result.energy;
+
+  // GP virial (multi-tile NPT): result.virial is the GLOBAL virial, all-reduced
+  // across tiles inside predict_host and identical on every rank. LAMMPS sums
+  // virial[] over ranks, so exactly ONE rank contributes it (mirrors eng_vdwl).
+  if (vflag_global && result.has_virial && mn_rank == 0)
+    for (int k = 0; k < 6; k++) virial[k] += result.virial[k];
 }
 
 /* ---------------------------------------------------------------------- */
@@ -809,25 +816,31 @@ void PairUMA::init_style()
       barostat_present = true; barostat_style = s; break;
     }
   }
-  if (barostat_present && !multinode && !dd_active_ && !want_virial_flag_ && !ac_on) {
-    // A10: single-tile + AC-off + no explicit flag -> just turn the virial on.
+  // GP virial (multi-tile NPT): the GP path now computes an all-reduced virial
+  // (mpi_peer->predict_host want_virial=true), so a barostat is supported on GP
+  // single-node when AC is off. DD still has no virial. Auto-enable on GP too.
+  const bool gp_virial_ok = multinode && !dd_active_ && !ac_on;
+  if (barostat_present && !dd_active_ && !want_virial_flag_ && !ac_on) {
+    // single tile OR GP, AC-off, no explicit flag -> auto-enable the virial.
     want_virial_flag_ = true;
     if (comm->me == 0)
       utils::logmesg(lmp,
-          "Pair uma: barostat (fix {}) present on a single tile with activation "
-          "checkpointing OFF -> virial auto-enabled (pos+cell autograd). Set "
-          "UMA_COMPUTE_VIRIAL=0 to force it off.\n", barostat_style);
+          "Pair uma: barostat (fix {}) with activation checkpointing OFF -> "
+          "virial auto-enabled (pos+cell autograd{}). Set UMA_COMPUTE_VIRIAL=0 "
+          "to force it off.\n", barostat_style,
+          multinode ? ", GP all-reduced across tiles" : "");
   }
-  const bool virial_supported = !multinode && !dd_active_ && want_virial_flag_;
+  const bool virial_supported =
+      !dd_active_ && want_virial_flag_ && (!multinode || gp_virial_ok);
   if (barostat_present && !virial_supported) {
-    if (multinode || dd_active_)
+    if (dd_active_)
       error->all(FLERR,
-                 "Pair style uma does not compute the virial on the multi-node "
-                 "(GP/DD) path; pressure control (fix {}) is not supported "
-                 "there. Use a single tile for NPT, or NVE/NVT.", barostat_style);
+                 "Pair style uma does not compute the virial on the DD path; "
+                 "pressure control (fix {}) is not supported there. Use a single "
+                 "tile or the GP path for NPT, or NVE/NVT.", barostat_style);
     else
-      // Single tile but AC was explicitly re-enabled: the strain grad cannot
-      // thread the checkpoint Functions, so refuse with the fix.
+      // AC was explicitly re-enabled: the strain grad cannot thread a recomputed
+      // chunk (single-tile) or the GP checkpoint path, so refuse with the fix.
       error->all(FLERR,
                  "Pair style uma: pressure control (fix {}) needs the virial, but "
                  "activation checkpointing is ON (UMA_AC/UMA_CKPT) which is "

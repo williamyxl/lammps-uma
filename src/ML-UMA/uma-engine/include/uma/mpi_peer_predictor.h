@@ -48,9 +48,14 @@ class MpiPeerPredictor {
 
   /// Full global system in (n atoms, tag-ordered identically on every rank).
   /// forces_out (optional) receives the fully reduced [n,3] FP64 forces.
+  /// want_virial: also compute the global virial (dE/dpos + dE/dcell, all-reduced
+  /// across ranks) and fill Prediction.virial. Requires activation checkpointing
+  /// OFF (the strain gradient cannot thread a recomputed chunk); the caller
+  /// (pair_uma) guarantees this before requesting it.
   Prediction predict_host(int n, const double* pos_xyz, const int* atomic_numbers,
                           const double* cell_3x3, const int* pbc_3,
-                          double* forces_out_optional = nullptr);
+                          double* forces_out_optional = nullptr,
+                          bool want_virial = false);
 
   int world() const { return world_; }
   int rank() const { return rank_; }
@@ -64,7 +69,8 @@ class MpiPeerPredictor {
   // collective abort instead of a hang.
   Prediction predict_host_body(int n, const double* pos_xyz,
                                const int* atomic_numbers, const double* cell_3x3,
-                               const int* pbc_3, double* forces_out_optional);
+                               const int* pbc_3, double* forces_out_optional,
+                               bool want_virial);
 
   int world_ = 1;
   int rank_ = 0;

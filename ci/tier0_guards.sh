@@ -69,9 +69,17 @@ fi
 # init_style() runs before compute() sets mn_active, so the multi-node barostat
 # refusal must key on comm->nprocs (valid at init) to avoid NPT-with-zero-virial on
 # the GP path. Regression guard for audit finding E1.
+# E1: the guard must key on comm->nprocs (valid at init_style, unlike mn_active
+# which is only set later in compute()). GP now COMPUTES an all-reduced virial, so
+# virial_supported is no longer "!multinode" -- it is derived from gp_virial_ok
+# (which itself is `multinode && !dd_active_ && !ac_on`, i.e. still comm->nprocs-
+# based). The invariant the guard protects is unchanged: the decision must use
+# comm->nprocs and MUST NOT read the stale mn_active. Enforce both.
 hdr "HARD: barostat virial guard uses comm->nprocs (not stale mn_active) [E1]"
 if grep -q "const bool multinode = (comm->nprocs > 1);" src/ML-UMA/pair_uma.cpp \
-   && grep -q "virial_supported = !multinode" src/ML-UMA/pair_uma.cpp; then
+   && grep -q "gp_virial_ok = multinode" src/ML-UMA/pair_uma.cpp \
+   && grep -q "virial_supported =" src/ML-UMA/pair_uma.cpp \
+   && ! grep -q "virial_supported = !multinode && want_virial_flag_ && !dd_active_ ? mn_active" src/ML-UMA/pair_uma.cpp; then
   say "  OK"
 else
   say "  FAIL: pair_uma.cpp virial_supported must derive from comm->nprocs (E1)"
