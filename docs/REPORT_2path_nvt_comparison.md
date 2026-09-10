@@ -1762,7 +1762,29 @@ but does not remove the traced ops**, so *every per-block/per-chunk artifact*
 (i.e. all the shipped single-tile artifacts) cannot compute the stress — NPT is
 impossible on them regardless of the A10 default flip.
 
-**Consequence:** A10's "NPT works out of the box on a single tile" holds only for
+**FIXED (2026-09-10, commit 302d1dde26).** The guard was over-broad: it refused
+the virial whenever any block/chunk/edgedeg sub-module was loaded, but those ops
+are registered `CompositeExplicitAutograd`, so the traced graph differentiates
+`edge_distance_vec = pos_j + offset@cell - pos_i` back to `cell`. The virial is
+now refused ONLY for (a) whole-module `CheckpointModuleFn` (`UMA_CKPT=1`) and
+(b) any active AC recompute (`all_activations_retained()` false) -- both false
+under the `UMA_AC=off` default. Single-tile NPT now runs on the shipped per-block
+artifacts. Validated: tripwire 8811897 bit-identical (force path unchanged); NPT
+10-step completes at N=4/5/6 (jobs 8816400/8816402):
+
+| N | atoms | single-point | 10-step NVT | 10-step NPT |
+|---|---|---|---|---|
+| 4 | 512 | wall 14 s | loop 9.07 s | loop 9.06 s |
+| 5 | 1,000 | wall 7 s | loop 7.88 s | loop 7.88 s |
+| **6** | **1,728** | wall 7 s | loop 4.92 s | loop 4.92 s |
+| 7 | 2,744 | **OOM** | - | - |
+
+**Max N on one tile, UMA_AC=off = N=6 (1,728 atoms)** for single-point, NVT, and
+NPT alike; N=7 OOMs.
+
+---
+
+*(historical, pre-fix:)* A10's "NPT works out of the box on a single tile" held only for
 a **plain (non-per-chunk) traced artifact** with a cell-differentiable graph.
 None of the shipped artifacts are that. To actually run single-tile NPT: export a
 plain artifact whose traced forward differentiates `cell`, or extend the checkpoint
