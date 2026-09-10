@@ -118,6 +118,7 @@ declare -A MAX
 for k in nvt_on nvt_off npt_on npt_off; do MAX[$k]=0; done
 for N in ${NLIST}; do
   NAT=$((8*N*N*N)); ART=${ARTROOT}/n${N}_w12
+  mkdir -p "${ART}"        # export log redirect target must exist first
   # export 12 ranks if missing
   if [ ! -f "${ART}/w12/r11/model_traced.pt" ]; then
     for R in $(seq 0 11); do
