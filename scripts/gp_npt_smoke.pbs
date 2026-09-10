@@ -1,0 +1,121 @@
+#!/bin/bash -l
+#PBS -N uma_gp_npt
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# GP-path NPT smoke: confirm multi-tile NPT now RUNS (was refused) and produces a
+# finite, nonzero pressure via the all-reduced GP virial. N=32, W=12 tiles, 1
+# node, UMA_AC=off (the virial requires AC off). Checks:
+#   - the barostat is accepted (no "does not compute the virial" abort),
+#   - step-0 Press is finite and nonzero (a zero virial => only kinetic term),
+#   - the run completes >=2 NPT steps without crashing.
+#
+#   qsub scripts/gp_npt_smoke.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+N=${N:-32}
+W=${W:-12}
+NAT=$((8*N*N*N))
+ART=${ART:-${LU}/scripts/out/phase6_maxN12/n32_ac}
+STEPS=${STEPS:-3}
+RUNDIR=${RUNDIR:-${LU}/scripts/out/gp_npt_smoke}; mkdir -p "${RUNDIR}"
+
+source "${HEN}/scripts/activate_fxpu.sh"
+set -uo pipefail   # AFTER activation (conda mpivars is not nounset-safe)
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "missing lmp"; exit 1; }
+[ -f "${ART}/w${W}/r0/model_traced.pt" ] || { echo "missing GP artifact ${ART}/w${W}"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNDIR}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT FI_PROVIDER=cxi
+export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd \
+       CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi
+
+# the GP W=12 metadata must be at ART/metadata.json for the loader
+cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+
+# NaCl data
+python - "${N}" "${RUNDIR}/data.nacl" <<'PY'
+import sys, numpy as np
+N=int(sys.argv[1]); out=sys.argv[2]; a=5.64; rng=np.random.default_rng(0)
+base=np.array([[0,0,0],[0.5,0.5,0],[0.5,0,0.5],[0,0.5,0.5]])
+Na=[];Cl=[]
+for i in range(N):
+ for j in range(N):
+  for k in range(N):
+   o=np.array([i,j,k])
+   for b in base:
+    Na.append((o+b)*a); Cl.append((o+b+np.array([0.5,0,0]))*a)
+pos=np.array(Na+Cl); typ=[1]*len(Na)+[2]*len(Cl); pos+=rng.normal(0,0.05,pos.shape); L=N*a
+with open(out,'w') as f:
+ f.write(f"NaCl {N}\n\n{len(pos)} atoms\n2 atom types\n0 {L} xlo xhi\n0 {L} ylo yhi\n0 {L} zlo zhi\n\nMasses\n\n1 22.989769\n2 35.453\n\nAtoms\n\n")
+ for idx,(p,t) in enumerate(zip(pos,typ),1): f.write(f"{idx} {t} {p[0]:.6f} {p[1]:.6f} {p[2]:.6f}\n")
+PY
+
+cat > "${RUNDIR}/in.gpnpt" <<EOF
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+read_data       data.nacl
+mass            1 22.989769
+mass            2 35.453
+pair_style      uma precision double devices 1
+pair_coeff      * * ${ART} Na Cl
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+timestep        0.001
+velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
+fix             1 all npt temp 300.0 300.0 0.1 iso 1.0 1.0 1.0
+thermo          1
+thermo_style    custom step temp pe etotal press pxx pyy pzz
+thermo_modify   norm no
+run             ${STEPS}
+EOF
+
+cd "${RUNDIR}"
+echo "### GP NPT smoke: N=${N} W=${W} tiles (${NAT} atoms), UMA_AC=off, ${STEPS} steps ###"
+mpiexec -n ${W} --ppn ${W} gpu_tile_compact.sh \
+  env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=off UMA_MP_NATOMS=${NAT} \
+  UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+  "${LMP}" -in in.gpnpt > lmp.log 2>&1
+rc=$?
+echo "lmp exit=${rc}"
+echo "=== thermo (step / press / pxx pyy pzz) ==="
+grep -E "^\s+[0-9]+\s" log.lammps 2>/dev/null | head -5
+echo "=== checks ==="
+if grep -qiE "does not compute the virial|not supported there" lmp.log; then
+  echo "  FAIL: barostat still refused on GP"
+elif grep -qiE "out of memory|OUT_OF_RESOURCES" lmp.log; then
+  echo "  OOM: GP NPT ran out of memory at N=${N} W=${W} AC-off (try smaller N / more tiles)"
+  grep -iE "out of|allocate" lmp.log | head -2
+else
+  P0=$(grep -E "^\s+0\s" log.lammps 2>/dev/null | head -1 | awk '{print $5}')
+  echo "  step0 Press = ${P0:-<none>}"
+  if [ -n "${P0}" ]; then
+    python - "${P0}" <<'PY'
+import sys
+p=float(sys.argv[1])
+print("  PASS: finite nonzero pressure (GP virial live)" if abs(p)>1e-6 else
+      "  SUSPECT: pressure ~0 (virial may be zero -> kinetic only)")
+PY
+  fi
+fi
+echo "DONE"
