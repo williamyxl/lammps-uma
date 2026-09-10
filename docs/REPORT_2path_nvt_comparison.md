@@ -1795,3 +1795,33 @@ between the A10 promise and the artifact format.
 atoms (N=6 ok, N=12 OOM) — checkpointing is effectively mandatory for any useful
 single-tile system size, and single-tile NPT needs a cell-differentiable artifact
 that does not yet exist.
+
+## 17. GP-path (multi-tile) NPT implemented (2026-09-10)
+
+The GP path previously refused a barostat (no virial). Now implemented: each rank
+differentiates `e_for_grad = E/world` w.r.t. a `cell` leaf as well as `pos`, and
+the `[3,3]` `dE/dcell` is **all-reduced(SUM) across tiles** (the same collective
+as the force shards) to reconstruct the global strain gradient. The virial is
+`W = -1/2 (pos^T dE/dpos + cell^T dE/dcell)` symmetrized, using the reduced global
+tensors — identical on every rank, deposited once (`mn_rank==0`, LAMMPS sums over
+ranks). Requires `UMA_AC=off` (a recomputed chunk's backward, create_graph=false,
+does not rebuild the cell path); auto-enabled for a barostat + AC-off, refused
+otherwise. Commit `bfc06d552f`.
+
+**Validation:**
+- **Parity unchanged (tripwire 8816607):** N=16 W=1 −110673.829050 + N=32 W=12
+  −885377.060040, bit-identical — the virial is gated behind `want_virial`, so
+  NVT/GP forces are untouched.
+- **GP NPT runs (job 8816771/8816620):** the barostat is accepted (no refusal);
+  log: *"barostat (fix npt) with activation checkpointing OFF -> virial
+  auto-enabled (pos+cell autograd, GP all-reduced across tiles)"*.
+- **Finite physical pressure (job 8816788, N=8 W=12 tiles, 4096 atoms, AC-off):**
+  3-step NPT completes, step-0 `Press = 10978.5 bar` with `pxx/pyy/pzz` ≈
+  11088 / 10939 / 10908 bar (isotropic, as expected for cubic NaCl), evolving
+  smoothly. A zero/broken virial would report only the kinetic term. **PASS.**
+
+**Caveat:** GP NPT (like single-tile NPT) needs `UMA_AC=off`, so its per-tile
+atom capacity is the AC-off ceiling (~1–2k atoms/tile). N=32 W=12 OOMs under
+AC-off (job 8816620) — large-system NPT would need either more tiles or the
+strain gradient threaded through the checkpoint (future work). NVT/single-point
+retain the full AC-on capacity (N=38 at 12 tiles). DD NPT remains unsupported.
