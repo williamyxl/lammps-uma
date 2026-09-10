@@ -7,7 +7,6 @@
 #PBS -l walltime=01:00:00
 #PBS -j oe
 #PBS -k doe
-set -uo pipefail
 # ---------------------------------------------------------------------------
 # Single-tile, NO activation checkpointing (UMA_AC=off) max-N sweep.
 #
@@ -53,6 +52,7 @@ STEPS=${STEPS:-10}
 RUNROOT=${RUNROOT:-${LU}/scripts/out/noac_sweep}; mkdir -p "${RUNROOT}"
 
 source "${ACTIVATE}"
+set -uo pipefail  # AFTER activation (conda mpivars is not nounset-safe)
 [ -x "${LMP}" ] || { echo "missing lmp: ${LMP}"; exit 1; }
 
 TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")

@@ -7,7 +7,6 @@
 #PBS -l walltime=01:00:00
 #PBS -j oe
 #PBS -k doe
-set -uo pipefail
 # ---------------------------------------------------------------------------
 # Full single-tile UMA_AC=off sweep N=4..12 with the DEFINED items
 # (single-point, 10-step NVT, 10-step NPT), each N using its OWN unpadded 1-tile
@@ -33,6 +32,7 @@ NLIST=${NLIST:-"4 5 6 7 8 9 10 11 12"}
 RUNROOT=${RUNROOT:-${LU}/scripts/out/noac_sweep_full}; mkdir -p "${RUNROOT}" "${ARTROOT}"
 
 source "${HEN}/scripts/activate_fxpu.sh"
+set -uo pipefail  # AFTER activation (conda mpivars is not nounset-safe)
 export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
 [ -x "${LMP}" ] || { echo "missing lmp"; exit 1; }
 TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
