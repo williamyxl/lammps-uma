@@ -1836,14 +1836,19 @@ ceiling from §13).
 | N | atoms | NVT chunk-ON | NVT chunk-OFF | NPT chunk-ON | NPT chunk-OFF |
 |---|---|---|---|---|---|
 | 12 | 13,824 | loop 12.59 s | loop 9.18 s | **refused** | loop 9.20 s |
+| 13 | 17,576 | loop 12.30 s | loop 8.77 s | refused | loop 8.76 s |
+| 14 | 21,952 | loop 12.12 s | loop 8.41 s | refused | loop 8.42 s |
+| 15 | 27,000 | loop 25.69 s | **OOM** | refused | **OOM** |
 | 16 | 32,768 | loop 25.10 s | **OOM** | refused | **OOM** |
+
+(N=13,14,15 from the follow-up job 8817466 to pin the chunk-OFF ceiling exactly.)
 
 **Max N (12 tiles, 10-step, no OOM):**
 
 | | chunking ON (recompute) | chunking OFF (retain) |
 |---|---|---|
-| **NVT** | **N=38** (438,976 atoms; §13 ceiling; N=16 = 25.1 s here) | **N=12** (13,824 atoms; N=16 OOMs) |
-| **NPT** | **refused** (recompute breaks dE/dcell) | **N=12** (13,824 atoms; N=16 OOMs) |
+| **NVT** | **N=38** (438,976 atoms; §13 ceiling; N=16 = 25.1 s here) | **N=14** (21,952 atoms; N=15 OOMs) |
+| **NPT** | **refused** (recompute breaks dE/dcell) | **N=14** (21,952 atoms; N=15 OOMs) |
 
 **Findings:**
 1. **NPT + chunking ON is impossible and correctly refused** — the strain gradient
