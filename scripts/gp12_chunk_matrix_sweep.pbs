@@ -1,0 +1,153 @@
+#!/bin/bash -l
+#PBS -N uma_gp12_mtx
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1:ncpus=208
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# 12-tile max-N sweep across the 2x2 matrix:
+#   {chunking ON (UMA_AC=chunk, recompute), chunking OFF (UMA_AC=off, retain)}
+#   x { 10-step NVT, 10-step NPT }
+# Per N: export the GP W=12 artifact once (12 serial 1-tile traces), then run the
+# four configs and record OOM / Loop time. Reports the max N (no OOM) per cell.
+#
+# Notes:
+#  - NPT requires the virial, which needs chunking OFF (a recomputed chunk breaks
+#    dE/dcell). NPT + chunking ON is therefore EXPECTED to be REFUSED -- that is a
+#    correct measured result, recorded as "refused".
+#  - one artifact per N (unpadded, N-specific); exports dominate wall time, so keep
+#    NLIST short. Default probes the chunk-OFF ceiling region.
+#
+#   qsub -v NLIST="12 16 20 24" scripts/gp12_chunk_matrix_sweep.pbs
+# ---------------------------------------------------------------------------
+module reset 2>/dev/null || true
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LU=${LU:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma}
+HEN=${HEN:-/lus/flare/projects/MatSciAI/xiaoliyan/workdir/hen}
+ENG=${LU}/src/ML-UMA/uma-engine
+LMP=${LMP:-${LU}/build-lmp-xccl/lmp}
+W=12
+STEPS=${STEPS:-10}
+NLIST=${NLIST:-"12 16 20 24"}
+ARTROOT=${ARTROOT:-${LU}/scripts/out/gp12_mtx_arts}
+RUNROOT=${RUNROOT:-${LU}/scripts/out/gp12_mtx_run}; mkdir -p "${ARTROOT}" "${RUNROOT}"
+
+source "${HEN}/scripts/activate_fxpu.sh"
+set -uo pipefail   # AFTER activation
+export PYTHONPATH="${ENG}/python:${HEN}/shim:${HEN}/patches:${HEN}:${PYTHONPATH:-}"
+[ -x "${LMP}" ] || { echo "missing lmp"; exit 1; }
+TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
+ICPX_LIB=$(dirname $(dirname $(which icpx)))/lib
+COMPAT=${RUNROOT}/compat; mkdir -p "${COMPAT}"; ln -sf "${CONDA_PREFIX}/lib/libsycl.so.9" "${COMPAT}/libsycl.so.8"
+SYS_FABRIC=$(ls -d /opt/cray/libfabric/*/lib64 2>/dev/null | sort -V | tail -1)
+export LD_LIBRARY_PATH="${SYS_FABRIC}:${COMPAT}:${CONDA_PREFIX}/lib:${TORCH_LIB}:${ICPX_LIB}:${LD_LIBRARY_PATH}"
+export ZE_FLAT_DEVICE_HIERARCHY=FLAT HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
+export UMA_CHECKPOINT=${UMA_CKPT:-${HEN}/uma-cache/uma-s-1p2.pt}
+export UMA_CKPT="${UMA_CHECKPOINT}" UMA_TASK=omat
+export FXPU_WIGNER_PREP_CHUNK=65536 FXPU_WIGNER_PREP_CHUNK_MODE=both UMA_EXPORT_CELL_LIST=1
+export EDGE_AC_CHUNK=${EDGE_AC_CHUNK:-65536}
+
+gen_data() { python - "$1" "$2" <<'PY'
+import sys, numpy as np
+N=int(sys.argv[1]); out=sys.argv[2]; a=5.64; rng=np.random.default_rng(0)
+base=np.array([[0,0,0],[0.5,0.5,0],[0.5,0,0.5],[0,0.5,0.5]])
+Na=[];Cl=[]
+for i in range(N):
+ for j in range(N):
+  for k in range(N):
+   o=np.array([i,j,k])
+   for b in base:
+    Na.append((o+b)*a); Cl.append((o+b+np.array([0.5,0,0]))*a)
+pos=np.array(Na+Cl); typ=[1]*len(Na)+[2]*len(Cl); pos+=rng.normal(0,0.05,pos.shape); L=N*a
+with open(out,'w') as f:
+ f.write(f"NaCl {N}\n\n{len(pos)} atoms\n2 atom types\n0 {L} xlo xhi\n0 {L} ylo yhi\n0 {L} zlo zhi\n\nMasses\n\n1 22.989769\n2 35.453\n\nAtoms\n\n")
+ for idx,(p,t) in enumerate(zip(pos,typ),1): f.write(f"{idx} {t} {p[0]:.6f} {p[1]:.6f} {p[2]:.6f}\n")
+PY
+}
+write_in() { local MODE=$1 DATA=$2 ST=$3 OUT=$4 ART=$5
+  cat > "${OUT}" <<EOF
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+read_data       ${DATA}
+mass            1 22.989769
+mass            2 35.453
+pair_style      uma precision double devices 1
+pair_coeff      * * ${ART} Na Cl
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+timestep        0.001
+velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
+EOF
+  if [ "${MODE}" = nvt ]; then echo "fix 1 all nvt temp 300.0 300.0 0.1" >> "${OUT}"
+  else echo "fix 1 all npt temp 300.0 300.0 0.1 iso 1.0 1.0 1.0" >> "${OUT}"; fi
+  echo "thermo 1
+thermo_style custom step temp pe etotal press
+thermo_modify norm no
+run ${ST}" >> "${OUT}"
+}
+
+# runtime CCL env for 12-tile runs
+CCL_ENV="CCL_PROCESS_LAUNCHER=none CCL_ATL_TRANSPORT=ofi CCL_ZE_IPC_EXCHANGE=pidfd CCL_WORKER_COUNT=1 FI_PROVIDER=tcp CCL_KVS_MODE=mpi"
+
+run_cfg() {  # $1=mode(nvt|npt) $2=chunk(on|off) $3=NAT $4=RD $5=ART
+  local MODE=$1 CH=$2 NAT=$3 RD=$4 ART=$5
+  local AC="off"; [ "${CH}" = on ] && AC="chunk"
+  rm -f "${RD}/log.lammps"
+  ( cd "${RD}" && env ${CCL_ENV} mpiexec -n ${W} --ppn ${W} gpu_tile_compact.sh \
+      env UMA_ALLOW_LEGACY_METADATA=1 UMA_AC=${AC} UMA_MP_NATOMS=${NAT} \
+      UMA_CHECKPOINT="${UMA_CHECKPOINT}" \
+      "${LMP}" -in "in.${MODE}" > "lmp_${MODE}_${CH}.log" 2>&1 )
+  local loop=$(grep -E "Loop time" "${RD}/lmp_${MODE}_${CH}.log" 2>/dev/null|head -1|awk '{print $4}')
+  if grep -qiE "does not compute the virial|not supported there" "${RD}/lmp_${MODE}_${CH}.log"; then echo "REFUSED"
+  elif grep -qiE "out of memory|OUT_OF_RESOURCES|bad alloc" "${RD}/lmp_${MODE}_${CH}.log"; then echo "OOM"
+  elif [ -n "${loop}" ]; then echo "OK ${loop}"
+  else echo "ERR"; fi
+}
+fmt() { if [[ "$1" == OK* ]]; then set -- $1; echo "loop=${2}s"; else echo "$1"; fi; }
+
+echo "############ 12-tile chunk x ensemble max-N sweep (${STEPS}-step) ############"
+printf "%4s %9s | %-14s %-14s | %-14s %-14s\n" N atoms "NVT chunkON" "NVT chunkOFF" "NPT chunkON" "NPT chunkOFF"
+declare -A MAX
+for k in nvt_on nvt_off npt_on npt_off; do MAX[$k]=0; done
+for N in ${NLIST}; do
+  NAT=$((8*N*N*N)); ART=${ARTROOT}/n${N}_w12
+  # export 12 ranks if missing
+  if [ ! -f "${ART}/w12/r11/model_traced.pt" ]; then
+    for R in $(seq 0 11); do
+      [ -f "${ART}/w12/r${R}/model_traced.pt" ] && continue
+      OUT="${ART}" N_LIST=${N} EXPORT_WORLD=12 EXPORT_RANK=${R} TRACE_DEV=xpu RECONSTRUCT=0 \
+        ZE_AFFINITY_MASK=0 python -u "${ENG}/python/export_blocks_xpu.py" \
+        > "${ART}/exp_r${R}.log" 2>&1
+    done
+  fi
+  NR=$(ls -d ${ART}/w12/r*/model_traced.pt 2>/dev/null | wc -l)
+  if [ "${NR}" -ne 12 ]; then
+    printf "%4d %9d | export FAILED (%d/12 ranks)\n" ${N} ${NAT} ${NR}; continue
+  fi
+  cp -f "${ART}/w12/r0/metadata.json" "${ART}/metadata.json"
+  RD=${RUNROOT}/n${N}; mkdir -p "${RD}"; gen_data ${N} "${RD}/data.nacl"
+  write_in nvt data.nacl ${STEPS} "${RD}/in.nvt" "${ART}"
+  write_in npt data.nacl ${STEPS} "${RD}/in.npt" "${ART}"
+  R_nvt_on=$(run_cfg nvt on  ${NAT} "${RD}" "${ART}")
+  R_nvt_off=$(run_cfg nvt off ${NAT} "${RD}" "${ART}")
+  R_npt_on=$(run_cfg npt on  ${NAT} "${RD}" "${ART}")
+  R_npt_off=$(run_cfg npt off ${NAT} "${RD}" "${ART}")
+  [[ "${R_nvt_on}"  == OK* ]] && MAX[nvt_on]=${N}
+  [[ "${R_nvt_off}" == OK* ]] && MAX[nvt_off]=${N}
+  [[ "${R_npt_on}"  == OK* ]] && MAX[npt_on]=${N}
+  [[ "${R_npt_off}" == OK* ]] && MAX[npt_off]=${N}
+  printf "%4d %9d | %-14s %-14s | %-14s %-14s\n" ${N} ${NAT} \
+    "$(fmt "${R_nvt_on}")" "$(fmt "${R_nvt_off}")" "$(fmt "${R_npt_on}")" "$(fmt "${R_npt_off}")"
+done
+echo
+echo "### MAX N (12 tiles, ${STEPS}-step, no OOM) ###"
+echo "  NVT chunk ON : N=${MAX[nvt_on]}   NVT chunk OFF: N=${MAX[nvt_off]}"
+echo "  NPT chunk ON : N=${MAX[npt_on]} (expect 0: refused)   NPT chunk OFF: N=${MAX[npt_off]}"
+echo "DONE"
