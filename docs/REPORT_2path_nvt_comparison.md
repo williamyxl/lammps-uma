@@ -1869,3 +1869,68 @@ ceiling from §13).
 (N=20/24 not run: N=16 chunk-OFF already OOMs, so they only add chunk-ON points;
 the chunk-ON NVT ceiling N=38 is established in §13. Job hit the 1 h wall after
 N=16.)
+
+## 19. N=14 W=12 full parity + timing (chunk-OFF ceiling / NPT ceiling) (2026-09-16)
+
+N=14 (21,952 atoms) is the 12-tile **chunk-OFF ceiling** (§18) and therefore the
+largest NPT-capable system on one node. §18 recorded only capacity + loop time;
+this section adds the missing **ASE parity, AG=FD, and head-to-head ASE-vs-LAMMPS
+timing** the auditor requested. One geometry on both sides (NaCl a=5.64,
+rattle=0.05, seed=0; `phase6_make_gp_inputs.build_nacl` ≡ hen
+`sweep_ag_fd_nacl_n.build_nacl` — identical na/cl fractional bases + interleaved
+order, so per-atom force comparison is index-aligned). Jobs: 8828709 (parity +
+LAMMPS timing), 8828796 (ASE timing); artifact `gp12_mtx_arts/n14_w12`
+(`metadata_version=2`, 12/12 ranks).
+
+### 19.1 Energy + per-atom force parity vs ASE-GP — PASS
+
+| metric | value | gate |
+|---|---|---|
+| E (LAMMPS) | −74142.191908 eV | |
+| E (ASE-GP) | −74142.191908 eV | |
+| **dE** | **3.28e-8 eV = 1.50e-9 meV/atom** | ≤ 1e-3 meV/atom ✅ |
+| **per-atom max\|dF\|** | **8.83e-14 eV/Å** | ≤ 1e-5 on all atoms ✅ |
+| rms\|dF\| | 1.12e-14 eV/Å | |
+| relL2(F) | 8.28e-14 | |
+| force angle mean/median/p99/max | 0.00 / 0.00 / 0.00 / 0.00 deg | |
+| **cos** | **1.0000000000** | |
+
+Full-system: all 21,952 atoms compared (not sampled). Machine-precision floor,
+same as the validated N=24/N=32 rows (§1 ¶). Compared with
+`scripts/parity_vs_asegp.py`.
+
+### 19.2 AG = FD (autograd vs finite difference, ASE side)
+
+Spot FD on 3 atoms × xyz, eps as in the ladder: **max|AG−FD| = 5.18e-7**
+(tol 1e-5) → **PASS**. Confirms the autograd forces LAMMPS consumes match finite
+differences of the energy. (E0 = −74142.191908 eV, Fmax = 0.733205,
+Frms = 0.135721 eV/Å.)
+
+### 19.3 Timing — ASE vs LAMMPS, W=12, 21,952 atoms
+
+| ensemble | ASE (FairChem GP) | LAMMPS `pair_style uma` |
+|---|---|---|
+| single point | 11.30 s (wall) | Loop ~0; wall 27 s (incl. 12-rank model load) |
+| **NVT 10 steps** | 24.26 s (2.43 s/step) | **12.26 s** chunk-ON · **8.52 s** chunk-OFF (Loop) |
+| **NPT 10 steps** | 49.73 s (4.97 s/step) | **8.54 s** chunk-OFF (Loop) |
+
+**Findings:**
+1. **LAMMPS MD is 2.9–5.8× faster than ASE** at this size: NVT chunk-OFF 8.52 s
+   vs ASE 24.26 s (**2.85×**); NPT chunk-OFF 8.54 s vs ASE 49.73 s (**5.82×**).
+2. **NPT costs the same as NVT at chunk-OFF** in LAMMPS (8.54 vs 8.52 s) — the
+   all-reduced GP virial (§17) is nearly free. In ASE, NPT is ~2× NVT (Berendsen
+   cell coupling recomputes stress).
+3. **Chunk-OFF is ~30% faster than chunk-ON** in LAMMPS NVT (8.52 vs 12.26 s) —
+   consistent with §18: retaining activations avoids the backward recompute.
+4. The LAMMPS single-point "wall 27 s" is dominated by one-time 12-rank model
+   load (Loop ≈ 0); it is not comparable to ASE's 11.3 s SP. Use the MD Loop
+   times for a fair per-step comparison.
+
+**Caveats:** ASE NPT uses Berendsen pressure coupling vs LAMMPS Nosé-Hoover
+(`fix npt`), so the NPT *timings* are comparable but the integrators differ. Both
+NPT runs need chunk-OFF (the virial is incompatible with a recomputed chunk,
+§18). N=15 OOMs (§18), so N=14 is the ceiling for this whole comparison.
+
+**Bottom line:** N=14 W=12 is now parity-validated (dE 1.5e-9 meV/atom, forces at
+the FP64 floor, cos = 1.0), AG=FD-confirmed, and timed against ASE — LAMMPS is
+2.9× (NVT) to 5.8× (NPT) faster at the largest node-local NPT-capable size.
