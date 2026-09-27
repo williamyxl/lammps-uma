@@ -1,4 +1,5 @@
 #include "uma/peer_context.h"
+#include "uma/xccl_peer.h"
 
 #include <cstdlib>
 #include <stdexcept>
@@ -42,6 +43,21 @@ void PeerContext::set_thread_rank(int rank) {
   instance().process_rank_ = rank;
 }
 int PeerContext::thread_rank() { return instance().process_rank_; }
+
+#if defined(UMA_ENGINE_USE_CUDA) && !defined(UMA_ENGINE_USE_XPU)
+// xccl_peer.cpp (XPU-only) defines this; CUDA needs a no-op so mpi_peer_predictor
+// can link UMA_MP_PERF logging.
+namespace kokkos_peer {
+void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
+                          double& ar_ms, int& ar_n) {
+  ag_ms = 0.0;
+  ag_n = 0;
+  ag_bytes = 0.0;
+  ar_ms = 0.0;
+  ar_n = 0;
+}
+}  // namespace kokkos_peer
+#endif
 
 // G9/S7: register_uma_peer_ops() was an empty no-op with 4 call sites that did
 // nothing — deleted (fn + decl + all call sites). The uma_peer TorchScript ops are

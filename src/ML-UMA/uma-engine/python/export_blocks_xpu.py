@@ -66,6 +66,10 @@ Env:
   UMA_TASK   (default omat)
   OUT        artifact dir (writes model_traced.pt + model_block_{i}.pt + metadata.json)
   N_LIST     comma NxNxN size(s) to build the trace sample from (default "2")
+  EXPORT_ATOMS  optional ASE-readable structure (extxyz/xyz). If set, this
+             geometry is traced instead of NaCl NxNxN. Required when the
+             runtime system is denser than rocksalt (e.g. fcc metals) so
+             edge_pad_cap covers the real graph. N_LIST is ignored.
   FXPU_WIGNER_PREP_CHUNK / _MODE  (Wigner-chunk fix knobs)
   RECONSTRUCT (default 1) run the in-process reconstruct==monolithic validation
   EXPORT_WORLD (default 1)  graph-parallel world size W. W==1 = single-tile
@@ -826,7 +830,10 @@ def make_ckpt_forward(backbone, submodules, edge_ac_chunk=None):
 
 
 def main() -> int:
-    ckpt = Path(os.environ.get("UMA_CKPT", str(HEN / "uma-cache" / "uma-s-1p2.pt")))
+    ckpt_s = os.environ.get("UMA_CHECKPOINT") or os.environ.get("UMA_CKPT") or ""
+    if ckpt_s in ("", "0", "1"):
+        ckpt_s = str(HEN / "uma-cache" / "uma-s-1p2.pt")
+    ckpt = Path(ckpt_s)
     task = os.environ.get("UMA_TASK", "omat")
     out_root = Path(os.environ["OUT"]); out_root.mkdir(parents=True, exist_ok=True)
     n_list = [int(x) for x in os.environ.get("N_LIST", "2").split(",") if x.strip()]
@@ -939,7 +946,17 @@ def main() -> int:
         set_export_rank(rank, world)
         restore_gp = patch_fairchem_gp_utils(world, rank)
 
-    atoms = build_nacl(n_trace)
+    export_atoms = os.environ.get("EXPORT_ATOMS", "").strip()
+    if export_atoms:
+        from ase.io import read as ase_read
+        atoms = ase_read(export_atoms)
+        atoms.info.setdefault("charge", 0)
+        atoms.info.setdefault("spin", 0)
+        print(f"EXPORT_ATOMS={export_atoms} natoms={len(atoms)} "
+              f"pbc={atoms.pbc.tolist()} cell={atoms.cell.lengths().tolist()}",
+              flush=True)
+    else:
+        atoms = build_nacl(n_trace)
     nat = len(atoms)
     s = settings_for()
     sample = atoms_to_atomic_data(atoms, task_name=task, settings=s)
