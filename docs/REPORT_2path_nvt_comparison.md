@@ -1934,3 +1934,38 @@ NPT runs need chunk-OFF (the virial is incompatible with a recomputed chunk,
 **Bottom line:** N=14 W=12 is now parity-validated (dE 1.5e-9 meV/atom, forces at
 the FP64 floor, cos = 1.0), AG=FD-confirmed, and timed against ASE — LAMMPS is
 2.9× (NVT) to 5.8× (NPT) faster at the largest node-local NPT-capable size.
+
+## 20. N=6 NPT strong scaling — W = 1, 2, 4, 6, 8, 10, 12 (2026-09-27)
+
+NaCl N=6 (1,728 atoms; a=5.64 Å, rattle 0.05 Å, seed 0), 10-step NPT
+(`fix npt` 300 K, iso 1 bar, dt=1 fs), `UMA_AC=off` (virial requires retained
+activations, §16.1/§17), one Aurora node. W=1 reuses
+`scripts/out/opt2/n6_chunk65536_1tile`; W>1 uses per-rank GP artifacts
+(`EDGE_AC_CHUNK=65536`) under `scripts/out/npt_scale_n6/arts`. Job **8873852**,
+`scripts/npt_scale_n6.pbs`.
+
+**Loop time** is the 10-step MD compute (excludes cold model load) and is the
+scaling metric, same convention as §5. Wall includes the one-time load and stays
+~20 s at every W. Efficiency = (W=1 Loop / W) / Loop × 100%.
+
+| W (tiles) | atoms/tile | Loop | wall | vs W=1 | eff% |
+|--:|--:|--:|--:|--:|--:|
+| 1 | 1,728 | **5.03 s** | 20 s | 1.00× | 100 |
+| 2 | 864 | 8.86 s | 19 s | 0.57× | 28 |
+| 4 | 432 | 9.81 s | 19 s | 0.51× | 13 |
+| 6 | 288 | 10.10 s | 20 s | 0.50× | 8 |
+| 8 | 216 | 10.27 s | 20 s | 0.49× | 6 |
+| 10 | 172.8 | 10.38 s | 21 s | 0.49× | 5 |
+| 12 | 144 | 10.54 s | 22 s | 0.48× | 4 |
+
+(Exact Loop: 5.0338 / 8.8613 / 9.8064 / 10.1004 / 10.273 / 10.3758 / 10.5397 s.)
+
+Step-0 and step-10 thermo are identical across all seven W, to the printed
+digits: step-0 PE **−5836.6833 eV**, Press **10948.462 bar**; step-10 PE
+**−5833.0042 eV**, Press **11056.701 bar**, T = 282.49068 K. The W=1 Loop
+(5.03 s) matches the earlier single-tile N=6 NPT (4.92 s, §16.1, job 8816402).
+
+**Finding:** one tile is fastest. Loop rises 5.03 → 10.54 s from W=1 to W=12.
+N=6 is far below the size where graph-parallel pays off (§5 saturates past W=6
+already at N=16): each extra tile adds an XCCL all-reduce on a shard of only a
+few hundred atoms, so the run gets slower. Use W=1 for this cell.
