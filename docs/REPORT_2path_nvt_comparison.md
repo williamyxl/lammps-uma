@@ -1969,3 +1969,50 @@ digits: step-0 PE **−5836.6833 eV**, Press **10948.462 bar**; step-10 PE
 N=6 is far below the size where graph-parallel pays off (§5 saturates past W=6
 already at N=16): each extra tile adds an XCCL all-reduce on a shard of only a
 few hundred atoms, so the run gets slower. Use W=1 for this cell.
+
+## 21. W=2 NPT max-N, then N=7 scaling — W = 2, 4, 6, 8, 10, 12 (2026-09-27)
+
+Two tiles of one GPU Max 1550 (FLAT: `gpu_tile_compact` ranks 0 and 1 land on
+the two 64 GB stacks of GPU 0; they are not one 128 GB pool). Same NaCl and
+10-step NPT as §20 (`UMA_AC=off`, `fix npt` 300 K, iso 1 bar, dt=1 fs). Per-N
+GP artifacts (`EDGE_AC_CHUNK=65536`) under `scripts/out/npt_w2_sweep/n{N}`.
+Job **8874000**, `scripts/npt_w2_sweep_scale.pbs`. The sweep stops at the first
+failure, so N=9–12 were not run.
+
+### 21.1 Max N on W=2
+
+| N | atoms | atoms/tile | 10-step NPT |
+|--:|--:|--:|--:|
+| **7** | **2,744** | **1,372** | **Loop 7.81 s** (wall 16 s) |
+| 8 | 4,096 | 2,048 | **OOM** (wall 46 s) |
+
+**Max N on two tiles = N=7 (2,744 atoms).** 1,372 atoms/tile is under the
+12-tile AC-off fit (1,829 atoms/tile at N=14, §18); 2,048 atoms/tile is the
+first size past that fit and it OOMs, consistent with the N=15 W=12 OOM
+(2,250 atoms/tile).
+
+### 21.2 Strong scaling of N=7
+
+N=7 (2,744 atoms), 10-step NPT. Loop is the scaling metric (§5, §20).
+Efficiency = (W=2 Loop / (W/2)) / Loop × 100%.
+
+| W (tiles) | atoms/tile | Loop | wall | vs W=2 | eff% |
+|--:|--:|--:|--:|--:|--:|
+| 2 | 1,372 | **7.80 s** | 14 s | 1.00× | 100 |
+| 4 | 686 | 9.34 s | 16 s | 0.83× | 42 |
+| 6 | 457 | 9.82 s | 17 s | 0.79× | 26 |
+| 8 | 343 | 10.07 s | 17 s | 0.77× | 19 |
+| 10 | 274 | 10.23 s | 17 s | 0.76× | 15 |
+| 12 | 229 | 10.41 s | 18 s | 0.75× | 12 |
+
+(Exact Loop: 7.79585 / 9.33644 / 9.81953 / 10.0684 / 10.2251 / 10.4142 s.
+The sweep's own W=2 Loop was 7.80796 s.)
+
+Step-0 and step-10 thermo are identical across all six W, to the printed
+digits: step-0 PE **−9267.4639 eV**, Press **11042.621 bar**; step-10 PE
+**−9262.4752 eV**, Press **11103.34 bar**, T = 284.87999 K.
+
+**Finding:** two tiles is fastest for this cell. Loop rises 7.80 → 10.41 s
+from W=2 to W=12. N=7 is still far below the graph-parallel payoff size (§5,
+§20): extra tiles add an XCCL all-reduce on a few hundred atoms per tile and
+the run gets slower. Use W=2 for this cell.
