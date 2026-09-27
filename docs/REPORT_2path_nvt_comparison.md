@@ -2056,3 +2056,125 @@ every loop is still the pair call. N=9 is 3.4× the Aurora one-tile ceiling
 Aurora ladders only get slower with W. The 8-GPU H200 capacity point (N=18,
 46,656 atoms, Loop 5.50 s, job 22226541) is a different cell and is not a
 point on this ladder.
+
+## 23. Checkpoint-off NPT phase profile — Aurora, one node (2026-09-27)
+
+`UMA_AC=off`, `fix npt`, 10 steps, NaCl (a=5.64 Å, rattle 0.05 Å, seed 0),
+FP64, one Aurora node. Job **8874864**, `scripts/npt_acoff_profile.pbs`,
+`UMA_MP_PERF=1`. Each stamp calls `device_synchronize()` before the host
+clock, so the forward and backward times are the XPU intervals. The same
+line is printed on the single-tile path (`predict_host_extgraph`, which is
+what W=1 actually runs) and on the graph-parallel path. Only rank 0 writes
+the line. Logs: `scripts/out/npt_acoff_profile/`.
+
+Each run emits 11 lines. Line 0 is the pre-loop pair call. Lines 1–10 are
+the Loop. Phase means below are lines 2–10. The in-graph XCCL all-reduce
+sits inside backward, and the in-graph all-gather sits inside the step, so
+the phase columns already sum to the step. Comm fraction is
+(force all-reduce + in-graph all-gather + in-graph all-reduce) / step.
+These Loop times include those syncs, so they sit a few tens of milliseconds
+off the unsynced loops in §20 and §21. §20 and §21 stay the scaling record;
+this section is the phase split.
+
+LAMMPS's own section timer still reads Pair ≈ 100%. The neighbor build and
+the XCCL calls are inside `pair_style uma`.
+
+### 23.1 Per-step breakdown
+
+Milliseconds, mean of loop steps 2–10. NVT is the same artifact and W, and
+is the control for the virial. N=6 W=1 graph time is the host-graph upload
+and the edge pad (LAMMPS owns the neighbor list on that path). W>1 graph
+time is the engine's replicated neighbor build plus the shard pad.
+
+| point | mode | graph | forward | backward | force AR | virial | other | step |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| N=6 W=1 | NPT | 0.87 | 213.63 | 276.95 | 0.00 | 1.16 | 0.66 | 493.27 |
+| N=6 W=1 | NVT | 1.04 | 213.40 | 275.95 | 0.00 | 0.00 | 1.01 | 491.40 |
+| N=6 W=12 | NPT | 8.08 | 246.92 | 789.46 | 0.91 | 0.85 | 0.21 | 1046.43 |
+| N=7 W=2 | NPT | 11.23 | 271.40 | 493.99 | 0.52 | 0.32 | 0.21 | 777.67 |
+| N=7 W=2 | NVT | 11.09 | 272.38 | 492.96 | 0.32 | 0.00 | 0.33 | 777.08 |
+| N=7 W=12 | NPT | 12.15 | 247.95 | 771.50 | 1.04 | 0.32 | 0.22 | 1033.18 |
+| N=14 W=12 | NPT | 121.02 | 277.65 | 431.99 | 1.29 | 0.22 | 0.33 | 832.50 |
+| N=14 W=12 | NVT | 119.50 | 278.32 | 432.16 | 1.31 | 0.00 | 0.34 | 831.63 |
+
+NPT − NVT on the steady step is **+1.9 ms** (N=6 W=1), **+0.6 ms** (N=7 W=2),
+and **+0.9 ms** (N=14 W=12). The virial column itself is 1.16 / 0.32 / 0.22 ms.
+Backward does not grow. The stress all-reduce is a 3×3 and is inside that
+virial column; the force all-reduce is about 1 ms. Neither moves the step.
+
+### 23.2 Efficiency and communication fraction
+
+Efficiency uses the §20 / §21 definitions: N=6 against W=1, N=7 against W=2.
+Comm% and the in-graph all-reduce are the step-2–10 means. The force
+all-reduce is the ~1 ms column in §23.1; almost all of the comm fraction is
+the in-graph all-reduce already counted inside backward.
+
+N=6 (1,728 atoms). Loop is the 10 steps.
+
+| W | atoms/tile | Loop | eff% | comm% | in-graph AR |
+|--:|--:|--:|--:|--:|--:|
+| 1 | 1,728 | 4.96 s | 100 | 0.0 | 0 ms |
+| 2 | 864 | 8.81 s | 28.2 | 62.5 | 549 ms |
+| 4 | 432 | 9.77 s | 12.7 | 66.3 | 645 ms |
+| 6 | 288 | 10.10 s | 8.2 | 67.1 | 675 ms |
+| 8 | 216 | 10.30 s | 6.0 | 67.6 | 693 ms |
+| 10 | 173 | 10.40 s | 4.8 | 67.7 | 701 ms |
+| 12 | 144 | 10.56 s | 3.9 | 67.9 | 707 ms |
+
+(Exact Loop: 4.9625 / 8.8092 / 9.7715 / 10.0982 / 10.2988 / 10.3952 / 10.5578 s.)
+
+N=7 (2,744 atoms). W=1 does not fit (§16).
+
+| W | atoms/tile | Loop | eff% | comm% | in-graph AR |
+|--:|--:|--:|--:|--:|--:|
+| 2 | 1,372 | 7.76 s | 100 | 56.2 | 436 ms |
+| 4 | 686 | 9.33 s | 41.6 | 64.3 | 595 ms |
+| 6 | 457 | 9.81 s | 26.4 | 66.0 | 644 ms |
+| 8 | 343 | 10.10 s | 19.2 | 66.7 | 670 ms |
+| 10 | 274 | 10.24 s | 15.2 | 66.9 | 681 ms |
+| 12 | 229 | 10.43 s | 12.4 | 67.0 | 689 ms |
+
+(Exact Loop: 7.7618 / 9.3316 / 9.8057 / 10.0960 / 10.2354 / 10.4332 s.)
+
+N=14 (21,952 atoms, 1,829/tile) is one W=12 point, Loop **8.49 s**, comm
+**51.2%**, in-graph all-reduce **417 ms**. It is the largest AC-off NPT cell
+that fits on the node (§18) and it is still half communication.
+
+From W=1 to W=2 on N=6 the comm share goes from 0% to 62% and efficiency
+from 100% to 28%. Further tiles push the comm share to 68% and efficiency
+to 4%. N=7 starts already at 56% comm on its fastest width (W=2) and reaches
+67% at W=12. The larger N=14 shard spends 121 ms on the graph and 432 ms in
+backward, of which 417 ms is the all-reduce, so the comm share only falls to
+51%. N=8 OOMs at W=2 (§21) and N=15 OOMs at W=12 (§18), so no AC-off NPT
+cell on this node has a shard big enough to leave that regime.
+
+### 23.3 Model load versus the steady step
+
+Wall is the `mpiexec` time in whole seconds (it includes the model load).
+Load = wall − Loop. The first pair call is outside Loop. Steady is the mean
+`ms_total` of loop steps 2–10. Loop/10 is the scaling metric used in §20 and
+§21; the ~15–22 s walls there are this load plus the 10 steps.
+
+| run | wall | Loop | load | first call | loop step 1 | steady |
+|---|--:|--:|--:|--:|--:|--:|
+| N=6 W=1 | 19 s | 4.96 s | 14.0 s | 7989 ms | 502 ms | 493 ms |
+| N=6 W=2 | 19 s | 8.81 s | 10.2 s | 3520 ms | 866 ms | 882 ms |
+| N=6 W=4 | 19 s | 9.77 s | 9.2 s | 3639 ms | 972 ms | 977 ms |
+| N=6 W=6 | 19 s | 10.10 s | 8.9 s | 3971 ms | 1002 ms | 1010 ms |
+| N=6 W=8 | 21 s | 10.30 s | 10.7 s | 3790 ms | 1023 ms | 1030 ms |
+| N=6 W=10 | 21 s | 10.40 s | 10.6 s | 3931 ms | 1036 ms | 1039 ms |
+| N=6 W=12 | 22 s | 10.56 s | 11.4 s | 4014 ms | 1129 ms | 1046 ms |
+| N=7 W=2 | 17 s | 7.76 s | 9.2 s | 3008 ms | 753 ms | 778 ms |
+| N=7 W=4 | 19 s | 9.33 s | 9.7 s | 3384 ms | 924 ms | 933 ms |
+| N=7 W=6 | 19 s | 9.81 s | 9.2 s | 3825 ms | 971 ms | 980 ms |
+| N=7 W=8 | 20 s | 10.10 s | 9.9 s | 3395 ms | 1001 ms | 1009 ms |
+| N=7 W=10 | 25 s | 10.24 s | 14.8 s | 3490 ms | 1017 ms | 1023 ms |
+| N=7 W=12 | 21 s | 10.43 s | 10.6 s | 3749 ms | 1122 ms | 1033 ms |
+| N=14 W=12 | 20 s | 8.49 s | 11.5 s | 3445 ms | 975 ms | 833 ms |
+
+At the fastest N=6 point the steady step is **0.49 s** and the wall is 19 s,
+of which 14 s is load. The first pair call is 8.0 s and is outside Loop; loop
+step 1 is already within 2% of the steady step on one tile. On W=12 the first
+loop step is still warm (all-gather 90 ms versus ~2 ms later). The N=7 W=10
+wall (25 s) is the one load outlier; its Loop sits on the same curve as its
+neighbors.

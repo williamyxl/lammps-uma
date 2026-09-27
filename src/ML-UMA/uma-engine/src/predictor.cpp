@@ -1,5 +1,6 @@
 #include "uma/predictor.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -36,6 +37,45 @@ void disable_torchscript_texpr_once() {
     return true;
   }();
   (void)done;
+}
+
+// Single-tile phase timers, same MP_PERF line as MpiPeerPredictor so one parser
+// covers W=1 and W>1. All-reduce fields are zero: there is no XCCL on this path.
+bool mp_perf_on() {
+  const char* e = std::getenv("UMA_MP_PERF");
+  return e && e[0] == '1';
+}
+
+struct StepPerf {
+  bool armed = false;
+  bool defer_print = false;
+  bool have_nl = false;
+  std::chrono::steady_clock::time_point t0{}, t_pre{}, t_nl{}, t_graph{},
+      t_fwd{}, t_bwd{}, t_far{}, t_vir{};
+  int64_t n_edges = 0;
+};
+StepPerf g_step;
+
+void print_mp_perf(const torch::Device& dev) {
+  if (!g_step.armed) return;
+  uma::device_synchronize(dev);
+  const auto t_end = std::chrono::steady_clock::now();
+  auto ms = [](auto a, auto b) {
+    return std::chrono::duration<double, std::milli>(b - a).count();
+  };
+  std::cerr << "MP_PERF rank=0 n_edges_shard=" << g_step.n_edges
+            << " ms_graph=" << ms(g_step.t0, g_step.t_graph)
+            << " (ms_pre=" << ms(g_step.t0, g_step.t_pre)
+            << " ms_vesin=" << ms(g_step.t_pre, g_step.t_nl)
+            << " ms_shardpad=" << ms(g_step.t_nl, g_step.t_graph) << ")"
+            << " ms_fwd=" << ms(g_step.t_graph, g_step.t_fwd)
+            << " ms_bwd=" << ms(g_step.t_fwd, g_step.t_bwd)
+            << " ms_force_ar=" << ms(g_step.t_bwd, g_step.t_far)
+            << " ms_virial=" << ms(g_step.t_far, g_step.t_vir)
+            << " ms_total=" << ms(g_step.t0, t_end)
+            << " || ms_allgather=0 (n=0 GB=0) ms_allreduce=0 (n=0)\n"
+            << std::flush;
+  g_step = StepPerf{};
 }
 
 }  // namespace
@@ -309,14 +349,31 @@ Prediction Predictor::predict(const torch::Tensor& pos,
   if (!has_traced_module_) {
     throw std::runtime_error("Predictor: no traced module and no GP runtime");
   }
+  const bool perf = mp_perf_on();
+  if (perf) {
+    const bool defer = g_step.defer_print;
+    g_step = StepPerf{};
+    g_step.armed = true;
+    g_step.defer_print = defer;
+    g_step.t0 = std::chrono::steady_clock::now();
+  }
   stage_inputs(pos, atomic_numbers, cell, pbc, charge, spin);
 
   // FairChem AtomicData wraps into the cell; model + edge offsets share that frame.
   pos_.copy_(wrap_positions_to_cell(pos_, cell_, pbc_));
+  if (perf) device_synchronize(device_);
+  if (perf) g_step.t_pre = std::chrono::steady_clock::now();
 
   rebuild_neighbors();
+  if (perf) device_synchronize(device_);
+  if (perf) {
+    g_step.t_nl = std::chrono::steady_clock::now();
+    g_step.have_nl = true;
+  }
 
-  return predict_body();
+  auto pred = predict_body();
+  if (g_step.armed && !g_step.defer_print) print_mp_perf(device_);
+  return pred;
 }
 
 Prediction Predictor::predict_extgraph(const torch::Tensor& pos,
@@ -352,6 +409,17 @@ Prediction Predictor::predict_extgraph(const torch::Tensor& pos,
   edge_index_ = edge_index.to(device_, torch::kLong).contiguous();
   cell_offsets_ = cell_offsets.to(device_, compute_dtype_).contiguous();
 
+  // LAMMPS pair_style uma feeds this path (engine_build_graph=0). Stamp the
+  // host-graph upload here so predict_body's pad/forward/backward timers keep
+  // the caller's t0 instead of restarting the step clock.
+  if (g_step.armed) {
+    device_synchronize(device_);
+    g_step.t_nl = std::chrono::steady_clock::now();
+    g_step.have_nl = true;
+    if (g_step.t_pre == std::chrono::steady_clock::time_point{})
+      g_step.t_pre = g_step.t0;
+  }
+
   // Intentionally do NOT call wrap_positions_to_cell here: the supplied offsets
   // already encode periodicity against the caller's (unwrapped) coordinates, and
   // edge_distance_vec = pos[j] + offset @ cell - pos[i] is translation-invariant.
@@ -360,6 +428,11 @@ Prediction Predictor::predict_extgraph(const torch::Tensor& pos,
 
 Prediction Predictor::predict_body() {
   const auto dtype = compute_dtype_;
+  const bool perf = g_step.armed;
+  if (perf && !g_step.have_nl) {
+    const auto now = std::chrono::steady_clock::now();
+    g_step.t0 = g_step.t_pre = g_step.t_nl = now;
+  }
   // Clone so the persistent buffer is not marked requires_grad.
   auto pos_grad = pos_.detach().clone().set_requires_grad(true);
 
@@ -429,6 +502,11 @@ Prediction Predictor::predict_body() {
                                        metadata_.edge_pad_atom);
     cell_offsets_run = cell_offsets_run.to(dtype).contiguous();
   }
+  if (perf) {
+    device_synchronize(device_);
+    g_step.t_graph = std::chrono::steady_clock::now();
+    g_step.n_edges = edge_index_run.defined() ? edge_index_run.size(1) : 0;
+  }
 
   std::vector<torch::jit::IValue> args = {pos_used,
                                           atomic_numbers_,
@@ -479,6 +557,10 @@ Prediction Predictor::predict_body() {
       normed_raw = module_.forward(args).toTensor();
     }
   }
+  if (perf) {
+    device_synchronize(device_);
+    g_step.t_fwd = std::chrono::steady_clock::now();
+  }
   auto normed = normed_raw.to(dtype);
   auto energy = denorm_energy(normed, metadata_.normalizer_mean,
                               metadata_.normalizer_rmsd);
@@ -495,6 +577,12 @@ Prediction Predictor::predict_body() {
                                      /*create_graph=*/false,
                                      /*allow_unused=*/want_virial_);
   auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
+  if (perf) {
+    device_synchronize(device_);
+    g_step.t_bwd = std::chrono::steady_clock::now();
+    g_step.t_far = g_step.t_bwd;  // no force all-reduce on one tile
+    g_step.t_vir = g_step.t_far;
+  }
 
   Prediction out;
   out.energy = energy.reshape({-1})[0].item<double>();
@@ -522,6 +610,10 @@ Prediction Predictor::predict_body() {
     out.virial[3] = a[0][1];  // xy
     out.virial[4] = a[0][2];  // xz
     out.virial[5] = a[1][2];  // yz
+    if (perf) {
+      device_synchronize(device_);
+      g_step.t_vir = std::chrono::steady_clock::now();
+    }
   }
   return out;
 }
@@ -555,12 +647,14 @@ Prediction Predictor::predict_host(int n, const float* pos_xyz,
   auto pbc = torch::tensor({pbc_3[0] != 0, pbc_3[1] != 0, pbc_3[2] != 0},
                            torch::kBool);
 
+  if (mp_perf_on()) g_step.defer_print = true;
   auto pred = predict(pos, z, cell, pbc, 0, 0);
   if (forces_out_optional) {
     auto f_cpu = pred.forces.to(torch::kCPU).contiguous();
     std::memcpy(forces_out_optional, f_cpu.data_ptr<double>(),
                 sizeof(double) * static_cast<size_t>(n) * 3);
   }
+  if (g_step.armed) print_mp_perf(device_);
   return pred;
 }
 
@@ -590,12 +684,14 @@ Prediction Predictor::predict_host(int n, const double* pos_xyz,
   auto pbc = torch::tensor({pbc_3[0] != 0, pbc_3[1] != 0, pbc_3[2] != 0},
                            torch::kBool);
 
+  if (mp_perf_on()) g_step.defer_print = true;
   auto pred = predict(pos, z, cell, pbc, 0, 0);
   if (forces_out_optional) {
     auto f_cpu = pred.forces.to(torch::kCPU).contiguous();
     std::memcpy(forces_out_optional, f_cpu.data_ptr<double>(),
                 sizeof(double) * static_cast<size_t>(n) * 3);
   }
+  if (g_step.armed) print_mp_perf(device_);
   return pred;
 }
 
@@ -607,6 +703,17 @@ Prediction Predictor::predict_host_extgraph(
     throw std::runtime_error(
         "predict_host_extgraph: external-graph path is single-tile Predictor "
         "only (GP runtime not yet supported)");
+  }
+  // W=1 NPT goes through this path, not predict_host. ms_pre is the host
+  // packing below; predict_extgraph stamps the device upload as ms_vesin and
+  // predict_body stamps pad / forward / backward / virial. Print after the
+  // force copy so ms_total includes that D2H.
+  const bool perf = mp_perf_on();
+  if (perf) {
+    g_step = StepPerf{};
+    g_step.armed = true;
+    g_step.defer_print = true;
+    g_step.t0 = std::chrono::steady_clock::now();
   }
   // Build pos/z/cell/pbc tensors from raw pointers (mirrors predict_host FP64).
   auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3},
@@ -636,6 +743,10 @@ Prediction Predictor::predict_host_extgraph(
   auto cell_offsets = torch::from_blob(const_cast<double*>(cell_offsets_E3),
                                        {n_edges, 3}, torch::kFloat64)
                           .clone();
+  if (perf) {
+    device_synchronize(device_);
+    g_step.t_pre = std::chrono::steady_clock::now();
+  }
 
   auto pred = predict_extgraph(pos, z, cell, pbc, edge_index, cell_offsets, 0, 0);
   if (forces_out) {
@@ -643,6 +754,7 @@ Prediction Predictor::predict_host_extgraph(
     std::memcpy(forces_out, f_cpu.data_ptr<double>(),
                 sizeof(double) * static_cast<size_t>(n) * 3);
   }
+  if (g_step.armed) print_mp_perf(device_);
   return pred;
 }
 

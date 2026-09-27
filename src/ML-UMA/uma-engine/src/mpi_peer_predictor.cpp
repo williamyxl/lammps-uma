@@ -359,6 +359,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
                   .to(dev, dtype).contiguous();
   auto pbc = torch::tensor({pbc_3[0] != 0, pbc_3[1] != 0, pbc_3[2] != 0},
                            torch::TensorOptions().dtype(torch::kBool).device(dev));
+  if (perf) device_synchronize(dev);
 
   // Build the FULL-system neighbor graph (identical on every rank because the
   // input is tag-ordered). Reuse vesin CUDA NL + FairChem edge flip like the
@@ -409,7 +410,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     pos = wrap_positions_to_cell(pos_cpu, cell_cpu, pbc_cpu).to(dev, dtype).contiguous();
   }
 #endif
-
+  if (perf) device_synchronize(dev);
   auto t_nl = clk::now();
   // Shard the edges by center atom for THIS rank (FairChem partition).
   auto shard = graph_shard::shard_edges(I.edge_index_full, I.cell_offsets_full,
@@ -483,9 +484,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     cell = cell_leaf;   // feed the leaf to graph build + model below
   }
 
-#if defined(UMA_ENGINE_USE_CUDA)
-  if (perf) cudaDeviceSynchronize();
-#endif
+  if (perf) device_synchronize(dev);
   auto t_graph = clk::now();
 
   torch::Tensor normed;
@@ -515,9 +514,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
       normed = I.module.forward(args).toTensor().to(dtype);
     }
   }
-#if defined(UMA_ENGINE_USE_CUDA)
-  if (perf) cudaDeviceSynchronize();
-#endif
+  if (perf) device_synchronize(dev);
   auto t_fwd = clk::now();
   auto energy = denorm_energy(normed, metadata_.normalizer_mean, metadata_.normalizer_rmsd);
   if (I.element_refs.defined()) {
@@ -541,14 +538,21 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   auto grads = torch::autograd::grad({e_for_grad}, grad_inputs, {}, false, false,
                                      /*allow_unused=*/want_virial);
   auto forces = (-grads[0]).to(torch::kFloat64).contiguous();
-#if defined(UMA_ENGINE_USE_CUDA)
-  if (perf) cudaDeviceSynchronize();
-#endif
+  if (perf) device_synchronize(dev);
   auto t_bwd = clk::now();
+  // In-graph collectives only. The force and virial all-reduces below also
+  // increment these counters; snapshot first so they are not double-counted,
+  // then clear again after the virial.
+  double ag_ms = 0, ag_bytes = 0, ar_ms = 0;
+  int ag_n = 0, ar_n = 0;
+  if (perf)
+    ::uma::kokkos_peer::peer_perf_read_reset(ag_ms, ag_n, ag_bytes, ar_ms, ar_n);
 
   // Sum force shards across all W GPUs (NCCL).
   forces = PeerContext::instance().slot().all_reduce(rank_, forces);
   forces = forces.to(torch::kFloat64).contiguous();
+  if (perf) device_synchronize(dev);
+  auto t_far = clk::now();
 
   // GP virial (multi-tile NPT). Each rank differentiated e_for_grad = E/world, so
   // its dE/dpos and dE/dcell are 1/world-scaled SHARD contributions; the force
@@ -576,27 +580,8 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     auto Wc = torch::matmul(cell64.t(), dE_dcell);             // [3,3]
     virial_W = (-0.5) * ((Wp + Wc) + (Wp + Wc).t());           // symmetrize + sign
   }
-#if defined(UMA_ENGINE_USE_CUDA)
-  if (perf) cudaDeviceSynchronize();
-#endif
-  auto t_ar = clk::now();
-  if (perf) {
-    auto ms = [](auto a, auto b) {
-      return std::chrono::duration<double, std::milli>(b - a).count();
-    };
-    double ag_ms=0, ag_bytes=0, ar_ms=0; int ag_n=0, ar_n=0;
-    ::uma::kokkos_peer::peer_perf_read_reset(ag_ms, ag_n, ag_bytes, ar_ms, ar_n);
-    std::cerr << "MP_PERF rank=" << rank_ << " n_edges_shard=" << eidx.size(1)
-              << " ms_graph=" << ms(t0, t_graph)
-              << " (ms_pre=" << ms(t0, t_pre) << " ms_vesin=" << ms(t_pre, t_nl)
-              << " ms_shardpad=" << ms(t_nl, t_graph) << ")"
-              << " ms_fwd=" << ms(t_graph, t_fwd)
-              << " ms_bwd=" << ms(t_fwd, t_bwd) << " ms_force_ar=" << ms(t_bwd, t_ar)
-              << " ms_total=" << ms(t0, t_ar)
-              << " || ms_allgather=" << ag_ms << " (n=" << ag_n
-              << " GB=" << ag_bytes / 1e9 << ") ms_allreduce=" << ar_ms
-              << " (n=" << ar_n << ")\n" << std::flush;
-  }
+  if (perf) device_synchronize(dev);
+  auto t_vir = clk::now();
 
   Prediction out;
   out.energy = energy.reshape({-1})[0].item<double>();
@@ -616,6 +601,35 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     auto f_cpu = forces.to(torch::kCPU).contiguous();
     std::memcpy(forces_out_optional, f_cpu.data_ptr<double>(),
                 sizeof(double) * static_cast<size_t>(n) * 3);
+  }
+  if (perf) device_synchronize(dev);
+  auto t_end = clk::now();
+  if (perf) {
+    auto ms = [](auto a, auto b) {
+      return std::chrono::duration<double, std::milli>(b - a).count();
+    };
+    // Drop the force/virial all-reduces so the next step's in-graph snapshot
+    // starts clean. Their time is already in ms_force_ar / ms_virial.
+    double dump_ag = 0, dump_bytes = 0, dump_ar = 0;
+    int dump_agn = 0, dump_arn = 0;
+    ::uma::kokkos_peer::peer_perf_read_reset(dump_ag, dump_agn, dump_bytes,
+                                             dump_ar, dump_arn);
+    const double ms_virial = want_virial ? ms(t_far, t_vir) : 0.0;
+    // One writer. Concurrent cerr from every rank splices lines in the
+    // mpiexec log, and the parser keeps only rank 0.
+    if (rank_ != 0) return out;
+    std::cerr << "MP_PERF rank=" << rank_ << " n_edges_shard=" << eidx.size(1)
+              << " ms_graph=" << ms(t0, t_graph)
+              << " (ms_pre=" << ms(t0, t_pre) << " ms_vesin=" << ms(t_pre, t_nl)
+              << " ms_shardpad=" << ms(t_nl, t_graph) << ")"
+              << " ms_fwd=" << ms(t_graph, t_fwd)
+              << " ms_bwd=" << ms(t_fwd, t_bwd)
+              << " ms_force_ar=" << ms(t_bwd, t_far)
+              << " ms_virial=" << ms_virial
+              << " ms_total=" << ms(t0, t_end)
+              << " || ms_allgather=" << ag_ms << " (n=" << ag_n
+              << " GB=" << ag_bytes / 1e9 << ") ms_allreduce=" << ar_ms
+              << " (n=" << ar_n << ")\n" << std::flush;
   }
   return out;
 }
