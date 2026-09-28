@@ -2017,7 +2017,7 @@ from W=2 to W=12. N=7 is still far below the graph-parallel payoff size (§5,
 §20): extra tiles add an XCCL all-reduce on a few hundred atoms per tile and
 the run gets slower. Use W=2 for this cell.
 
-## 22. H200 N=9 NPT strong scaling — W = 1, 2, 4 (2026-09-27)
+## 22. H200 N=9 NPT strong scaling — W = 1, 2, 4, 8 (2026-09-27)
 
 Same NaCl recipe and 10-step NPT as §20/§21 (`fix npt` 300 K, iso 1 bar,
 dt=1 fs, a=5.64 Å, rattle 0.05 Å, seed 0), but on Delta `gpuH200x8`
@@ -2026,36 +2026,37 @@ atoms)**, the largest that fits on one H200: job **22457234** passed N=7, 8,
 and 9 and OOMed at N=10 (8,000 atoms). That single-GPU sweep's own N=9 Loop
 was 5.23 s (N=7 5.62 s, N=8 8.42 s; the W=1 time is not monotone in N).
 
-W=1 reuses `scripts/delta/artifacts/nacl9_w1` (single-tile layout). W=2 and
-W=4 use per-rank GP artifacts (`EDGE_AC_CHUNK=65536`, `RECONSTRUCT=0`). Each
-width is its own job, one GPU per rank: **22459062** (W=1, `gpue08`),
-**22459063** (W=2, `gpue05`), **22459064** (W=4, `gpue05`). W=6 was cancelled
-(22459065). W=8 at this cell has not been measured (22459066 still pending).
-Loop time is the scaling metric (§5, §20). Efficiency = (W=1 Loop / W) / Loop
-× 100%.
+W=1 reuses `scripts/delta/artifacts/nacl9_w1` (single-tile layout). W=2, W=4,
+and W=8 use per-rank GP artifacts (`EDGE_AC_CHUNK=65536`, `RECONSTRUCT=0`).
+Each width is its own job, one GPU per rank: **22459062** (W=1, `gpue08`),
+**22459063** (W=2, `gpue05`), **22459064** (W=4, `gpue05`), **22459066**
+(W=8, `gpue02`). W=6 was cancelled (22459065) and is the missing point
+between W=4 and W=8. Loop time is the scaling metric (§5, §20). Efficiency
+= (W=1 Loop / W) / Loop × 100%.
 
 | W (GPUs) | atoms/GPU | Loop | wall | vs W=1 | eff% | pair % |
 |--:|--:|--:|--:|--:|--:|--:|
 | 1 | 5,832 | **5.27 s** | 10.8 s | 1.00× | 100 | 99.9 |
 | 2 | 2,916 | 5.40 s | 13.3 s | 0.98× | 49 | 99.9 |
 | 4 | 1,458 | **2.76 s** | 14.9 s | **1.91×** | 48 | 99.9 |
+| 8 | 729 | 4.12 s | 21.5 s | 1.28× | 16 | 99.9 |
 
-(Exact Loop: 5.27081 / 5.39785 / 2.76407 s. Pair avg: 5.2675 / 5.3936 /
-2.7612 s. Wall: 10.762 / 13.309 / 14.893 s.)
+(Exact Loop: 5.27081 / 5.39785 / 2.76407 / 4.12399 s. Pair avg: 5.2675 /
+5.3936 / 2.7612 / 4.1205 s. Wall: 10.762 / 13.309 / 14.893 / 21.477 s.)
 
-Step-0 and step-10 thermo are identical across all three W, to the printed
+Step-0 and step-10 thermo are identical across all four W, to the printed
 digits: step-0 PE **−19697.653 eV**, Press **10991.6 bar**; step-10 PE
 **−19685.928 eV**, Press **11087.763 bar**, T = 283.40635 K.
 
 **Finding:** this is the first checkpoint-off NPT cell on which adding
-devices shortens the loop. Two H200s do not help (0.98×, the same flat step
-§20 and §21 show on Aurora once the shard is a few hundred to a couple
-thousand atoms). Four H200s are 1.91×, about 48% efficient, and >99.9% of
-every loop is still the pair call. N=9 is 3.4× the Aurora one-tile ceiling
-(N=6, 1,728 atoms, §20) and 2.1× the two-tile ceiling (N=7, §21); those
-Aurora ladders only get slower with W. The 8-GPU H200 capacity point (N=18,
-46,656 atoms, Loop 5.50 s, job 22226541) is a different cell and is not a
-point on this ladder.
+devices shortens the loop, and the minimum is at four GPUs. Two H200s do
+not help (0.98×). Four H200s are 1.91×, about 48% efficient. Eight H200s
+are 4.12 s, only 1.28× W=1 and slower than W=4, at 16% efficiency. More
+than 99.9% of every loop is still the pair call. N=9 is 3.4× the Aurora
+one-tile ceiling (N=6, 1,728 atoms, §20) and 2.1× the two-tile ceiling
+(N=7, §21); those Aurora ladders only get slower with W. The 8-GPU H200
+capacity point (N=18, 46,656 atoms, Loop 5.50 s, job 22226541) is a
+different cell and is not a point on this ladder.
 
 ## 23. Checkpoint-off NPT phase profile — Aurora, one node (2026-09-27)
 
