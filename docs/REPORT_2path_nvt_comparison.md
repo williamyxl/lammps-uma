@@ -2178,3 +2178,43 @@ step 1 is already within 2% of the steady step on one tile. On W=12 the first
 loop step is still warm (all-gather 90 ms versus ~2 ms later). The N=7 W=10
 wall (25 s) is the one load outlier; its Loop sits on the same curve as its
 neighbors.
+
+## 24. W=12 edge cap and peak GiB per tile (2026-09-28)
+
+The four ceiling points from §13 and §18, on one Aurora node, 12 tiles, NaCl
+(a=5.64 Å, rattle 0.05 Å, seed 0), FP64, 10-step NVT. Checkpoint-off is
+`UMA_AC=off`. Checkpoint-on is `UMA_AC=full` (per-chunk, per-block, and
+edge-degree recompute), the C1 path that completes N=38. Jobs **8875993**
+(`scripts/w12_cap_mem.pbs`) and **8876013**
+(`scripts/w12_cap_mem_full.pbs`). Each tile is a 63.98 GiB stack.
+`UMA_MEM_PEAK=1` prints the XPU caching-allocator high-water mark; the table
+is the maximum across the 12 ranks.
+
+| point | artifact | `edge_pad_cap` | chunk | 10-step NVT | peak allocated | peak reserved |
+|---|---|--:|--:|---|--:|--:|
+| checkpoint-off N=14 | `gp12_mtx_arts/n14_w12` | 65,536 | 65,536 | fits, Loop 8.36 s | **37.07 GiB** | 39.40 GiB |
+| checkpoint-off N=15 | `gp12_mtx_arts/n15_w12` | 131,072 | 65,536 | **OOM** | **62.50 GiB** | 63.22 GiB |
+| checkpoint-on N=38 | `opt2/n38_chunk65536` | 1,179,648 | 65,536 | fits, Loop 313.06 s | **28.77 GiB** | 39.70 GiB |
+| checkpoint-on N=40 | `phase6_maxN12/n40_ac` | 1,376,256 | 16,384 | **OOM** | **53.33 GiB** | 60.53 GiB |
+
+`edge_pad_cap` is the same on every rank. N=14 and N=15 are the values
+already stored in those artifacts' `metadata.json`. N=38 and N=40 were
+exported before the field existed, so the cap is the one the current exporter
+would stamp: build the same cell-list graph (`UMA_EXPORT_CELL_LIST=1`, cutoff
+6 Å), shard edges by the rank's node partition, then
+`cap = (E // chunk + 1) * chunk` with that artifact's `edge_ac_chunk`. The
+probe reproduces the stored N=14 and N=15 caps exactly (shard edges
+58,528–58,562 and 72,000–72,001). N=38 shards are 1,170,596–1,170,634 edges
+(chunk 65,536). N=40 shards are 1,365,314–1,365,362 edges (chunk 16,384, the
+chunk baked into `n40_ac`).
+
+N=38's Loop (313.06 s) matches the C1 timing in §13 (313.7 s). N=40 dies on
+the same allocation as job 8780065: a further 4.39 GiB with 53.19 GiB already
+allocated and 3.76 GiB free. N=15 dies with the allocator watermark at
+62.50 GiB allocated and 63.22 GiB reserved (`UR_RESULT_ERROR_OUT_OF_RESOURCES`).
+
+A `UMA_AC=chunk` pass (chunk recompute only, the opt4 memory shape) is a
+different configuration. On this binary it OOMs at N=38 (peak allocated
+60.67 GiB; tried to allocate 3.77 GiB with 54.42 GiB already allocated and
+3.12 GiB free), the same failure recorded for opt4 in §2a. Those rows are
+not the checkpoint-on ceiling.
