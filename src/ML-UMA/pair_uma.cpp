@@ -35,6 +35,10 @@
 #include "uma/mpi_peer_predictor.h"
 #include "uma/halo_context.h"
 
+#include <c10/xpu/XPUCachingAllocator.h>
+#include <cstdio>
+#include <unistd.h>
+
 #ifdef LMP_KOKKOS
 #include "kokkos.h"
 #endif
@@ -246,10 +250,34 @@ void PairUMA::compute(int eflag, int vflag)
   // each model's body lives in its own method so the file is no longer a monolith
   // and adding a fourth path does not grow compute() further. The shared input
   // staging above (pos/z/cell/pbc member buffers) is common to single-tile + GP.
-  if (!mn_active)
-    run_compute_single_tile(eflag, vflag, nlocal, use_f64);
-  else
-    run_compute_gp(eflag, vflag, nlocal, use_f64);
+  // UMA_MEM_PEAK=1: high-water mark of the XPU caching allocator on this
+  // tile (GiB). One write() so the 12 rank lines do not splice. The peak is
+  // cumulative from process start, so the last line is the run peak; the
+  // fail line is what was allocated when the step threw (including OOM).
+  auto mem_peak = [&](const char* tag) {
+    const char* e = std::getenv("UMA_MEM_PEAK");
+    if (!e || e[0] != '1') return;
+    if (c10::xpu::XPUCachingAllocator::get() == nullptr) return;
+    const auto st = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
+    const auto agg = static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
+    const double alloc = static_cast<double>(st.allocated_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+    const double reserved = static_cast<double>(st.reserved_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+    char buf[192];
+    const int n = snprintf(buf, sizeof(buf),
+                           "MEM_PEAK rank=%d tag=%s max_alloc_GiB=%.3f max_reserved_GiB=%.3f\n",
+                           comm->me, tag, alloc, reserved);
+    if (n > 0) ::write(STDERR_FILENO, buf, static_cast<size_t>(n));
+  };
+  try {
+    if (!mn_active)
+      run_compute_single_tile(eflag, vflag, nlocal, use_f64);
+    else
+      run_compute_gp(eflag, vflag, nlocal, use_f64);
+  } catch (const std::exception&) {
+    mem_peak("fail");
+    throw;
+  }
+  mem_peak("step");
 }
 
 /* ----------------------------------------------------------------------
