@@ -2218,3 +2218,31 @@ different configuration. On this binary it OOMs at N=38 (peak allocated
 60.67 GiB; tried to allocate 3.77 GiB with 54.42 GiB already allocated and
 3.12 GiB free), the same failure recorded for opt4 in §2a. Those rows are
 not the checkpoint-on ceiling.
+
+## 25. N=14 checkpoint-off strong scaling (2026-09-29)
+
+NaCl, a=5.64 Å, 21,952 atoms, 300 K, isotropic NPT, 1 bar, 1 fs, Tdamp 0.1 ps,
+Pdamp 1.0 ps, 10 steps, `UMA_AC=off`, one Aurora node. W=12 is job **8874864**
+(§23). W=8 was exported at `EDGE_AC_CHUNK=65536` and run as job **8877473**
+(`scripts/n14_acoff_wscale.pbs`). It dies in the first pair call
+(`UR_RESULT_ERROR_OUT_OF_RESOURCES`), so W=6 and W=4 were not started. The
+edge cap was not raised. N=15 at W=12 was not rerun; its cap is already in
+`gp12_mtx_arts/n15_w12` and the OOM log is `w12_cap_mem/n15_acoff`.
+
+| W | atoms | status | step-0 energy (eV) | step-0 pressure (bar) | loop (s) | edge_pad_cap | perf split |
+|--:|--:|---|--:|--:|--:|--:|---|
+| 12 | 21,952 | fits | −74141.205 | 11032.424 | 8.492 | 65,536 | graph 121.02 ms, fwd 277.65, bwd 431.99, force AR 1.29, virial 0.22; all-gather 6.746×10⁷ B (n=4) |
+| 8 | 21,952 | OOM |  |  |  | 131,072 |  |
+| 6 | 21,952 | not run |  |  |  |  | walk stopped at W=8 |
+| 4 | 21,952 | not run |  |  |  |  | walk stopped at W=8 |
+| 12 | 27,000 (N=15) | OOM |  |  |  | 131,072 | existing log, not rerun |
+
+The W=12 split is the mean of loop steps 2–10 (§23.1). The all-gather byte
+count is `GB × 10⁹` from the rank-0 `MP_PERF` line and is the same on every
+steady step.
+
+`unitrace` (pti-gpu 1.0.1-rc1, rank 0 only, no rebuild) has no FLOP counter.
+On the same N=14 W=12 cell its per-kernel `ComputeBasic` query gives a
+time-weighted XVE active fraction of **44.0%** (stall 30.7%, thread occupancy
+51.1%). `VectorEngine138` counts **6.956×10¹¹** FP64 execution slots
+(34.3% of FP64 execution slots), which is not a flop count.
