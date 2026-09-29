@@ -35,7 +35,11 @@
 #include "uma/mpi_peer_predictor.h"
 #include "uma/halo_context.h"
 
+#if defined(UMA_ENGINE_USE_XPU)
 #include <c10/xpu/XPUCachingAllocator.h>
+#elif defined(UMA_ENGINE_USE_CUDA)
+#include <c10/cuda/CUDACachingAllocator.h>
+#endif
 #include <cstdio>
 #include <unistd.h>
 
@@ -257,11 +261,28 @@ void PairUMA::compute(int eflag, int vflag)
   auto mem_peak = [&](const char* tag) {
     const char* e = std::getenv("UMA_MEM_PEAK");
     if (!e || e[0] != '1') return;
-    if (c10::xpu::XPUCachingAllocator::get() == nullptr) return;
-    const auto st = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
     const auto agg = static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
-    const double alloc = static_cast<double>(st.allocated_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
-    const double reserved = static_cast<double>(st.reserved_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+    double alloc = 0.0;
+    double reserved = 0.0;
+    bool ok = false;
+#if defined(UMA_ENGINE_USE_XPU)
+    if (c10::xpu::XPUCachingAllocator::get() != nullptr) {
+      const auto st = c10::xpu::XPUCachingAllocator::getDeviceStats(0);
+      alloc = static_cast<double>(st.allocated_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+      reserved = static_cast<double>(st.reserved_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+      ok = true;
+    }
+#elif defined(UMA_ENGINE_USE_CUDA)
+    if (c10::cuda::CUDACachingAllocator::get() != nullptr) {
+      const auto st = c10::cuda::CUDACachingAllocator::getDeviceStats(0);
+      alloc = static_cast<double>(st.allocated_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+      reserved = static_cast<double>(st.reserved_bytes[agg].peak) / (1024.0 * 1024.0 * 1024.0);
+      ok = true;
+    }
+#else
+    (void)agg;
+#endif
+    if (!ok) return;
     char buf[192];
     const int n = snprintf(buf, sizeof(buf),
                            "MEM_PEAK rank=%d tag=%s max_alloc_GiB=%.3f max_reserved_GiB=%.3f\n",
