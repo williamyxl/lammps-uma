@@ -543,10 +543,11 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   // In-graph collectives only. The force and virial all-reduces below also
   // increment these counters; snapshot first so they are not double-counted,
   // then clear again after the virial.
-  double ag_ms = 0, ag_bytes = 0, ar_ms = 0;
+  double ag_ms = 0, ag_bytes = 0, ar_ms = 0, ar_bytes = 0;
   int ag_n = 0, ar_n = 0;
   if (perf)
-    ::uma::kokkos_peer::peer_perf_read_reset(ag_ms, ag_n, ag_bytes, ar_ms, ar_n);
+    ::uma::kokkos_peer::peer_perf_read_reset(ag_ms, ag_n, ag_bytes, ar_ms, ar_n,
+                                            ar_bytes);
 
   // Sum force shards across all W GPUs (NCCL).
   forces = PeerContext::instance().slot().all_reduce(rank_, forces);
@@ -610,10 +611,10 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     };
     // Drop the force/virial all-reduces so the next step's in-graph snapshot
     // starts clean. Their time is already in ms_force_ar / ms_virial.
-    double dump_ag = 0, dump_bytes = 0, dump_ar = 0;
+    double dump_ag = 0, dump_bytes = 0, dump_ar = 0, dump_ar_bytes = 0;
     int dump_agn = 0, dump_arn = 0;
     ::uma::kokkos_peer::peer_perf_read_reset(dump_ag, dump_agn, dump_bytes,
-                                             dump_ar, dump_arn);
+                                             dump_ar, dump_arn, dump_ar_bytes);
     const double ms_virial = want_virial ? ms(t_far, t_vir) : 0.0;
     // One writer. Concurrent cerr from every rank splices lines in the
     // mpiexec log, and the parser keeps only rank 0.
@@ -629,7 +630,8 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
               << " ms_total=" << ms(t0, t_end)
               << " || ms_allgather=" << ag_ms << " (n=" << ag_n
               << " GB=" << ag_bytes / 1e9 << ") ms_allreduce=" << ar_ms
-              << " (n=" << ar_n << ")\n" << std::flush;
+              << " (n=" << ar_n << " GB=" << ar_bytes / 1e9 << ")\n"
+              << std::flush;
   }
   return out;
 }

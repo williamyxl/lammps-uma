@@ -52,9 +52,10 @@ class XcclPeer {
 };
 
 // opt6-diag: read + reset per-call collective accumulators (UMA_PEER_PERF).
-// Returns via out params: all_gather ms/count/bytes, all_reduce ms/count.
+// Returns via out params: all_gather ms/count/bytes, all_reduce ms/count/bytes.
+// Byte counts are reduced payloads (numel * element_size), not wire traffic.
 void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
-                          double& ar_ms, int& ar_n);
+                          double& ar_ms, int& ar_n, double& ar_bytes);
 
 }  // namespace kokkos_peer
 }  // namespace uma

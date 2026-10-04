@@ -49,12 +49,13 @@ int PeerContext::thread_rank() { return instance().process_rank_; }
 // can link UMA_MP_PERF logging.
 namespace kokkos_peer {
 void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
-                          double& ar_ms, int& ar_n) {
+                          double& ar_ms, int& ar_n, double& ar_bytes) {
   ag_ms = 0.0;
   ag_n = 0;
   ag_bytes = 0.0;
   ar_ms = 0.0;
   ar_n = 0;
+  ar_bytes = 0.0;
 }
 }  // namespace kokkos_peer
 #endif

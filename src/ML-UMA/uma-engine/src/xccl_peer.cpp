@@ -32,7 +32,7 @@ namespace kokkos_peer {
 // caller (mpi_peer_predictor) reads+resets these each force call to see how much
 // of fwd/bwd is all_gather vs all_reduce vs compute. Wall time incl. the .wait().
 double g_ag_ms = 0.0; int g_ag_n = 0; double g_ag_bytes = 0.0;
-double g_ar_ms = 0.0; int g_ar_n = 0;
+double g_ar_ms = 0.0; int g_ar_n = 0; double g_ar_bytes = 0.0;
 
 namespace {
 inline double now_ms() {
@@ -109,6 +109,7 @@ class XcclPeerImpl final : public XcclPeer {
                    *stream_)
         .wait();
     g_ar_ms += now_ms() - _t0; ++g_ar_n;
+    g_ar_bytes += static_cast<double>(count) * static_cast<double>(work.element_size());
     if (cast) out = out.to(local.scalar_type());
     return out.contiguous();
   }
@@ -158,11 +159,11 @@ std::shared_ptr<XcclPeer> XcclPeer::create(int rank, int world,
 }
 
 void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
-                          double& ar_ms, int& ar_n) {
+                          double& ar_ms, int& ar_n, double& ar_bytes) {
   ag_ms = g_ag_ms; ag_n = g_ag_n; ag_bytes = g_ag_bytes;
-  ar_ms = g_ar_ms; ar_n = g_ar_n;
+  ar_ms = g_ar_ms; ar_n = g_ar_n; ar_bytes = g_ar_bytes;
   g_ag_ms = 0.0; g_ag_n = 0; g_ag_bytes = 0.0;
-  g_ar_ms = 0.0; g_ar_n = 0;
+  g_ar_ms = 0.0; g_ar_n = 0; g_ar_bytes = 0.0;
 }
 
 }  // namespace kokkos_peer
