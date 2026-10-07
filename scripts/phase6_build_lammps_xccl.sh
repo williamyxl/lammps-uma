@@ -12,8 +12,10 @@ LMP_BUILD=${LU}/build-lmp-xccl
 source "${HEN_ROOT}/scripts/activate_fxpu.sh"
 module load cmake 2>/dev/null || true
 
-GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-hgnyg4p
-MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+# Aurora 26.181 replacements for the removed 26.26 hashes gcc-13.4.0-hgnyg4p
+# and mpich-3c70a61-hlkigtk. Same GCC major and the same MPICH commit.
+GCC=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg
+MPICH=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-v2spaxy
 export CC=$GCC/bin/gcc CXX=$GCC/bin/g++
 
 TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
