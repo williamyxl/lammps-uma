@@ -57,6 +57,14 @@ void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
   ar_n = 0;
   ar_bytes = 0.0;
 }
+bool peer_split_enabled() { return false; }
+void peer_split_read_reset(double& ag_wait_ms, double& ag_drain_ms,
+                           double& ar_wait_ms, double& ar_drain_ms) {
+  ag_wait_ms = 0.0;
+  ag_drain_ms = 0.0;
+  ar_wait_ms = 0.0;
+  ar_drain_ms = 0.0;
+}
 }  // namespace kokkos_peer
 #endif
 

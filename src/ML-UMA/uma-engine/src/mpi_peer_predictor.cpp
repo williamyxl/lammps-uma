@@ -548,6 +548,11 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   if (perf)
     ::uma::kokkos_peer::peer_perf_read_reset(ag_ms, ag_n, ag_bytes, ar_ms, ar_n,
                                             ar_bytes);
+  // UMA_PEER_SPLIT=1: rank-wait / local-drain split of the same in-graph calls.
+  double ag_wait = 0, ag_drain = 0, ar_wait = 0, ar_drain = 0;
+  if (perf)
+    ::uma::kokkos_peer::peer_split_read_reset(ag_wait, ag_drain, ar_wait,
+                                              ar_drain);
 
   // Sum force shards across all W GPUs (NCCL).
   forces = PeerContext::instance().slot().all_reduce(rank_, forces);
@@ -615,6 +620,9 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     int dump_agn = 0, dump_arn = 0;
     ::uma::kokkos_peer::peer_perf_read_reset(dump_ag, dump_agn, dump_bytes,
                                              dump_ar, dump_arn, dump_ar_bytes);
+    double tail_ag_wait = 0, tail_ag_drain = 0, tail_ar_wait = 0, tail_ar_drain = 0;
+    ::uma::kokkos_peer::peer_split_read_reset(tail_ag_wait, tail_ag_drain,
+                                              tail_ar_wait, tail_ar_drain);
     const double ms_virial = want_virial ? ms(t_far, t_vir) : 0.0;
     // One writer. Concurrent cerr from every rank splices lines in the
     // mpiexec log, and the parser keeps only rank 0.
@@ -630,8 +638,17 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
               << " ms_total=" << ms(t0, t_end)
               << " || ms_allgather=" << ag_ms << " (n=" << ag_n
               << " GB=" << ag_bytes / 1e9 << ") ms_allreduce=" << ar_ms
-              << " (n=" << ar_n << " GB=" << ar_bytes / 1e9 << ")\n"
-              << std::flush;
+              << " (n=" << ar_n << " GB=" << ar_bytes / 1e9 << ")";
+    // Only with UMA_PEER_SPLIT=1; the default line is byte-identical to before.
+    // ms_allreduce / ms_allgather above are then post-barrier collective time.
+    if (::uma::kokkos_peer::peer_split_enabled()) {
+      std::cerr << " || ms_ar_wait=" << ar_wait << " ms_ag_wait=" << ag_wait
+                << " ms_ar_drain=" << ar_drain << " ms_ag_drain=" << ag_drain
+                << " ms_tail_ar=" << dump_ar << " (n=" << dump_arn << ")"
+                << " ms_tail_ar_wait=" << tail_ar_wait
+                << " ms_tail_ar_drain=" << tail_ar_drain;
+    }
+    std::cerr << "\n" << std::flush;
   }
   return out;
 }

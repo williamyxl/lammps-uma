@@ -57,5 +57,15 @@ class XcclPeer {
 void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
                           double& ar_ms, int& ar_n, double& ar_bytes);
 
+// UMA_PEER_SPLIT=1 diagnostic (default off, no effect when unset). When on, each
+// all_reduce_sum / all_gather first drains the local queue (drain), then runs a
+// barrier (wait), and only then starts the timer that feeds g_ar_ms / g_ag_ms. So
+// ms_allreduce / ms_allgather become post-barrier collective time, and the
+// rank-skew they used to contain moves into the *_wait counters.
+// Read + reset; all zero when the split is off.
+bool peer_split_enabled();
+void peer_split_read_reset(double& ag_wait_ms, double& ag_drain_ms,
+                           double& ar_wait_ms, double& ar_drain_ms);
+
 }  // namespace kokkos_peer
 }  // namespace uma
