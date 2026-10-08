@@ -50,12 +50,19 @@ int PeerContext::thread_rank() { return instance().process_rank_; }
 namespace kokkos_peer {
 void peer_perf_read_reset(double& ag_ms, int& ag_n, double& ag_bytes,
                           double& ar_ms, int& ar_n, double& ar_bytes) {
+#if defined(UMA_ENGINE_USE_NCCL)
+  // CUDA/NCCL: event-timed collectives recorded in shared_peer.h
+  // (UMA_MP_PERF=1 or UMA_PEER_PERF=1). Zeros only when the NCCL transport was
+  // not used, e.g. the shm/cuda_ipc fallbacks, which are not instrumented.
+  nccl_perf_drain(ag_ms, ag_n, ag_bytes, ar_ms, ar_n, ar_bytes);
+#else
   ag_ms = 0.0;
   ag_n = 0;
   ag_bytes = 0.0;
   ar_ms = 0.0;
   ar_n = 0;
   ar_bytes = 0.0;
+#endif
 }
 }  // namespace kokkos_peer
 #endif

@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -40,6 +41,80 @@
 
 namespace uma {
 namespace kokkos_peer {
+
+#if defined(UMA_ENGINE_USE_NCCL) && defined(UMA_ENGINE_USE_CUDA)
+// Collective timing for the CUDA/NCCL transport (UMA_MP_PERF=1 / UMA_PEER_PERF=1).
+// The XPU build times oneCCL calls in xccl_peer.cpp; this is the CUDA counterpart so
+// MP_PERF reports real ms_allgather / ms_allreduce instead of zeros. NCCL calls are
+// asynchronous, so host clocks would only time the launch. Instead a pair of CUDA
+// events brackets each collective on the stream it runs on; the pairs are resolved
+// lazily by nccl_perf_drain (called by peer_perf_read_reset after the perf path has
+// already synchronised the device), so timing adds no per-call sync. The interval
+// is the collective itself, including time spent waiting for slower ranks, which is
+// what the XPU wall-clock stamps also include.
+struct NcclPerfAcc {
+  struct Pending {
+    cudaEvent_t t0;
+    cudaEvent_t t1;
+    bool is_ag;
+    double bytes;
+  };
+  std::mutex mu;
+  std::vector<Pending> pending;
+  bool enabled = false;
+  NcclPerfAcc() {
+    auto on = [](const char* k) {
+      const char* v = std::getenv(k);
+      return v && *v && std::string(v) != "0";
+    };
+    enabled = on("UMA_MP_PERF") || on("UMA_PEER_PERF");
+  }
+};
+inline NcclPerfAcc& nccl_perf() {
+  static NcclPerfAcc acc;
+  return acc;
+}
+inline cudaEvent_t nccl_perf_start(cudaStream_t s) {
+  if (!nccl_perf().enabled) return nullptr;
+  cudaEvent_t e = nullptr;
+  if (cudaEventCreate(&e) != cudaSuccess) return nullptr;
+  cudaEventRecord(e, s);
+  return e;
+}
+inline void nccl_perf_end(cudaEvent_t t0, cudaStream_t s, bool is_ag,
+                          double bytes) {
+  if (!t0) return;
+  cudaEvent_t t1 = nullptr;
+  if (cudaEventCreate(&t1) != cudaSuccess) {
+    cudaEventDestroy(t0);
+    return;
+  }
+  cudaEventRecord(t1, s);
+  std::lock_guard<std::mutex> g(nccl_perf().mu);
+  nccl_perf().pending.push_back({t0, t1, is_ag, bytes});
+}
+// Sum and clear everything recorded since the last drain.
+inline void nccl_perf_drain(double& ag_ms, int& ag_n, double& ag_bytes,
+                            double& ar_ms, int& ar_n, double& ar_bytes) {
+  ag_ms = 0.0; ag_n = 0; ag_bytes = 0.0;
+  ar_ms = 0.0; ar_n = 0; ar_bytes = 0.0;
+  std::vector<NcclPerfAcc::Pending> take;
+  {
+    std::lock_guard<std::mutex> g(nccl_perf().mu);
+    take.swap(nccl_perf().pending);
+  }
+  for (auto& p : take) {
+    float ms = 0.0f;
+    cudaEventSynchronize(p.t1);
+    if (cudaEventElapsedTime(&ms, p.t0, p.t1) == cudaSuccess) {
+      if (p.is_ag) { ag_ms += ms; ++ag_n; ag_bytes += p.bytes; }
+      else         { ar_ms += ms; ++ar_n; ar_bytes += p.bytes; }
+    }
+    cudaEventDestroy(p.t0);
+    cudaEventDestroy(p.t1);
+  }
+}
+#endif
 
 class SharedPeerGatherSlot {
  public:
@@ -728,9 +803,12 @@ class SharedPeerGatherSlot {
     if (gpu.dim() == 0) {
       auto gathered = torch::empty({static_cast<int64_t>(world)}, gpu.options());
       nccl_precede_from_default_();
+      cudaEvent_t pt0 = nccl_perf_start(nccl_cuda_stream_());
       ncclResult_t nr =
           ncclAllGather(gpu.data_ptr(), gathered.data_ptr(), 1,
                         nccl_dtype_(gpu.scalar_type()), comm_, nccl_cuda_stream_());
+      nccl_perf_end(pt0, nccl_cuda_stream_(), /*is_ag=*/true,
+                    static_cast<double>(gpu.element_size()));
       if (nr != ncclSuccess)
         throw std::runtime_error(std::string("ncclAllGather(scalar): ") +
                                  ncclGetErrorString(nr));
@@ -751,9 +829,13 @@ class SharedPeerGatherSlot {
     auto gathered = torch::empty(out_sizes, padded.options());
     const size_t sendcount = static_cast<size_t>(padded.numel());
     nccl_precede_from_default_();
+    cudaEvent_t pt0 = nccl_perf_start(nccl_cuda_stream_());
     ncclResult_t nr =
         ncclAllGather(padded.data_ptr(), gathered.data_ptr(), sendcount,
                       nccl_dtype_(padded.scalar_type()), comm_, nccl_cuda_stream_());
+    nccl_perf_end(pt0, nccl_cuda_stream_(), /*is_ag=*/true,
+                  static_cast<double>(sendcount) *
+                      static_cast<double>(padded.element_size()));
     if (nr != ncclSuccess) {
       throw std::runtime_error(std::string("ncclAllGather: ") +
                                ncclGetErrorString(nr));
@@ -793,11 +875,15 @@ class SharedPeerGatherSlot {
     }
     auto out = torch::empty_like(gpu);
     nccl_precede_from_default_();
+    cudaEvent_t pt0 = nccl_perf_start(nccl_cuda_stream_());
     ncclResult_t nr =
         ncclAllReduce(gpu.data_ptr(), out.data_ptr(),
                       static_cast<size_t>(gpu.numel()),
                       nccl_dtype_(gpu.scalar_type()), ncclSum, comm_,
                       nccl_cuda_stream_());
+    nccl_perf_end(pt0, nccl_cuda_stream_(), /*is_ag=*/false,
+                  static_cast<double>(gpu.numel()) *
+                      static_cast<double>(gpu.element_size()));
     if (nr != ncclSuccess) {
       throw std::runtime_error(std::string("ncclAllReduce: ") +
                                ncclGetErrorString(nr));
