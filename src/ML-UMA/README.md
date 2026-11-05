@@ -37,4 +37,6 @@ Export artifacts with
 
 ## Examples
 
-Start here: [`examples/getting_started/`](examples/getting_started/).
+LAMMPS-tree examples: [`examples/PACKAGES/uma`](../../examples/PACKAGES/uma)
+(NaCl NVT and NPT; artifact path via `-var uma_art`).
+In-package smoke: [`examples/getting_started/`](examples/getting_started/).

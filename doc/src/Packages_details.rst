@@ -2207,7 +2207,7 @@ This package has :ref:`specific installation instructions <ml-uma>` on the
 * ``src/ML-UMA/README.md``
 * ``src/ML-UMA/LICENSE``
 * :doc:`pair_style uma <pair_uma>`
-* ``src/ML-UMA/examples/getting_started``
+* ``examples/PACKAGES/uma``
 
 ----------
 

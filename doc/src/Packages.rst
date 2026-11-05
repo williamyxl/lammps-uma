@@ -381,7 +381,7 @@ whether an extra library is needed to build and use the package:
    * - :ref:`ML-UMA <PKG-ML-UMA>`
      - Universal Models for Atoms (UMA) LibTorch pair style
      - :doc:`pair_style uma <pair_uma>`
-     -
+     - ``PACKAGES/uma``
      - ext
    * - :ref:`MOFFF <PKG-MOFFF>`
      - styles for `MOF-FF <MOFplus_>`_ force field

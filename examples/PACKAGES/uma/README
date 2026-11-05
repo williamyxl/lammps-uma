@@ -1,0 +1,30 @@
+This directory has short example scripts for pair_style uma (ML-UMA).
+
+UMA model weights are NOT shipped with LAMMPS (FAIR Chemistry License).
+Export a FP64 TorchScript artifact from a user-supplied FairChem checkpoint
+before running. pair_coeff names that artifact directory.
+
+  python src/ML-UMA/uma-engine/python/export_artifact.py \
+    --checkpoint $UMA_CHECKPOINT --dtype float64 --task omat \
+    --output /path/to/uma-s-1p2-omat-f64
+
+Then, from this directory, with LAMMPS built -D PKG_ML-UMA=on:
+
+  lmp -in in.nacl.nvt -var uma_art /path/to/uma-s-1p2-omat-f64
+  lmp -in in.nacl.npt -var uma_art /path/to/uma-s-1p2-omat-f64
+
+in.nacl.nvt
+  NaCl rocksalt 3x3x3 (216 atoms), 10-step NVT at 300 K.
+  pair_style uma precision double, newton off.
+
+in.nacl.npt
+  Same crystal, 10-step NPT. virial auto (the default) enables the
+  strain-gradient virial when the barostat is present; ac must stay off.
+
+Do not launch with -k on or -sf kk. There is no uma/kk style.
+Graph-parallel uses one MPI rank per GPU and devices 1 (the default):
+
+  mpiexec -n 12 lmp -in in.nacl.nvt -var uma_art /path/to/uma-s-1p2-omat-f64
+
+No log.* files are included: the example cannot run in default LAMMPS CI
+without LibTorch and a user artifact.

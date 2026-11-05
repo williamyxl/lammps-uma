@@ -46,6 +46,10 @@ Examples
    pair_coeff * * ${uma_art} Na Cl
    newton off
 
+Example input scripts (NVT and NPT NaCl) are in ``examples/PACKAGES/uma``.
+They require a user-exported TorchScript artifact; UMA weights are not
+shipped with LAMMPS.
+
 Description
 """""""""""
 
