@@ -55,6 +55,7 @@ packages:
    * :ref:`ML-POD <ml-pod>`
    * :ref:`ML-QUIP <ml-quip>`
    * :ref:`ML-RUNNER <ml-runner>`
+   * :ref:`ML-UMA <ml-uma>`
    * :ref:`MOLFILE <molfile>`
    * :ref:`NETCDF <netcdf>`
    * :ref:`OPENMP <openmp>`

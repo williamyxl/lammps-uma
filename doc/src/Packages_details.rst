@@ -89,6 +89,7 @@ gives those details.
    * :ref:`ML-RUNNER <PKG-ML-RUNNER>`
    * :ref:`ML-SNAP <PKG-ML-SNAP>`
    * :ref:`ML-UF3 <PKG-ML-UF3>`
+   * :ref:`ML-UMA <PKG-ML-UMA>`
    * :ref:`MOFFF <PKG-MOFFF>`
    * :ref:`MOLECULE <PKG-MOLECULE>`
    * :ref:`MOLFILE <PKG-MOLFILE>`
@@ -2174,6 +2175,41 @@ Richard Hennig (University of Florida)
 * :doc:`pair_style uf3 <pair_uf3>`
 * ``examples/PACKAGES/uf3``
 * https://github.com/uf3/uf3
+
+----------
+
+.. _PKG-ML-UMA:
+
+ML-UMA package
+--------------
+
+**Contents:**
+
+A :doc:`pair_style uma <pair_uma>` command that evaluates Meta FAIR's
+Universal Models for Atoms (UMA) through a native C++ LibTorch engine.
+This is a GPU pair style, not a Kokkos ``/kk`` variant and not FairChem's
+Python ``fix external`` callback.
+
+LAMMPS loads a user-supplied TorchScript artifact directory at run time.
+UMA model weights are **not** redistributed with this package; they remain
+under the FAIR Chemistry License.  See ``src/ML-UMA/LICENSE``.
+
+**Author:** Xiaoli Yan (Argonne National Laboratory)
+
+**Install:**
+
+This package has :ref:`specific installation instructions <ml-uma>` on the
+:doc:`Build extras <Build_extras>` page.
+
+**Supporting info:**
+
+* ``src/ML-UMA``: filenames -> commands
+* ``src/ML-UMA/README.md``
+* ``src/ML-UMA/LICENSE``
+* :doc:`pair_style uma <pair_uma>`
+* ``src/ML-UMA/examples/getting_started``
+
+----------
 
 .. _PKG-MOFFF:
 

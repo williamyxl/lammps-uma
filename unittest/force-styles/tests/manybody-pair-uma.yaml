@@ -1,0 +1,41 @@
+---
+# pair_style uma force-style stub.
+#
+# UMA TorchScript artifacts and FairChem checkpoints cannot be shipped in the
+# LAMMPS tree (FAIR Chemistry License). Without a user-provided FP64 artifact
+# there is no in-tree gold data to regenerate this YAML.
+#
+# prerequisites: pair uma  -> skip the whole file when ML-UMA is not built.
+# skip_tests: all PairStyle cases until an artifact + regenerated numbers exist.
+# Do not treat the placeholder energies/forces below as a numerical reference.
+lammps_version: 30 Sep 2026
+date_generated: Wed Nov  5 00:00:00 2026
+epsilon: 1.0e-6
+tags:
+skip_tests: plain omp eatom_only eatom_only_omp vatom_only vatom_only_omp vatom_only_kokkos kokkos_omp kokkos_omp_full kokkos_serial kokkos_serial_full kokkos_gpu gpu intel opt numdiff numdiff_omp single extract extract_omp
+prerequisites: ! |
+  pair uma
+pre_commands: ! |
+  variable newton_pair delete
+  variable newton_pair index off
+  variable newton_bond delete
+post_commands: ! ""
+input_file: in.manybody
+pair_style: uma precision double
+pair_coeff: ! |
+  * * uma-s-1p2-omat-f64 Na Na Na Na Na Na Na Na
+extract: ! ""
+natoms: 1
+init_vdwl: 0.0
+init_coul: 0
+init_stress: ! |2-
+   0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00
+init_forces: ! |2
+    1  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00
+run_vdwl: 0.0
+run_coul: 0
+run_stress: ! |2-
+   0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00
+run_forces: ! |2
+    1  0.0000000000000000e+00  0.0000000000000000e+00  0.0000000000000000e+00
+...

@@ -214,6 +214,7 @@ atype
 augt
 AuO
 automagically
+autograd
 autoscale
 Auvergne
 Avalos
@@ -1038,6 +1039,7 @@ dyne
 dynes
 dynmat
 Dyre
+Dzamba
 Dzyaloshinskii
 Eaa
 Eaat
@@ -1253,6 +1255,7 @@ facesets
 factorizable
 factorizations
 Fahrenberger
+FairChem
 Falk
 Faken
 Farago
@@ -1737,6 +1740,7 @@ Huepe
 Huetter
 Hugonio
 hugoniostat
+Hugging
 Hugoniostat
 Hugoniot
 Hura
@@ -2231,6 +2235,7 @@ libjpeg
 libkim
 liblammps
 Liblammps
+LibTorch
 liblink
 libmeam
 libmessage
@@ -3084,6 +3089,7 @@ omegaDD
 omegax
 omegay
 omegaz
+omat
 Omelyan
 omp
 OMP
@@ -4279,6 +4285,7 @@ topologies
 Toporov
 Torder
 Torino
+TorchScript
 torsions
 Tosi
 Toukmaji
@@ -4389,6 +4396,8 @@ uloop
 ulsph
 Ultrafast
 uMech
+uma
+UMA
 Umbanhowar
 umin
 Umin

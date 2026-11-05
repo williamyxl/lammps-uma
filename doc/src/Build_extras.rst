@@ -58,6 +58,7 @@ This is the list of packages that may require additional steps.
    * :ref:`ML-POD <ml-pod>`
    * :ref:`ML-QUIP <ml-quip>`
    * :ref:`ML-RUNNER <ml-runner>`
+   * :ref:`ML-UMA <ml-uma>`
    * :ref:`MOLFILE <molfile>`
    * :ref:`NETCDF <netcdf>`
    * :ref:`OPENMP <openmp>`
@@ -1818,6 +1819,46 @@ pre-compiled version already present on your system.
    * - ``FFT_FFTW_THREADS``
      - Use multi-threaded FFTW
      - ``on``
+
+----------
+
+.. _ml-uma:
+
+ML-UMA package
+--------------
+
+The ML-UMA package provides :doc:`pair_style uma <pair_uma>`.  It links
+against a vendored LibTorch engine in ``src/ML-UMA/uma-engine`` and
+requires an installed PyTorch / LibTorch that CMake can find via
+``find_package(Torch)``.
+
+UMA model weights are **not** downloaded or shipped.  Export a FP64
+TorchScript artifact from a user-supplied FairChem checkpoint with
+``src/ML-UMA/uma-engine/python/export_artifact.py`` before running.
+
+.. tabs::
+
+   .. tab:: CMake build
+
+      .. code-block:: bash
+
+         -D PKG_ML-UMA=on                # enable the package
+         -D UMA_ENGINE_USE_XPU=value     # off (default, CUDA) or on (Intel XPU)
+         -D UMA_ENGINE_ROOT=path         # optional; default src/ML-UMA/uma-engine
+
+      Point CMake at LibTorch, for example by adding the prefix printed by
+      ``python -c "import torch; print(torch.utils.cmake_prefix_path)"`` to
+      ``CMAKE_PREFIX_PATH``.
+
+      Default GPU backend is CUDA.  Set ``UMA_ENGINE_USE_XPU=on`` for Intel
+      GPU (for example Aurora).  Do not enable the KOKKOS package for this
+      pair style; multi-tile runs use MPI ranks (one device per rank), not
+      ``lmp -k on -sf kk``.
+
+   .. tab:: Traditional make
+
+      The ML-UMA package does not support the traditional make build.
+      You need to build LAMMPS with CMake.
 
 ----------
 

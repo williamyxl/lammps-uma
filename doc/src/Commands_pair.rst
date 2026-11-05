@@ -330,6 +330,7 @@ parenthesis: g = GPU, i = INTEL, k = KOKKOS, o = OPENMP, t = OPT.
    * :doc:`tri/lj (o) <pair_tri_lj>`
    * :doc:`ufm (gkot) <pair_ufm>`
    * :doc:`uf3 (ko) <pair_uf3>`
+   * :doc:`uma <pair_uma>`
    * :doc:`vashishta (gko) <pair_vashishta>`
    * :doc:`vashishta/table (ko) <pair_vashishta>`
    * :doc:`wf/cut (ko) <pair_wf_cut>`

@@ -423,6 +423,7 @@ accelerated styles exist.
 * :doc:`tri/lj <pair_tri_lj>` - LJ potential between triangles
 * :doc:`ufm <pair_ufm>` -
 * :doc:`uf3 <pair_uf3>` - UF3 machine-learning potential
+* :doc:`uma <pair_uma>` - Universal Models for Atoms (UMA) machine-learning potential
 * :doc:`vashishta <pair_vashishta>` - Vashishta 2-body and 3-body potential
 * :doc:`vashishta/table <pair_vashishta>` -
 * :doc:`wf/cut <pair_wf_cut>` - Wang-Frenkel Potential for short-ranged interactions
