@@ -1,0 +1,33 @@
+ML-UMA pair style and uma-engine
+================================
+
+The C++ pair style (`pair_uma.cpp`, `pair_uma.h`) and the uma-engine library
+are contributed to LAMMPS and are distributed under the GNU General Public
+License version 2, the same license as LAMMPS itself.
+
+  Contributing author: Xiaoli Yan, Argonne National Laboratory (xyan11@anl.gov)
+
+This package **does not redistribute** FairChem UMA model weights. At run time
+LAMMPS loads a user-supplied TorchScript artifact directory (`pair_coeff`).
+Export scripts may read a user-supplied FairChem checkpoint file
+(`UMA_CHECKPOINT`). Those files remain under Meta / FairChem's own terms.
+
+Third-party code vendored here
+------------------------------
+
+* `uma-engine/third_party/vesin/` — BSD-3-Clause (Guillaume Fraux). See
+  `uma-engine/third_party/vesin/LICENSE`.
+* `uma-engine/third_party/nlohmann/json.hpp` — MIT (nlohmann).
+* `uma-engine/third_party/nccl/include/nccl.h` — NVIDIA NCCL header. Use is
+  subject to the NCCL license shipped with the CUDA toolkit; prefer the
+  toolkit header when building with CUDA.
+
+Dependencies not shipped
+------------------------
+
+* LibTorch / PyTorch — BSD-style license (separate install).
+* fairchem-core (export / optional Python GP worker only) — MIT.
+* FairChem UMA checkpoints (`facebook/UMA` on Hugging Face, e.g. uma-s-1p2.pt)
+  — gated **FAIR Chemistry License** (commercially permissive, separate from
+  FairChem's MIT software license; geographic / acceptable-use restrictions).
+  Not part of this source tree. Users must accept those terms themselves.

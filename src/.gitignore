@@ -248,6 +248,8 @@
 
 /pair_uf3.cpp
 /pair_uf3.h
+/pair_uma.cpp
+/pair_uma.h
 /uf3_bspline_basis2.cpp
 /uf3_bspline_basis2.h
 /uf3_bspline_basis3.cpp

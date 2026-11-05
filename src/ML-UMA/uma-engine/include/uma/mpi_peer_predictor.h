@@ -1,0 +1,83 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include <torch/script.h>
+#include <torch/torch.h>
+
+#include "uma/metadata.h"
+#include "uma/predictor.h"
+
+namespace uma {
+
+/// In-process edge-parallel UMA peer for MULTI-NODE (one per MPI rank).
+///
+/// Unlike LibtorchMpRuntime (which forks W local workers and moves geometry
+/// through /dev/shm -- single node only), this class IS one peer: the calling
+/// MPI rank. It loads this rank's shard (model_mp_w{W}_n{N}_r{R}.pt), builds the
+/// full-system neighbor graph, evaluates its 1/W edge shard, and force-all-reduces
+/// across all W GPUs via NCCL bootstrapped over MPI (init_nccl_external).
+///
+/// Memory is ~O(N/W): the point of the multi-node path. Every rank passes the
+/// SAME tag-ordered global system in; forces come back fully reduced on rank 0
+/// (and, since all_reduce is symmetric, on every rank).
+class MpiPeerPredictor {
+ public:
+  /// Collective across all W ranks (each calls ncclCommInitRank). The NCCL
+  /// unique id must have been generated on rank 0 and MPI_Bcast to every rank
+  /// BEFORE calling this (nccl_unique_id points at unique_id_bytes() bytes).
+  // P7.1 (audit rev 26 §G.18.6 / A8): comm_f is a Fortran MPI handle
+  // (MPI_Comm_c2f) for the XCCL KVS rendezvous; 0 = MPI_COMM_WORLD (historical
+  // default). Pass the LAMMPS `world` so -partition / library / MDI bootstrap on
+  // the correct communicator. Ignored on the NCCL path (id already broadcast).
+  static std::unique_ptr<MpiPeerPredictor> create(
+      const std::string& artifact_dir, const ArtifactMetadata& metadata,
+      int world, int rank, int device_index, const void* nccl_unique_id,
+      torch::ScalarType compute_dtype, int comm_f = 0);
+
+  /// Size (bytes) of the opaque NCCL id the caller must broadcast.
+  static size_t nccl_unique_id_bytes();
+  /// Rank 0 fills a unique id for MPI_Bcast (buffer >= nccl_unique_id_bytes()).
+  static void make_nccl_unique_id(void* out);
+
+  ~MpiPeerPredictor();
+  MpiPeerPredictor(const MpiPeerPredictor&) = delete;
+  MpiPeerPredictor& operator=(const MpiPeerPredictor&) = delete;
+
+  /// Full global system in (n atoms, tag-ordered identically on every rank).
+  /// forces_out (optional) receives the fully reduced [n,3] FP64 forces.
+  /// want_virial: also compute the global virial (dE/dpos + dE/dcell, all-reduced
+  /// across ranks) and fill Prediction.virial. Requires activation checkpointing
+  /// OFF (the strain gradient cannot thread a recomputed chunk); the caller
+  /// (pair_uma) guarantees this before requesting it.
+  Prediction predict_host(int n, const double* pos_xyz, const int* atomic_numbers,
+                          const double* cell_3x3, const int* pbc_3,
+                          double* forces_out_optional = nullptr,
+                          bool want_virial = false);
+
+  int world() const { return world_; }
+  int rank() const { return rank_; }
+
+ private:
+  struct Impl;
+  MpiPeerPredictor();
+
+  // P0.3: the actual predict body. predict_host() wraps this in try/catch and a
+  // cross-rank error-flag all_reduce so a failure on one rank becomes a clean
+  // collective abort instead of a hang.
+  Prediction predict_host_body(int n, const double* pos_xyz,
+                               const int* atomic_numbers, const double* cell_3x3,
+                               const int* pbc_3, double* forces_out_optional,
+                               bool want_virial);
+
+  int world_ = 1;
+  int rank_ = 0;
+  int device_index_ = 0;
+  ArtifactMetadata metadata_;
+  torch::ScalarType compute_dtype_ = torch::kFloat64;
+  std::unique_ptr<Impl> impl_;
+};
+
+}  // namespace uma

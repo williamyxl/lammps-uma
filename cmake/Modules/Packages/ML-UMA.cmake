@@ -1,0 +1,53 @@
+# ML-UMA: LibTorch UMA pair style (GPU-persistent engine)
+
+set(UMA_ENGINE_ROOT "${LAMMPS_SOURCE_DIR}/ML-UMA/uma-engine" CACHE PATH
+    "Path to uma-engine (LibTorch UMA inference library)")
+get_filename_component(UMA_ENGINE_ROOT "${UMA_ENGINE_ROOT}" ABSOLUTE)
+
+if(NOT EXISTS "${UMA_ENGINE_ROOT}/CMakeLists.txt")
+  message(FATAL_ERROR
+    "ML-UMA requires uma-engine at ${UMA_ENGINE_ROOT}. "
+    "Set -DUMA_ENGINE_ROOT=/path/to/uma-engine")
+endif()
+
+# Torch from conda uma312: python -c "import torch; print(torch.utils.cmake_prefix_path)"
+# Pip/conda LibTorch often leaves MKL_INCLUDE_DIR unset; stub empty to satisfy INTERFACE.
+if(NOT MKL_INCLUDE_DIR)
+  set(MKL_INCLUDE_DIR "" CACHE PATH "MKL include (unused stub for pip torch)" FORCE)
+endif()
+find_package(Torch REQUIRED)
+
+# Backend select: Intel XPU (Aurora) vs CUDA. Default CUDA unless UMA_ENGINE_USE_XPU=ON.
+option(UMA_ENGINE_USE_XPU "Build ML-UMA for Intel XPU (Aurora)" OFF)
+if(NOT TARGET uma_engine)
+  if(UMA_ENGINE_USE_XPU)
+    set(UMA_ENGINE_USE_XPU ON CACHE BOOL "" FORCE)
+    set(UMA_ENGINE_USE_CUDA OFF CACHE BOOL "" FORCE)
+  else()
+    set(UMA_ENGINE_USE_CUDA ON CACHE BOOL "" FORCE)
+  endif()
+  add_subdirectory(${UMA_ENGINE_ROOT} ${CMAKE_BINARY_DIR}/uma-engine EXCLUDE_FROM_ALL)
+endif()
+
+target_link_libraries(lammps PRIVATE uma_engine ${TORCH_LIBRARIES})
+target_include_directories(lammps PRIVATE ${UMA_ENGINE_ROOT}/include)
+# pair_uma.cpp needs the XPU device branch compiled in.
+if(UMA_ENGINE_USE_XPU)
+  target_compile_definitions(lammps PRIVATE UMA_ENGINE_USE_XPU)
+endif()
+
+# Propagate vesin .so rpath onto the LAMMPS binary when present.
+set(_VESIN_ROOT "${UMA_ENGINE_ROOT}/third_party/vesin")
+if(DEFINED VESIN_ROOT AND VESIN_ROOT)
+  set(_VESIN_ROOT "${VESIN_ROOT}")
+endif()
+if(EXISTS "${_VESIN_ROOT}/lib/libvesin_torch.so")
+  target_link_libraries(lammps PRIVATE "${_VESIN_ROOT}/lib/libvesin_torch.so")
+  set_property(TARGET lammps APPEND PROPERTY BUILD_RPATH "${_VESIN_ROOT}/lib")
+  set_property(TARGET lammps APPEND PROPERTY INSTALL_RPATH "${_VESIN_ROOT}/lib")
+endif()
+
+
+message(STATUS "ML-UMA: linked uma_engine from ${UMA_ENGINE_ROOT}")
+message(STATUS "ML-UMA: Torch from ${TORCH_INSTALL_PREFIX}")
+message(STATUS "ML-UMA: pair_style uma is FP64-only (LibTorch artifact must be float64)")
