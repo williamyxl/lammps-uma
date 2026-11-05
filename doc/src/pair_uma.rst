@@ -14,11 +14,24 @@ Syntax
 
   .. parsed-literal::
 
-     keyword = *precision* or *devices*
+     keyword = *precision* or *devices* or *virial* or *ac* or *decomp* or *neigh*
        *precision* value = *double*
          *double* = FP64 positions, energy, and forces (required)
        *devices* value = N
          N = number of GPU devices for same-node graph-parallel workers (default 1)
+       *virial* value = *auto* or *yes* or *no*
+         *auto* = enable strain-gradient virial when a barostat is present (default)
+         *yes* = always request the virial
+         *no* = never compute the virial (NVE/NVT only)
+       *ac* value = *off* or *chunk* or *block* or *full*
+         *off* = no activation checkpointing (default; required for NPT)
+         *chunk*, *block*, *full* = increasing recompute / lower HBM
+       *decomp* value = *graph* or *spatial*
+         *graph* = graph-parallel over MPI, one device per rank (default)
+         *spatial* = LAMMPS spatial domain decomposition with a halo
+       *neigh* value = *lammps* or *engine*
+         *lammps* = consume the LAMMPS neighbor list (default)
+         *engine* = rebuild the graph inside the engine (debug / triclinic)
 
 Examples
 """"""""
@@ -29,7 +42,7 @@ Examples
    pair_coeff * * /path/to/uma-s-1p2-omat-f64 Na Cl
    newton off
 
-   pair_style uma precision double devices 1
+   pair_style uma precision double devices 1 virial auto ac off decomp graph
    pair_coeff * * ${uma_art} Na Cl
    newton off
 
@@ -89,6 +102,13 @@ The *devices* keyword selects same-node graph-parallel **fork** workers
 rank per GPU** with ``devices 1`` (the default).  Combining ``devices`` >
 1 with more than one MPI rank is an error.
 
+The *ac*, *virial*, *decomp*, and *neigh* keywords replace the former
+``UMA_AC``, ``UMA_COMPUTE_VIRIAL``, ``UMA_DD``, and
+``UMA_ENGINE_BUILD_GRAPH`` environment variables.  If a keyword is
+omitted, a leftover env var is still honored once with a warning.
+Setting the keyword ignores the env var.  Other ``UMA_*`` names are
+undocumented debug/perf knobs and are not pair_style arguments.
+
 Mixing, shift, table, tail correction, restart, rRESPA info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""
 
@@ -118,12 +138,12 @@ requires atom IDs.
 The pair style does not implement ``single()`` and does not yet support
 per-atom energy or per-atom virial.
 
-A global virial is not computed on the default energy/force path.  When
-a barostat is present (for example :doc:`fix npt <fix_nh>`), the pair
-style auto-enables a strain-gradient virial on a single tile and on the
-graph-parallel path, provided activation checkpointing is off.  Spatial
-domain decomposition does not compute a virial; a barostat is refused
-there.
+A global virial is not computed on the default energy/force path.  With
+*virial auto* (the default), a barostat (for example :doc:`fix npt
+<fix_nh>`) auto-enables a strain-gradient virial on a single tile and on
+the graph-parallel path, provided *ac off*.  *decomp spatial* does not
+compute a virial; a barostat is refused there.  *ac chunk/block/full* is
+incompatible with the virial; use NVE/NVT or *ac off*.
 
 Related commands
 """"""""""""""""
@@ -134,7 +154,7 @@ Related commands
 Default
 """""""
 
-precision = double, devices = 1
+precision = double, devices = 1, virial = auto, ac = off, decomp = graph, neigh = lammps
 
 ----------
 

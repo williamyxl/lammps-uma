@@ -828,6 +828,7 @@ deallocation
 debye
 Debye
 Decius
+decomp
 decomposable
 decompositions
 decorrelation
@@ -1640,6 +1641,7 @@ hbcut
 hbn
 hbnewflag
 hbond
+HBM
 hcp
 hdnnp
 HDNNP

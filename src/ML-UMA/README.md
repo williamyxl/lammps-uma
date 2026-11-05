@@ -10,7 +10,7 @@ a Kokkos `/kk` variant and not FairChem's `fix external` Python callback.
 `precision mixed` is refused.
 
 ```lammps
-pair_style uma precision double
+pair_style uma precision double virial auto ac off decomp graph
 pair_coeff * * /path/to/uma-s-1p2-omat-f64 Na Cl
 newton off
 ```

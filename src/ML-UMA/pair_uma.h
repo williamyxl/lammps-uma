@@ -43,6 +43,9 @@ class PairUMA : public Pair {
   // Supported: PRECISION_DOUBLE (FP64 positions, energy, forces).
   // PRECISION_MIXED is retained only so older inputs fail with a clear error.
   enum Precision { PRECISION_MIXED = 0, PRECISION_DOUBLE = 1 };
+  // pair_style keywords (defaults match the former UMA_* getenv defaults).
+  enum VirialMode { VIRIAL_AUTO = 0, VIRIAL_YES = 1, VIRIAL_NO = 2 };
+  enum AcMode { AC_OFF = 0, AC_CHUNK = 1, AC_BLOCK = 2, AC_FULL = 3 };
 
   PairUMA(class LAMMPS *);
   ~PairUMA() override;
@@ -57,6 +60,10 @@ class PairUMA : public Pair {
  protected:
   virtual void allocate();
   void load_predictor();
+  // Resolve pair_style keywords vs deprecated UMA_* getenv, then push the
+  // product knobs into the environment so uma-engine (still getenv-based) sees
+  // the same values. Called from settings() after parsing.
+  void apply_runtime_config(bool virial_kw, bool ac_kw, bool decomp_kw, bool neigh_kw);
   // A5 (audit rev 26 §G.18.6): load_predictor() decomposition. init_mpi_peer()
   // builds the GP-over-MPI peer and returns true when it handled construction
   // (multi-node, non-DD). The single-tile device pick is a file-local helper in
@@ -178,8 +185,10 @@ class PairUMA : public Pair {
   // Externally-built edge graph scratch (single-tile path).
   std::vector<int64_t> ext_edge_index_;   // [2,E] row0=neighbor(jr) row1=center(i)
   std::vector<double> ext_cell_offsets_;   // [E,3] integer image triples (as double)
-  bool engine_build_graph_;                // UMA_ENGINE_BUILD_GRAPH=1 -> old path
-  bool want_virial_flag_;                   // UMA_COMPUTE_VIRIAL=1 -> single-tile stress (P0'.1 step 2)
+  bool engine_build_graph_;                // neigh engine -> old in-engine graph
+  bool want_virial_flag_;                   // virial yes, or virial auto + barostat
+  int virial_mode_;                         // VIRIAL_AUTO / YES / NO
+  int ac_mode_;                             // AC_OFF / CHUNK / BLOCK / FULL
 };
 
 }    // namespace LAMMPS_NS

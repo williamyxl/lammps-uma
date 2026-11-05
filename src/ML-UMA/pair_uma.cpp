@@ -29,7 +29,9 @@
 #include "neighbor.h"
 #include "neigh_request.h"
 #include "neigh_list.h"
+#include "platform.h"
 #include "utils.h"
+#include "fmt/format.h"
 
 #include "uma/predictor.h"
 #include "uma/mpi_peer_predictor.h"
@@ -49,6 +51,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <initializer_list>  // brace-init list in the device-binding loop
 #include <vector>
 
@@ -57,7 +60,7 @@ using namespace LAMMPS_NS;
 // One validated bool-env parse (replaces the ad-hoc `e[0]=='1'&&e[1]=='\0'`
 // idiom scattered across the file). Accepts exactly "0"/"1"; any other value is a
 // config error (warned, treated as the default) rather than silently ignored.
-// See docs/ENV_VARS.md for the full catalog of UMA_* variables.
+// Product knobs are pair_style keywords; getenv is a deprecated fallback.
 static bool uma_env_bool(const char *name, bool dflt, Error *error = nullptr)
 {
   const char *e = std::getenv(name);
@@ -68,6 +71,31 @@ static bool uma_env_bool(const char *name, bool dflt, Error *error = nullptr)
     error->warning(FLERR, "Ignoring non-boolean value '{}' for {} (expected 0 or 1)",
                    e, name);
   return dflt;
+}
+
+static int uma_ac_from_string(const char *e)
+{
+  if (e == nullptr || e[0] == '\0') return PairUMA::AC_OFF;
+  if (strcmp(e, "off") == 0 || strcmp(e, "0") == 0) return PairUMA::AC_OFF;
+  if (strcmp(e, "chunk") == 0) return PairUMA::AC_CHUNK;
+  if (strcmp(e, "block") == 0) return PairUMA::AC_BLOCK;
+  if (strcmp(e, "full") == 0 || strcmp(e, "1") == 0) return PairUMA::AC_FULL;
+  return PairUMA::AC_OFF;
+}
+
+static const char *uma_ac_name(int mode)
+{
+  if (mode == PairUMA::AC_CHUNK) return "chunk";
+  if (mode == PairUMA::AC_BLOCK) return "block";
+  if (mode == PairUMA::AC_FULL) return "full";
+  return "off";
+}
+
+static const char *uma_virial_name(int mode)
+{
+  if (mode == PairUMA::VIRIAL_YES) return "yes";
+  if (mode == PairUMA::VIRIAL_NO) return "no";
+  return "auto";
 }
 
 static const char *const elements_uma[] = {
@@ -113,16 +141,13 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   mn_rank = 0;
   mn_active = false;
   list = nullptr;
-  // A/B switch: UMA_ENGINE_BUILD_GRAPH=1 forces the old path where the engine
-  // rebuilds its own graph (known-good reference). Default consumes the LAMMPS NL.
-  engine_build_graph_ = uma_env_bool("UMA_ENGINE_BUILD_GRAPH", false, error);
-  // Opt-in single-tile virial/stress (strain autograd). Off by
-  // default so ordinary NVE/NVT runs keep the byte-identical energy/force path.
-  want_virial_flag_ = uma_env_bool("UMA_COMPUTE_VIRIAL", false, error);
-  // Multi-node spatial domain decomposition (Phase A, deep halo k=1). Separate
-  // from the mn_active GP-over-MPI path. Each rank owns a LAMMPS subdomain and
-  // uses the single-tile Predictor on its owned+ghost atoms.
-  dd_active_ = uma_env_bool("UMA_DD", false, error);
+  // Product defaults: match former UMA_* getenv defaults. settings() may
+  // override via pair_style keywords (or a deprecated getenv fallback).
+  engine_build_graph_ = false;
+  want_virial_flag_ = false;
+  virial_mode_ = VIRIAL_AUTO;
+  ac_mode_ = AC_OFF;
+  dd_active_ = false;
   dd_edge_count_ = 0;
   halo_buf_ = nullptr;
   halo_per_node_ = 0;
@@ -331,7 +356,7 @@ void PairUMA::run_compute_single_tile(int /*eflag*/, int /*vflag*/, int nlocal,
     else
       error->all(FLERR,
                  "Pair style uma: LAMMPS-neighbor-list path requires precision "
-                 "double; set UMA_ENGINE_BUILD_GRAPH=1 for the mixed path");
+                 "double; use 'neigh engine' only as a debug fallback");
   } else if (use_f64) {
     result = predictor->predict_host(nlocal, pos_buf_d.data(), z_buf.data(), cell_buf, pbc_buf,
                                      force_buf.data());
@@ -491,12 +516,21 @@ void PairUMA::run_compute_gp(int /*eflag*/, int /*vflag*/, int nlocal, bool use_
 void PairUMA::settings(int narg, char **arg)
 {
   // pair_style uma [precision double] [devices N]
+  //               [virial auto|yes|no] [ac off|chunk|block|full]
+  //               [decomp graph|spatial] [neigh lammps|engine]
   // FP64 only. "precision mixed" is refused: the default neighbor-list path
   // requires double, multi-node/DD require double, and FP64 artifacts reject
   // a float32 compute dtype in Predictor::set_compute_dtype().
   precision = PRECISION_DOUBLE;
   num_devices = 1;
   devices_explicit = false;
+  virial_mode_ = VIRIAL_AUTO;
+  ac_mode_ = AC_OFF;
+  dd_active_ = false;
+  engine_build_graph_ = false;
+  want_virial_flag_ = false;
+
+  bool virial_kw = false, ac_kw = false, decomp_kw = false, neigh_kw = false;
 
   int iarg = 0;
   while (iarg < narg) {
@@ -519,6 +553,51 @@ void PairUMA::settings(int narg, char **arg)
         error->all(FLERR, "Illegal pair_style uma devices {}; must be >= 1", num_devices);
       devices_explicit = true;
       iarg += 2;
+    } else if (strcmp(arg[iarg], "virial") == 0) {
+      if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
+      if (strcmp(arg[iarg + 1], "auto") == 0)
+        virial_mode_ = VIRIAL_AUTO;
+      else if (strcmp(arg[iarg + 1], "yes") == 0)
+        virial_mode_ = VIRIAL_YES;
+      else if (strcmp(arg[iarg + 1], "no") == 0)
+        virial_mode_ = VIRIAL_NO;
+      else
+        error->all(FLERR, "Illegal pair_style uma virial {}; expected auto, yes, or no",
+                   arg[iarg + 1]);
+      virial_kw = true;
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "ac") == 0) {
+      if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
+      const int parsed = uma_ac_from_string(arg[iarg + 1]);
+      if (parsed == AC_OFF && strcmp(arg[iarg + 1], "off") != 0 &&
+          strcmp(arg[iarg + 1], "0") != 0)
+        error->all(FLERR, "Illegal pair_style uma ac {}; expected off, chunk, block, or full",
+                   arg[iarg + 1]);
+      ac_mode_ = parsed;
+      ac_kw = true;
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "decomp") == 0) {
+      if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
+      if (strcmp(arg[iarg + 1], "graph") == 0)
+        dd_active_ = false;
+      else if (strcmp(arg[iarg + 1], "spatial") == 0)
+        dd_active_ = true;
+      else
+        error->all(FLERR, "Illegal pair_style uma decomp {}; expected graph or spatial",
+                   arg[iarg + 1]);
+      decomp_kw = true;
+      iarg += 2;
+    } else if (strcmp(arg[iarg], "neigh") == 0) {
+      if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
+      if (strcmp(arg[iarg + 1], "lammps") == 0)
+        engine_build_graph_ = false;
+      else if (strcmp(arg[iarg + 1], "engine") == 0)
+        engine_build_graph_ = true;
+      else
+        error->all(FLERR, "Illegal pair_style uma neigh {}; expected lammps or engine",
+                   arg[iarg + 1]);
+      neigh_kw = true;
+      iarg += 2;
     } else if (strcmp(arg[iarg], "double") == 0) {
       precision = PRECISION_DOUBLE;
       iarg += 1;
@@ -530,6 +609,71 @@ void PairUMA::settings(int narg, char **arg)
       error->all(FLERR, "Illegal pair_style uma command");
     }
   }
+
+  apply_runtime_config(virial_kw, ac_kw, decomp_kw, neigh_kw);
+}
+
+/* ---------------------------------------------------------------------- */
+
+void PairUMA::apply_runtime_config(bool virial_kw, bool ac_kw, bool decomp_kw, bool neigh_kw)
+{
+  // Deprecated getenv fallback when the keyword was omitted. If the keyword
+  // was set, it wins and a leftover UMA_* var is ignored (rank-0 note).
+  auto note = [&](const std::string &msg) {
+    if (comm->me == 0) utils::logmesg(lmp, "WARNING: {}\n", msg);
+  };
+
+  if (!virial_kw) {
+    const char *e = std::getenv("UMA_COMPUTE_VIRIAL");
+    if (e && e[0] != '\0') {
+      if (e[0] == '1' && e[1] == '\0')
+        virial_mode_ = VIRIAL_YES;
+      else if (e[0] == '0' && e[1] == '\0')
+        virial_mode_ = VIRIAL_NO;
+      note("Pair style uma: UMA_COMPUTE_VIRIAL is deprecated; use 'virial auto|yes|no'");
+    }
+  } else if (std::getenv("UMA_COMPUTE_VIRIAL")) {
+    note("Pair style uma: ignoring UMA_COMPUTE_VIRIAL; pair_style keyword virial was set");
+  }
+
+  if (!ac_kw) {
+    const char *e = std::getenv("UMA_AC");
+    if (e && e[0] != '\0') {
+      ac_mode_ = uma_ac_from_string(e);
+      note("Pair style uma: UMA_AC is deprecated; use 'ac off|chunk|block|full'");
+    }
+  } else if (std::getenv("UMA_AC")) {
+    note("Pair style uma: ignoring UMA_AC; pair_style keyword ac was set");
+  }
+
+  if (!decomp_kw) {
+    if (uma_env_bool("UMA_DD", false, error)) {
+      dd_active_ = true;
+      note("Pair style uma: UMA_DD is deprecated; use 'decomp spatial'");
+    }
+  } else if (std::getenv("UMA_DD")) {
+    note("Pair style uma: ignoring UMA_DD; pair_style keyword decomp was set");
+  }
+
+  if (!neigh_kw) {
+    if (uma_env_bool("UMA_ENGINE_BUILD_GRAPH", false, error)) {
+      engine_build_graph_ = true;
+      note("Pair style uma: UMA_ENGINE_BUILD_GRAPH is deprecated; use 'neigh engine'");
+    }
+  } else if (std::getenv("UMA_ENGINE_BUILD_GRAPH")) {
+    note("Pair style uma: ignoring UMA_ENGINE_BUILD_GRAPH; pair_style keyword neigh was set");
+  }
+
+  want_virial_flag_ = (virial_mode_ == VIRIAL_YES);
+
+  // Bridge into uma-engine, which still reads these names via getenv.
+  platform::putenv(fmt::format("UMA_AC={}", uma_ac_name(ac_mode_)));
+  platform::putenv(fmt::format("UMA_DD={}", dd_active_ ? "1" : "0"));
+  platform::putenv(fmt::format("UMA_ENGINE_BUILD_GRAPH={}", engine_build_graph_ ? "1" : "0"));
+  if (virial_mode_ == VIRIAL_AUTO)
+    platform::unsetenv("UMA_COMPUTE_VIRIAL");
+  else
+    platform::putenv(fmt::format("UMA_COMPUTE_VIRIAL={}", virial_mode_ == VIRIAL_YES ? "1" : "0"));
 }
 
 /* ---------------------------------------------------------------------- */
@@ -805,19 +949,15 @@ void PairUMA::init_style()
   if (atom->tag_enable == 0) error->all(FLERR, "Pair style uma requires atom IDs");
   mole_composition_done_ = false;  // re-emit the one-time DD MoLE warning per setup
 
-  // Echo the resolved runtime config once, so a run's log records exactly
-  // which UMA_* flags were active (no more silent config). Full catalog: docs/ENV_VARS.md.
+  // Echo the resolved runtime config once (keywords, not getenv).
   if (comm->me == 0) {
-    const char *ckpt = std::getenv("UMA_CHECKPOINT");
     utils::logmesg(lmp,
-                   "Pair uma config: precision={} engine_build_graph={} dd={} "
-                   "ckpt={} mn_ckpt={} allow_legacy_metadata={} checkpoint={}\n",
-                   (precision == PRECISION_DOUBLE) ? "double" : "mixed",
-                   engine_build_graph_ ? 1 : 0, dd_active_ ? 1 : 0,
-                   uma_env_bool("UMA_CKPT", false) ? 1 : 0,
-                   uma_env_bool("UMA_MN_CKPT", false) ? 1 : 0,
-                   uma_env_bool("UMA_ALLOW_LEGACY_METADATA", false) ? 1 : 0,
-                   ckpt ? ckpt : "(unset)");
+                   "Pair uma config: precision={} devices={} virial={} ac={} "
+                   "decomp={} neigh={}\n",
+                   (precision == PRECISION_DOUBLE) ? "double" : "mixed", num_devices,
+                   uma_virial_name(virial_mode_), uma_ac_name(ac_mode_),
+                   dd_active_ ? "spatial" : "graph",
+                   engine_build_graph_ ? "engine" : "lammps");
   }
 
   // The single-tile virial (pos+cell gradient) is available under
@@ -836,10 +976,7 @@ void PairUMA::init_style()
   // was explicitly turned back on, which is incompatible with the strain grad.
   // The multi-node GP/DD paths still have no virial and still refuse a barostat.
   const bool multinode = (comm->nprocs > 1);
-  const bool ac_on = uma_env_bool("UMA_CKPT", false) ||
-                     (std::getenv("UMA_AC") != nullptr &&
-                      std::string(std::getenv("UMA_AC")) != "off" &&
-                      std::string(std::getenv("UMA_AC")) != "0");
+  const bool ac_on = (ac_mode_ != AC_OFF) || uma_env_bool("UMA_CKPT", false);
   bool barostat_present = false;
   const char *barostat_style = nullptr;
   for (const auto &ifix : modify->get_fix_list()) {
@@ -854,13 +991,15 @@ void PairUMA::init_style()
   // (mpi_peer->predict_host want_virial=true), so a barostat is supported on GP
   // single-node when AC is off. DD still has no virial. Auto-enable on GP too.
   const bool gp_virial_ok = multinode && !dd_active_ && !ac_on;
-  if (barostat_present && !dd_active_ && !want_virial_flag_ && !ac_on) {
-    // single tile OR GP, AC-off, no explicit flag -> auto-enable the virial.
+  if (barostat_present && !dd_active_ && !want_virial_flag_ && !ac_on &&
+      virial_mode_ != VIRIAL_NO) {
+    // single tile OR GP, AC-off, virial auto -> auto-enable the virial.
     want_virial_flag_ = true;
+    platform::putenv("UMA_COMPUTE_VIRIAL=1");
     if (comm->me == 0)
       utils::logmesg(lmp,
           "Pair uma: barostat (fix {}) with activation checkpointing OFF -> "
-          "virial auto-enabled (pos+cell autograd{}). Set UMA_COMPUTE_VIRIAL=0 "
+          "virial auto-enabled (pos+cell autograd{}). Use 'virial no' "
           "to force it off.\n", barostat_style,
           multinode ? ", GP all-reduced across tiles" : "");
   }
@@ -872,14 +1011,23 @@ void PairUMA::init_style()
                  "Pair style uma does not compute the virial on the DD path; "
                  "pressure control (fix {}) is not supported there. Use a single "
                  "tile or the GP path for NPT, or NVE/NVT.", barostat_style);
-    else
-      // AC was explicitly re-enabled: the strain grad cannot thread a recomputed
-      // chunk (single-tile) or the GP checkpoint path, so refuse with the fix.
+    else if (ac_on)
       error->all(FLERR,
                  "Pair style uma: pressure control (fix {}) needs the virial, but "
-                 "activation checkpointing is ON (UMA_AC/UMA_CKPT) which is "
-                 "incompatible with the strain gradient. Unset UMA_AC (default "
-                 "off) so the virial can be computed, or use NVE/NVT.",
+                 "activation checkpointing is ON (ac {}) which is incompatible "
+                 "with the strain gradient. Use 'ac off' (the default) so the "
+                 "virial can be computed, or use NVE/NVT.",
+                 barostat_style, uma_ac_name(ac_mode_));
+    else if (virial_mode_ == VIRIAL_NO)
+      error->all(FLERR,
+                 "Pair style uma: pressure control (fix {}) needs the virial, but "
+                 "'virial no' was set. Use 'virial auto' (the default) or "
+                 "'virial yes', or use NVE/NVT.",
+                 barostat_style);
+    else
+      error->all(FLERR,
+                 "Pair style uma: pressure control (fix {}) is not supported "
+                 "with the current uma settings.",
                  barostat_style);
   }
 
@@ -1022,13 +1170,8 @@ void PairUMA::preflight_memory_check()
     what = "atoms/tile";
   }
 
-  // AC resolution: activation checkpointing now defaults OFF; it
-  // is ON only when the user opts in via UMA_AC (chunk/block/full) or UMA_CKPT=1.
-  // (Legacy UMA_NO_RECOMPUTE forces retain = AC-off, so it counts as off too.)
-  const char *ac_env = std::getenv("UMA_AC");
-  const bool ac_on = uma_env_bool("UMA_CKPT", false) ||
-                     (ac_env != nullptr && std::string(ac_env) != "off" &&
-                      std::string(ac_env) != "0" && std::string(ac_env) != "");
+  // AC resolution: activation checkpointing defaults OFF; opt in with ac chunk|block|full.
+  const bool ac_on = (ac_mode_ != AC_OFF) || uma_env_bool("UMA_CKPT", false);
   const bool ac_off = !ac_on;
   // Measured single-point ceilings (atoms/tile), conservative:
   const double ceil_ac_on = 36000.0;         // ~N=38/12 tiles
@@ -1043,7 +1186,7 @@ void PairUMA::preflight_memory_check()
         per_rank, what,
         ac_off ? "activation-checkpointing-OFF" : "activation-checkpointing-ON",
         ceiling,
-        ac_off ? "enable activation checkpointing (UMA_AC=chunk / UMA_CKPT=1), "
+        ac_off ? "enable activation checkpointing (ac chunk), "
                  "or add more tiles"
                : "add more tiles, or reduce system size");
   }
@@ -1065,7 +1208,7 @@ int64_t PairUMA::build_ext_graph(int nlocal)
   if (domain->triclinic)
     error->all(FLERR,
                "Pair style uma: LAMMPS-neighbor-list path requires an "
-               "orthorhombic box (triclinic==0); set UMA_ENGINE_BUILD_GRAPH=1 "
+               "orthorhombic box (triclinic==0); use 'neigh engine' "
                "to use the engine's own graph for triclinic cells");
 
   double **x = atom->x;
