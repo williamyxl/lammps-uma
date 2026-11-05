@@ -119,13 +119,11 @@ inline void nccl_perf_drain(double& ag_ms, int& ag_n, double& ag_bytes,
 class SharedPeerGatherSlot {
  public:
   static constexpr size_t kMaxBytesPerRank = 256ull * 1024ull * 1024ull;
-  // Transport ids. A7 (audit rev 26 §G.18.6): the numbering has a deliberate gap
-  // at id 3 (a retired shm-bootstrap NCCL variant) — kept reserved rather than
-  // renumbered so any artifact/log that recorded a numeric transport stays
-  // unambiguous. transport_name() below maps every LIVE id; ids 0/1/2 are the
-  // CPU/CUDA transports (exercised by uma_peer_smoke + test_transport_table),
-  // id 4 (XCCL) is the sole XPU production transport. select_transport() never
-  // returns 3.
+  // Transport ids. Id 3 is a retired shm-bootstrap NCCL variant, kept
+  // reserved rather than renumbered so any artifact/log that recorded a
+  // numeric transport stays unambiguous. ids 0/1/2 are the CPU/CUDA
+  // transports; id 4 (XCCL) is the Intel GPU production transport.
+  // select_transport() never returns 3.
   static constexpr int kTransportShm = 0;
   static constexpr int kTransportCudaIpc = 1;
   static constexpr int kTransportNccl = 2;
@@ -227,12 +225,10 @@ class SharedPeerGatherSlot {
     return new SharedPeerGatherSlot(shm, map_bytes, /*owns=*/false);
   }
 
-  // A3/G.5 (audit rev 25): initialise a freshly-allocated (e.g. calloc'd) control
-  // block's pthread sync primitives. A zeroed pthread_mutex_t/cond_t is NOT a
-  // valid initialised object — using or destroying it is UB. Callers that allocate
-  // the Shm themselves (mpi_peer_predictor's XCCL/NCCL path) must call this once
-  // before attach(), so the shm barrier (used on the shm transport, and defensive
-  // on the others) operates on a properly-initialised mutex.
+  // Initialise a freshly-allocated (e.g. calloc'd) control block's pthread
+  // sync primitives. A zeroed pthread_mutex_t/cond_t is not a valid
+  // initialised object. Callers that allocate the Shm themselves
+  // (mpi_peer_predictor's XCCL/NCCL path) must call this once before attach().
   static void init_control_block(Shm* shm) { init_sync_primitives_(shm); }
 
   // Symmetric teardown for a self-allocated control block (see init_control_block):
@@ -247,14 +243,11 @@ class SharedPeerGatherSlot {
   Shm* raw() { return shm_; }
   int transport() const { return shm_ ? shm_->transport : kTransportShm; }
 
-  // A3/G.5 item 3 (audit rev 26 §G.18.6): the slot owns process-shared OS
-  // resources (an mmap segment + pthread primitives when owns_) and remote
-  // CUDA-IPC/NCCL handles. Copying it would double-free those on the second
-  // teardown; there is no sane copy of an mmap-backed control block, so both
-  // copy and move are deleted. Lifetime is single-owner via create()/attach()
-  // (heap) + destroy() (which now routes through the destructor), or via the
-  // destructor directly for a stack instance. This removes the "manual delete
-  // this with hand-inlined cleanup" hazard the ASAN harness guards against.
+  // The slot owns process-shared OS resources (an mmap segment + pthread
+  // primitives when owns_) and remote CUDA-IPC/NCCL handles. Copying it
+  // would double-free those on the second teardown, so copy and move are
+  // deleted. Lifetime is single-owner via create()/attach() + destroy(),
+  // or the destructor for a stack instance.
   SharedPeerGatherSlot(const SharedPeerGatherSlot&) = delete;
   SharedPeerGatherSlot& operator=(const SharedPeerGatherSlot&) = delete;
   SharedPeerGatherSlot(SharedPeerGatherSlot&&) = delete;

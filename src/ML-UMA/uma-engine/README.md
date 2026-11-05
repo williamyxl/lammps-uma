@@ -1,73 +1,41 @@
 # uma-engine — GPU-persistent LibTorch UMA inference
 
-Native C++/CUDA engine for FairChem UMA (`uma-s-1p2`). Vendored under
-`lammps/src/ML-UMA/uma-engine/` and linked by package **ML-UMA**.
+Native C++ engine for FairChem UMA, vendored under
+`src/ML-UMA/uma-engine/` and linked by package **ML-UMA**.
 
-Produces energy and forces from positions. Neighbor list is built on **CPU then
-uploaded** in v1; the TorchScript module and work tensors remain on the GPU
-across MD/minim steps and reuse storage when `N` is fixed.
+Produces energy and forces from positions. Forces are
+`forces = -dE/dpos` via autograd on a TorchScript energy module.
 
-Forces: `forces = -dE/dpos` via `torch::autograd::grad` on a differentiable
-energy TorchScript module (same idea as FairChem `compute_forces`).
-
-**Precision:** production / LAMMPS campaigns use **FP64** artifacts
-(`*-f64`). Mixed / FP32 export is disabled for campaigns.
+**Precision:** LAMMPS `pair_style uma` is FP64-only (`*-f64` artifacts).
+`precision mixed` is refused.
 
 ## Checkpoints vs artifacts
 
-| Item | Path | Notes |
-|------|------|-------|
-| Multihead checkpoint | `workdir/uma-cache/uma-s-1p2.pt` | FairChem Hydra `.pt` (Python only) |
-| LibTorch artifact | `artifacts/uma-s-1p2-<task>-f64/` | TorchScript; one energy task per dir |
-
-LibTorch **cannot** load the multihead checkpoint directly. Export traces one
-task head at a time (`omat`, `odac`, `omol`, `oc20`, …).
-
-## Export artifact(s)
-
-Script: [`python/export_artifact.py`](python/export_artifact.py)
+LibTorch cannot load a FairChem multihead Hydra `.pt` checkpoint.
+Export traces one energy task head (`omat`, `odac`, `omol`, …) into an
+artifact directory (`model_traced.pt` + `metadata.json`). `pair_coeff`
+names that directory.
 
 ```bash
-source $CONDA_SETUP && conda activate uma312
-ROOT=$ROOT
-ENG=$ROOT/src/ML-UMA/uma-engine
-CKPT=$UMA_CHECKPOINT
-
-# Single task (omat) FP64 — default for LAMMPS getting_started
-PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_artifact.py \
-  --checkpoint $CKPT --dtype float64 --task omat \
-  --output $ENG/artifacts/uma-s-1p2-omat-f64
-
-# All energy task heads FP64 (oc20 oc22 oc25 omat odac omc omol)
-PYTHONPATH=$ENG/python:$PYTHONPATH python $ENG/python/export_artifact.py \
-  --checkpoint $CKPT --dtype float64 --all-tasks --skip-existing \
-  --artifacts-root $ENG/artifacts
-
-# Or via SLURM:
-# sbatch $ROOT/src/ML-UMA/examples/getting_started/export_all_tasks_fp64.slurm
+python src/ML-UMA/uma-engine/python/export_artifact.py \
+  --checkpoint $UMA_CHECKPOINT --dtype float64 --task omat \
+  --output /path/to/uma-s-1p2-omat-f64
 ```
 
-Each artifact directory contains `model_traced.pt` + `metadata.json`.
-`pair_coeff` points at the **directory** for the task you want.
+Do not commit checkpoints or artifacts (FAIR Chemistry License).
 
 ## Build
 
-Usually built as part of LAMMPS (`scripts/build_lammps_uma.sh`). Standalone:
+Usually built as part of LAMMPS (`-D PKG_ML-UMA=on`). Standalone:
 
 ```bash
-source $CONDA_SETUP && conda activate uma312
-ENG=$ROOT/src/ML-UMA/uma-engine
-TORCH_CMAKE=$(python -c "import torch; print(torch.utils.cmake_prefix_path)")
-cmake -S $ENG -B $ENG/build \
+TORCH_CMAKE=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
+cmake -S . -B build \
   -DCMAKE_PREFIX_PATH="$TORCH_CMAKE" \
   -DCMAKE_BUILD_TYPE=Release \
   -DUMA_ENGINE_USE_CUDA=ON
-cmake --build $ENG/build -j$(nproc)
+cmake --build build
 ```
 
-## Precision modes
-
-| Mode | Artifact | Status |
-|------|----------|--------|
-| `precision double` | `uma-s-1p2-<task>-f64` | **use this** |
-| `precision mixed` | (none) | **refused** by `pair_style uma` |
+Intel GPU: `-DUMA_ENGINE_USE_XPU=ON` (disables CUDA). See
+`cmake/Modules/Packages/ML-UMA.cmake` in the LAMMPS tree.

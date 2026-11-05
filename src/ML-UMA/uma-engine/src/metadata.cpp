@@ -38,12 +38,10 @@ const json& require(const json& j, const char* key, const std::string& path) {
   return *it;
 }
 
-// A2/S2 fix (audit rev 26 §G.21.5): null-tolerant optional-string read. nlohmann's
-// j.value("k", default) substitutes the default ONLY when the key is ABSENT; if
-// the key is present but JSON null it throws type_error.302. Exporters legitimately
-// emit null for un-set provenance (checkpoint_sha256, atom_refs, ...), so a null
-// optional string must read as empty, not abort the whole artifact load. This bug
-// made the fresh v2 DD artifact unloadable ("type must be string, but is null").
+// Null-tolerant optional-string read. nlohmann's j.value("k", default)
+// substitutes the default only when the key is absent; if the key is present
+// but JSON null it throws type_error.302. Exporters emit null for unset
+// provenance, so a null optional string must read as empty.
 std::string opt_string(const json& j, const char* key) {
   auto it = j.find(key);
   if (it == j.end() || it->is_null() || !it->is_string()) return std::string();

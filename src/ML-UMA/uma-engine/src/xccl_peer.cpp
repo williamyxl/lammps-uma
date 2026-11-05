@@ -71,9 +71,9 @@ class XcclPeerImpl final : public XcclPeer {
   XcclPeerImpl(int rank, int world, int device_index, int comm_f)
       : rank_(rank), world_(world) {
     (void)device_index;
-    // P7.1: 0 -> MPI_COMM_WORLD (historical); else convert the Fortran handle to
-    // the caller's real communicator so the KVS rendezvous runs on the LAMMPS
-    // world under -partition / library / MDI.
+    // 0 -> MPI_COMM_WORLD; else convert the Fortran handle to the caller's
+    // real communicator so the KVS rendezvous runs on the LAMMPS world under
+    // -partition / library / MDI.
     boot_comm_ = (comm_f == 0) ? MPI_COMM_WORLD : MPI_Comm_f2c(comm_f);
     static std::once_flag ccl_init_once;
     std::call_once(ccl_init_once, [] { ccl::init(); });
@@ -175,7 +175,7 @@ class XcclPeerImpl final : public XcclPeer {
  private:
   int rank_;
   int world_;
-  MPI_Comm boot_comm_ = MPI_COMM_WORLD;  // P7.1: KVS rendezvous comm
+  MPI_Comm boot_comm_ = MPI_COMM_WORLD;  // KVS rendezvous comm
   sycl::device sycl_dev_;
   sycl::context sycl_ctx_;
   sycl::queue* queue_ = nullptr;

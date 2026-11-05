@@ -74,10 +74,9 @@ def main() -> int:
     # Wigner-chunk fix (correct FP64 backward at large edge counts).
     os.environ.setdefault("FXPU_WIGNER_PREP_CHUNK", "65536")
     os.environ.setdefault("FXPU_WIGNER_PREP_CHUNK_MODE", "both")
-    # G4 FIX (audit rev 11 / R3): mirror export_blocks_xpu.py's P5'.5 — the
-    # wigner-chunk fix is CORRECTNESS-CRITICAL (the N>=10 FP64 cliff); a silently
-    # skipped patch yields an artifact with WRONG forces at N>=10. Fail loudly
-    # unless explicitly overridden (UMA_ALLOW_MISSING_PATCHES=1, logged).
+    # The wigner-chunk fix is correctness-critical (FP64 backward at large
+    # edge counts); a silently skipped patch yields wrong forces. Fail
+    # loudly unless explicitly overridden (UMA_ALLOW_MISSING_PATCHES=1).
     _allow_missing = os.environ.get("UMA_ALLOW_MISSING_PATCHES", "0") == "1"
     try:
         from xpu_prepare_wigner import apply_xpu_prepare_wigner_chunking

@@ -1,11 +1,8 @@
 // XPU build stub for the CUDA/NCCL C++ LibTorch multi-process runtime.
 //
-// The real LibtorchMpRuntime (libtorch_mp.cpp) is CUDA/NCCL-only (includes
-// cuda_runtime_api.h, uma_peer NCCL collectives). On XPU we support the
-// single-GPU EAGER Python-worker path (UMA_EAGER_CKPT=1), which lives entirely
-// in graph_parallel.cpp (POSIX fork + pipe protocol to uma_gp_worker.py) and
-// does NOT use LibtorchMpRuntime. This stub satisfies the linker for the
-// !force_python branch, which is never taken with UMA_EAGER_CKPT=1.
+// The real LibtorchMpRuntime (libtorch_mp.cpp) is CUDA/NCCL-only. On Intel
+// GPU, same-node fork workers are not used: graph-parallel is one MPI rank
+// per device via MpiPeerPredictor. This stub satisfies the linker.
 
 #include "uma/libtorch_mp.h"
 
@@ -18,13 +15,13 @@ struct LibtorchMpRuntime::Impl {};
 
 bool LibtorchMpRuntime::artifacts_present(const std::string& /*artifact_dir*/,
                                          int /*num_devices*/) {
-  return false;  // no C++ MP shards on XPU -> forces the eager Python path
+  return false;
 }
 
 std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
     const std::string& /*artifact_dir*/, const ArtifactMetadata& /*metadata*/,
     int /*num_devices*/, torch::ScalarType /*compute_dtype*/) {
-  return nullptr;  // graph_parallel.cpp then reports: use UMA_EAGER_CKPT=1
+  return nullptr;
 }
 
 LibtorchMpRuntime::LibtorchMpRuntime(int num_devices, ArtifactMetadata metadata,
@@ -41,13 +38,13 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor&, const torch::Tensor&
                                       const torch::Tensor&, const torch::Tensor&,
                                       int64_t, int64_t) {
   throw std::runtime_error(
-      "LibtorchMpRuntime unavailable on XPU build (use UMA_EAGER_CKPT=1)");
+      "LibtorchMpRuntime unavailable on XPU build; use one MPI rank per GPU");
 }
 
 Prediction LibtorchMpRuntime::predict_host(int, const double*, const int*,
                                            const double*, const int*, double*) {
   throw std::runtime_error(
-      "LibtorchMpRuntime unavailable on XPU build (use UMA_EAGER_CKPT=1)");
+      "LibtorchMpRuntime unavailable on XPU build; use one MPI rank per GPU");
 }
 
 }  // namespace uma

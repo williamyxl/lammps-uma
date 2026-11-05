@@ -15,11 +15,9 @@ class LibtorchMpRuntime;
 
 /// Same-node graph-parallel backend for ``devices > 1``.
 ///
-/// **Default:** C++ LibTorch MP (``LibtorchMpRuntime`` + ``uma_peer`` + vesin)
-/// when ``model_mp_w{N}_r*.pt`` artifacts exist.
-///
-/// **Opt-in Python (debug):** ``UMA_PYTHON_GP_WORKER=1`` → ``uma_gp_worker.py``.
-/// Not the product path. Ray / native Python GP workers were removed.
+/// C++ LibTorch MP (``LibtorchMpRuntime`` + ``uma_peer`` + vesin) when
+/// ``model_mp_w{N}_r*.pt`` artifacts exist. Multi-rank Intel GPU runs use
+/// one MPI rank per device instead of this same-node fork path.
 class GraphParallelRuntime {
  public:
   static std::unique_ptr<GraphParallelRuntime> create(
@@ -47,27 +45,11 @@ class GraphParallelRuntime {
  private:
   GraphParallelRuntime(int num_devices, std::string checkpoint, std::string backend);
 
-  void write_line(const std::string& line);
-  std::string read_line();
-  void read_exact(void* dst, size_t n);
-  void write_exact(const void* src, size_t n);
-  void shutdown_worker();
-
   int num_devices_ = 1;
   std::string checkpoint_;
   std::string backend_ = "libtorch_vesin";
-  pid_t child_pid_ = -1;
-  int to_child_fd_ = -1;    // parent writes
-  int from_child_fd_ = -1;  // parent reads
 
   std::unique_ptr<LibtorchMpRuntime> cpp_mp_;
 };
-
-/// Resolve checkpoint for eager GP (metadata → env → lab default).
-std::string resolve_gp_checkpoint(const std::string& artifact_dir,
-                                  const ArtifactMetadata& metadata);
-
-/// Locate Python GP worker script (legacy opt-in only).
-std::string resolve_gp_worker_script();
 
 }  // namespace uma

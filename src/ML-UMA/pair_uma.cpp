@@ -920,12 +920,7 @@ void PairUMA::load_predictor()
 
     const char *gp_label = "off";
     if (predictor->uses_graph_parallel()) {
-      // Default product path is C++ LibTorch MP; Python only via UMA_PYTHON_GP_WORKER=1.
-      const char *py = std::getenv("UMA_PYTHON_GP_WORKER");
-      if (py && py[0] == '1')
-        gp_label = "python_optin";
-      else
-        gp_label = "libtorch_vesin";
+      gp_label = "libtorch_vesin";
     }
     utils::logmesg(lmp,
                    "Pair uma: loaded artifact '{}' cutoff={:.3f} device={} precision={} "

@@ -75,11 +75,17 @@ typically ``--task omat``).  LAMMPS does not import FairChem at run time.
 The only extra-repo files are that checkpoint at **export** time and the
 artifact directory at **run** time.
 
+The pair style and uma-engine C++ are GNU GPL-2, the same as LAMMPS.
+Vendored third-party headers: vesin (BSD-3-Clause) and nlohmann JSON
+(MIT).  LibTorch / PyTorch and fairchem-core are user-installed and are
+not shipped here.
+
 This package does **not** redistribute UMA model weights.  Checkpoints
-such as ``uma-s-1p2.pt`` (Hugging Face ``facebook/UMA``) remain under the
-FAIR Chemistry License, which is separate from LAMMPS GPL-2 and from
-FairChem's MIT software license.  Users must obtain and accept those
-terms themselves.  See ``src/ML-UMA/LICENSE``.
+such as ``uma-s-1p2.pt`` (Hugging Face ``facebook/UMA``) and exported
+TorchScript artifacts remain under the FAIR Chemistry License, which is
+separate from LAMMPS GPL-2 and from FairChem's MIT software license.
+Users must obtain and accept those terms themselves.  See
+``src/ML-UMA/LICENSE``.
 
 As an example, a two-type NaCl system uses:
 

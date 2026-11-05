@@ -37,9 +37,9 @@ bool env_flag_1(const char* name) {
   return e != nullptr && e[0] == '1' && e[1] == '\0';
 }
 
-// A10 (audit rev 29 §G.25 — owner directive): activation checkpointing defaults
-// OFF. Recompute is now OPT-IN via a single UMA_AC master, so an unflagged run
-// gets the plain, fully-differentiable path (NPT/virial works) at lower capacity.
+// Activation checkpointing defaults OFF. Recompute is opt-in via UMA_AC, so
+// an unflagged run gets the fully-differentiable path (NPT/virial works) at
+// lower capacity.
 //
 //   UMA_AC unset | "off" | "0"  -> NO recompute anywhere (default): every op
 //                                   retains its activations. Fully differentiable,
@@ -57,13 +57,13 @@ enum class AcLevel { kOff, kChunk, kBlock, kFull };
 AcLevel ac_level() {
   static const AcLevel v = [] {
     const char* e = std::getenv("UMA_AC");
-    if (e == nullptr) return AcLevel::kOff;              // ← DEFAULT OFF (A10)
+    if (e == nullptr) return AcLevel::kOff;
     const std::string s(e);
     if (s == "off" || s == "0" || s.empty()) return AcLevel::kOff;
     if (s == "chunk") return AcLevel::kChunk;
     if (s == "block") return AcLevel::kBlock;
     if (s == "full" || s == "1") return AcLevel::kFull;
-    return AcLevel::kOff;  // unknown -> off (safe/default; documented in ENV_VARS)
+    return AcLevel::kOff;  // unknown -> off (safe/default)
   }();
   return v;
 }

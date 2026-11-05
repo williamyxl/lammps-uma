@@ -33,9 +33,8 @@ struct Prediction {
 /// for FP64 artifacts. Forces are always FP64.
 ///
 /// ``num_devices == 1``: TorchScript ``model_traced.pt`` on a single device.
-/// ``num_devices > 1``: ``GraphParallelRuntime`` → default C++ LibTorch MP
-/// (``model_mp_wN_r*.pt`` + ``uma_peer`` + vesin). Opt-in debug Python with
-/// ``UMA_PYTHON_GP_WORKER=1``.
+/// ``num_devices > 1``: ``GraphParallelRuntime`` → C++ LibTorch MP
+/// (``model_mp_wN_r*.pt`` + ``uma_peer`` + vesin).
 class Predictor {
  public:
   static Predictor from_artifact(const std::string& artifact_dir,

@@ -1,8 +1,5 @@
 #pragma once
 
-// G7/S7: the full dated design narrative below is retained inline for context; the
-// migrated design history lives in `docs/activation_checkpointing.md` (P6.1).
-//
 // Per-block activation checkpointing for traced UMA inference.
 //
 // The traced top module (model_traced.pt) records calls to a custom op:
@@ -81,7 +78,7 @@ namespace uma {
 // under the live autograd graph with its activations retained. The virial
 // (dE/dcell) requires this: a recomputed chunk's backward uses create_graph=false,
 // so the edge_distance_vec->cell path is not rebuilt for the outer grad({E},{cell})
-// call. Under the A10 default (UMA_AC=off) this is true. Defined in
+// call. Under the default (UMA_AC=off) this is true. Defined in
 // block_context.cpp alongside no_recompute_{block,chunk,edeg}.
 bool all_activations_retained();
 
@@ -165,12 +162,11 @@ struct BlockCheckpointFn
                                torch::Tensor atomic_numbers,
                                torch::Tensor edge_index,
                                 torch::Tensor sys_node_emb) {
-    // A3/G.5 item 4 (audit rev 26 §G.18.6): the module pointers threaded through
-    // ctx->saved_data (here "block", and "chunk_module"/"edgedeg_module" below)
-    // are NON-OWNING borrows of jit Modules owned by the Predictor for the whole
-    // predict() call. forward()+backward() run inside one autograd invocation, so
-    // the owner outlives backward's recompute. Stored as int64_t only because
-    // saved_data holds IValues; never freed here, never an autograd input.
+    // Module pointers threaded through ctx->saved_data (here "block", and
+    // "chunk_module"/"edgedeg_module" below) are non-owning borrows of jit
+    // Modules owned by the Predictor for the whole predict() call.
+    // forward()+backward() run inside one autograd invocation. Stored as
+    // int64_t because saved_data holds IValues; never freed here.
     TORCH_CHECK(block != nullptr,
                 "BlockCheckpointFn: null block module into saved_data");
     ctx->saved_data["block"] = reinterpret_cast<int64_t>(block);

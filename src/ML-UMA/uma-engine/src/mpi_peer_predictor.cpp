@@ -161,7 +161,7 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   PeerContext::instance().reset_shared(self->impl_->slot);
   PeerContext::set_thread_rank(rank);
   self->impl_->slot->init_xccl_external(rank, world, /*unused*/ nullptr,
-                                        device_index, comm_f);  // P7.1
+                                        device_index, comm_f);
 #else
   // Private per-rank Shm (NCCL transport). Not shared across processes: NCCL
   // itself carries the cross-rank traffic; the Shm only records world/transport
@@ -256,10 +256,9 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   // deadlock (a hang, not an error). Agree the mode across ranks FIRST via a peer
   // all_reduce and throw a clear error on disagreement instead of hanging.
   {
-    // A4 (audit rev 23 / G.3): fold the THREE other collective-affecting flags into
-    // the same cross-rank agreement, so a per-rank mismatch (a stale `export` in one
-    // shell, a per-rank launcher) aborts cleanly here instead of hanging or, worse,
-    // computing a different gradient on one rank with no diagnostic:
+    // Fold the other collective-affecting flags into the same cross-rank
+    // agreement, so a per-rank mismatch aborts cleanly here instead of hanging
+    // or computing a different gradient on one rank with no diagnostic:
     //   UMA_ALLREDUCE_WITH_GRAD_BWD (default ON) -> gradient definition
     //   UMA_SKIP_PRE_BWD_BARRIER              -> lockstep entry to mid-bwd collectives
     //   UMA_CHUNK_RETAIN_K (int)              -> backward graph shape

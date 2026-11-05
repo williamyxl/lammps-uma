@@ -27,13 +27,12 @@ struct CheckpointModuleFn
                                torch::Tensor cell, torch::Tensor pbc,
                                torch::Tensor eidx, torch::Tensor coff,
                                 torch::Tensor charge, torch::Tensor spin) {
-    // A3/G.5 item 4 (audit rev 26 §G.18.6): lifetime contract for the smuggled
-    // module pointer. `module` is a NON-OWNING borrow of a torch::jit::Module
-    // owned by the Predictor for the whole predict() call. forward() and
-    // backward() both run inside that single autograd invocation, so the module
-    // is guaranteed live when backward() recomputes through it. It is passed as
-    // int64_t only because AutogradContext::saved_data holds IValues, not raw
-    // pointers; it is NEVER freed here and MUST NOT be an autograd input.
+    // Lifetime contract for the smuggled module pointer. `module` is a
+    // non-owning borrow of a torch::jit::Module owned by the Predictor for
+    // the whole predict() call. forward() and backward() both run inside
+    // that single autograd invocation. Stored as int64_t because
+    // AutogradContext::saved_data holds IValues, not raw pointers; it is
+    // never freed here and must not be an autograd input.
     TORCH_CHECK(module != nullptr,
                 "CheckpointModuleFn: null module pointer into saved_data");
     ctx->saved_data["module"] = reinterpret_cast<int64_t>(module);
@@ -76,17 +75,14 @@ struct CheckpointModuleFn
   }
 };
 
-// Env gate: UMA_CKPT (whole-module checkpoint). A10 (audit rev 29 §G.25 — owner
-// directive): activation checkpointing defaults OFF on ALL builds, so an
-// unflagged run is fully differentiable (NPT/virial works) at lower capacity.
-// The previous XPU "default ON" special case is removed. UMA_CKPT=1 opts back in.
-// NOTE: on production artifacts this whole-module branch is dead code (the
-// per-chunk ops short-circuit first, predictor.cpp) — the effective AC default is
-// controlled by UMA_AC in block_context.cpp (see §G.25.1). This flag is kept
-// consistent with the directive for the no-per-chunk-op case.
+// Env gate: UMA_CKPT (whole-module checkpoint). Default off on every build so
+// an unflagged run is fully differentiable (NPT/virial works) at lower
+// capacity. UMA_CKPT=1 opts back in. On production artifacts this
+// whole-module branch is dead (per-chunk ops short-circuit first); the
+// effective AC default is UMA_AC in block_context.cpp.
 inline bool checkpoint_enabled() {
   const char* e = std::getenv("UMA_CKPT");
-  if (e == nullptr) return false;  // A10: default OFF on every build
+  if (e == nullptr) return false;
   return !(e[0] == '0' && e[1] == '\0');
 }
 

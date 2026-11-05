@@ -27,7 +27,7 @@ if(UMA_ENGINE_USE_XPU)
   # XPU build: single-tile (predictor.cpp) + graph-parallel edge-parallel
   # (mpi_peer_predictor.cpp + peer_context.cpp) using host-staged MPI (Step 1)
   # or native XCCL (Step 2) collectives. libtorch_mp (C++ MP fork runtime) is
-  # CUDA/NCCL-only -> stubbed. graph_parallel.cpp keeps the eager fork path.
+  # CUDA/NCCL-only -> stubbed. Same-node devices>1 fork is CUDA-only.
   set(UMA_ENGINE_SOURCES
     src/metadata.cpp
     src/neighbor_list.cpp
@@ -75,7 +75,7 @@ target_link_libraries(uma_engine PUBLIC ${TORCH_LIBRARIES})
 # targets — it broke uma_parity_cli and test_lifetime_asan identically.
 find_package(Threads REQUIRED)
 target_link_libraries(uma_engine PUBLIC Threads::Threads)
-# Locate uma_gp_worker.py for devices>1 FairChem eager GP backend.
+# Python dir for export scripts and (CUDA) LibTorch MP worker path lookup.
 target_compile_definitions(uma_engine PRIVATE
   "UMA_ENGINE_PYTHON_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/python\"")
 set(UMA_ENGINE_HAS_NCCL OFF)
@@ -117,11 +117,9 @@ if(UMA_ENGINE_USE_XPU)
               ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/peer_context.h
               ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/shared_peer.h
               ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/uma_peer.h
-      # Rec 4 (audit 2026-08-31): this hand-rolled command does NOT get CMake's
-      # automatic header-dependency scanning. IMPLICIT_DEPENDS makes CMake parse the
-      # #include graph so a change to ANY transitively-included header (e.g. the
-      # P0.4 rewrite in shared_peer.h) rebuilds xccl_peer.o instead of silently
-      # linking a stale object on the production XPU path.
+      # This hand-rolled command does not get CMake's automatic header-dependency
+      # scanning. IMPLICIT_DEPENDS makes CMake parse the #include graph so a
+      # change to a transitively-included header rebuilds xccl_peer.o.
       IMPLICIT_DEPENDS CXX ${CMAKE_CURRENT_SOURCE_DIR}/src/xccl_peer.cpp
       COMMENT "Compiling xccl_peer.cpp with icpx (SYCL+oneCCL)")
     add_custom_target(uma_xccl_obj DEPENDS ${_xccl_obj})

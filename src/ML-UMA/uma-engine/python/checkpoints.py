@@ -20,7 +20,7 @@ UMA_CACHE_CHECKPOINTS: dict[str, str] = {
 def uma_cache_dir() -> Path:
     """Directory containing flat *.pt checkpoints.
 
-    P3.3/P5'.7: resolution order (no machine-specific hardcoded default):
+    Resolution order (no machine-specific hardcoded default):
       1. UMA_CACHE_DIR
       2. the directory of UMA_CHECKPOINT (if it points at a file)
       3. a `uma-cache/` sibling of the repo root

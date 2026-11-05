@@ -42,8 +42,8 @@
 namespace uma {
 namespace {
 
-// E2 (audit 2026-08-31): per-step PERF_PARENT logging must be gated. Read the flag
-// once (env is process-constant). Was an UNGATED std::cerr on the hot path.
+// Per-step PERF_PARENT logging is gated. Read the flag once (env is
+// process-constant).
 bool mp_perf_enabled() {
   static const bool on = [] {
     const char* e = std::getenv("UMA_MP_PERF");

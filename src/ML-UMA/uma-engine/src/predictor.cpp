@@ -186,20 +186,21 @@ Predictor Predictor::from_artifact(const std::string& artifact_dir,
   const std::string metadata_path = artifact_dir + "/metadata.json";
   auto metadata = load_artifact_metadata(metadata_path);
 
-  // Activation checkpointing (eager only; cannot be traced). UMA_EAGER_CKPT=1
-  // routes single-GPU through the eager FairChem worker with checkpointing on,
-  // trading ~1.33x step time for ~3x less activation memory (much bigger boxes).
-  bool eager_ckpt = false;
-  if (const char* e = std::getenv("UMA_EAGER_CKPT"))
-    eager_ckpt = (e[0] == '1' && e[1] == '\0');
+  // UMA_EAGER_CKPT used to route single-GPU through an eager FairChem Python
+  // worker. That worker was removed; traced AC is pair_style keyword ac.
+  if (const char* e = std::getenv("UMA_EAGER_CKPT")) {
+    if (e[0] == '1' && e[1] == '\0') {
+      throw std::runtime_error(
+          "UMA_EAGER_CKPT was removed with the Python GP worker. "
+          "Use pair_style keyword ac on the traced path, or ac off.");
+    }
+  }
 
-  if (num_devices > 1 || eager_ckpt) {
-    // Same-node GP (num_devices>1) via GraphParallelRuntime, OR single-GPU eager
-    // checkpointing (num_devices==1 + eager_ckpt). Default GP = C++ LibTorch MP
-    // when model_mp_wN_r*.pt exists; Python only with UMA_PYTHON_GP_WORKER=1 or
-    // the single-tile eager-checkpointing path.
+  if (num_devices > 1) {
+    // Same-node GP via GraphParallelRuntime = C++ LibTorch MP when
+    // model_mp_wN_r*.pt exists. The Python GP worker was removed.
     auto gp = GraphParallelRuntime::create(artifact_dir, metadata, num_devices,
-                                           metadata.compute_dtype, eager_ckpt);
+                                           metadata.compute_dtype);
     return Predictor(std::move(gp), torch::Device(torch::kCPU), std::move(metadata),
                      num_devices);
   }
@@ -468,7 +469,7 @@ Prediction Predictor::predict_body() {
     // The strain gradient also requires every AC level RETAINED: a recomputed
     // chunk/block backward uses create_graph=false, so its edge_distance_vec->cell
     // path is not rebuilt for the outer grad({E},{cell}). Under UMA_AC=off (the
-    // A10 default) this holds. Refuse clearly if the user turned AC back on.
+    // default) this holds. Refuse clearly if the user turned AC back on.
     TORCH_CHECK(all_activations_retained(),
                 "uma-engine: virial (UMA_COMPUTE_VIRIAL=1) requires activation "
                 "checkpointing OFF (UMA_AC=off, the default) so the strain "
