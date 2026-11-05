@@ -7,22 +7,32 @@ mode=$1
 LC_ALL=C
 export LC_ALL
 
-action() {
+action () {
   if (test $mode = 0) then
-    rm -f ../../$1
-  elif (! cmp -s $1 ../../$1) then
-    if (test -z "$2" || test -e ../../$2) then
-      cp $1 ../../
-      if (test $mode = 2) then
-        echo "Updating src/$1"
-      fi
-    fi
-  elif (test $mode = 1) then
-    echo "Installing src/$1"
+    rm -f ../$1
   fi
 }
 
-# list all package files that need to be installed
+# all package files with no dependencies
 
-action pair_uma.cpp
-action pair_uma.h
+for file in *.cpp *.h; do
+  test -f ${file} && action $file
+done
+
+# edit 2 Makefile.package files to include/exclude package info
+
+if (test $1 = 1 || test $1 = 2) then
+  echo "The ML-UMA package no longer supports the legacy build system. Please build LAMMPS with CMake instead."
+  exit 1
+
+elif (test $1 = 0) then
+
+  if (test -e ../Makefile.package) then
+    sed -i -e 's/[^ \t]*uma[^ \t]* //' ../Makefile.package
+  fi
+
+  if (test -e ../Makefile.package.settings) then
+    sed -i -e '/^[ \t]*include.*uma.*$/d' ../Makefile.package.settings
+  fi
+
+fi

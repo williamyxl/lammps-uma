@@ -1843,17 +1843,27 @@ TorchScript artifact from a user-supplied FairChem checkpoint with
       .. code-block:: bash
 
          -D PKG_ML-UMA=on                # enable the package
-         -D UMA_ENGINE_USE_XPU=value     # off (default, CUDA) or on (Intel XPU)
+         -D UMA_ENGINE_USE_CUDA=value    # on (default) or off
+         -D UMA_ENGINE_USE_XPU=value     # off (default) or on (Intel GPU)
          -D UMA_ENGINE_ROOT=path         # optional; default src/ML-UMA/uma-engine
+         -D Torch_DIR=path               # directory with TorchConfig.cmake
+         -D CMAKE_PREFIX_PATH=path       # alternative to Torch_DIR
 
-      Point CMake at LibTorch, for example by adding the prefix printed by
-      ``python -c "import torch; print(torch.utils.cmake_prefix_path)"`` to
-      ``CMAKE_PREFIX_PATH``.
+      CMake looks for LibTorch via ``find_package(Torch)``.  If ``Torch_DIR``
+      is unset it tries ``python3 -c "import torch; print(torch.utils.cmake_prefix_path)"``.
+      Configure fails with that recipe if Torch is not found.  Leave
+      ``PKG_ML-UMA=off`` (the default) for library-free builds; the
+      ``cmake/presets/nolib.cmake`` preset also turns the package off.
 
-      Default GPU backend is CUDA.  Set ``UMA_ENGINE_USE_XPU=on`` for Intel
-      GPU (for example Aurora).  Do not enable the KOKKOS package for this
-      pair style; multi-tile runs use MPI ranks (one device per rank), not
+      Default GPU backend is CUDA.  ``UMA_ENGINE_USE_XPU=on`` disables CUDA
+      and selects Intel GPU LibTorch.  The two backends are mutually
+      exclusive.  Do not enable the KOKKOS package for this pair style;
+      multi-tile runs use MPI ranks (one device per rank), not
       ``lmp -k on -sf kk``.
+
+      LAMMPS CI does not build ML-UMA: GitHub runners have no GPU LibTorch,
+      and UMA weights cannot be redistributed.  The force-style YAML for
+      ``pair uma`` skips unless a user artifact is present.
 
    .. tab:: Traditional make
 
