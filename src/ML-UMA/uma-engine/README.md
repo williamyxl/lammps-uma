@@ -26,16 +26,8 @@ Do not commit checkpoints or artifacts (FAIR Chemistry License).
 
 ## Build
 
-Usually built as part of LAMMPS (`-D PKG_ML-UMA=on`). Standalone:
+Built as part of LAMMPS (`-D PKG_ML-UMA=on`). It is not a standalone
+CMake project: `json.h` comes from the LAMMPS `src/` tree.
 
-```bash
-TORCH_CMAKE=$(python3 -c "import torch; print(torch.utils.cmake_prefix_path)")
-cmake -S . -B build \
-  -DCMAKE_PREFIX_PATH="$TORCH_CMAKE" \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DUMA_ENGINE_USE_CUDA=ON
-cmake --build build
-```
-
-Intel GPU: `-DUMA_ENGINE_USE_XPU=ON` (disables CUDA). See
-`cmake/Modules/Packages/ML-UMA.cmake` in the LAMMPS tree.
+Intel GPU: `-D UMA_ENGINE_USE_XPU=on` (disables CUDA). See
+`cmake/Modules/Packages/ML-UMA.cmake`.

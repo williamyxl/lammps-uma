@@ -5,12 +5,12 @@
 #include <stdexcept>
 #include <string>
 
-#include <nlohmann/json.hpp>
+#include "json.h"
 
 namespace uma {
 namespace {
 
-using json = nlohmann::json;
+using json = LAMMPS_NS::json;
 
 std::string read_file(const std::string& path) {
   std::ifstream in(path);

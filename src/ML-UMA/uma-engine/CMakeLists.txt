@@ -55,16 +55,19 @@ else()
   )
 endif()
 
+if(NOT LAMMPS_SOURCE_DIR)
+  message(FATAL_ERROR
+    "uma-engine needs LAMMPS_SOURCE_DIR for json.h. Build via -D PKG_ML-UMA=on "
+    "from the LAMMPS CMake tree (do not configure uma-engine standalone).")
+endif()
+
 add_library(uma_engine ${UMA_ENGINE_SOURCES})
 target_include_directories(uma_engine
   PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
   PRIVATE
-    # P4'.2: vendored nlohmann/json (single header, 3.12.0) for a real JSON parser
-    # in metadata.cpp / block_context.cpp (replaces the hand-rolled substring scan).
-    # Include the third_party ROOT so `#include <nlohmann/json.hpp>` resolves.
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party
+    ${LAMMPS_SOURCE_DIR}
 )
 target_link_libraries(uma_engine PUBLIC ${TORCH_LIBRARIES})
 # shared_peer.h / libtorch_mp.cpp use pthread mutex+cond directly, so every

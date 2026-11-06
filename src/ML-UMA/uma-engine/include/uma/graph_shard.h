@@ -7,7 +7,7 @@
 //   node_partition = tensor_split(arange(n_atoms), world_size)[rank]
 //   keep edges where edge_index[1] ∈ node_partition
 //
-// Does NOT run the UMA forward. Used by native Kokkos+LibTorch GP (no Ray).
+// Does NOT run the UMA forward. Used by native LibTorch GP (no Ray).
 
 #include <cstdint>
 #include <stdexcept>

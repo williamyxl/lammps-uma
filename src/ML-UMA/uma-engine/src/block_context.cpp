@@ -10,7 +10,7 @@
 #include <torch/script.h>
 #include <torch/torch.h>
 
-#include <nlohmann/json.hpp>  // P4'.2: real JSON parser (replaces substring scan)
+#include "json.h"
 
 namespace uma {
 
@@ -368,7 +368,7 @@ int read_optional_metadata_int(const std::string& artifact_dir,
   std::string text((std::istreambuf_iterator<char>(in)),
                    std::istreambuf_iterator<char>());
   try {
-    auto j = nlohmann::json::parse(text);
+    auto j = LAMMPS_NS::json::parse(text);
     auto it = j.find(key);
     if (it != j.end() && it->is_number_integer()) return it->get<int>();
   } catch (const std::exception&) {

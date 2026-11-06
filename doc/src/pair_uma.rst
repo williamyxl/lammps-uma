@@ -76,9 +76,9 @@ The only extra-repo files are that checkpoint at **export** time and the
 artifact directory at **run** time.
 
 The pair style and uma-engine C++ are GNU GPL-2, the same as LAMMPS.
-Vendored third-party headers: vesin (BSD-3-Clause) and nlohmann JSON
-(MIT).  LibTorch / PyTorch and fairchem-core are user-installed and are
-not shipped here.
+Vendored third-party headers: vesin (BSD-3-Clause).  nlohmann JSON (MIT)
+is the LAMMPS-bundled copy in ``src/nlohmann/``.  LibTorch / PyTorch and
+fairchem-core are user-installed and are not shipped here.
 
 This package does **not** redistribute UMA model weights.  Checkpoints
 such as ``uma-s-1p2.pt`` (Hugging Face ``facebook/UMA``) and exported

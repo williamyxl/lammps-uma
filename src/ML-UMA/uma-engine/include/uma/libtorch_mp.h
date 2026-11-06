@@ -13,7 +13,7 @@
 
 namespace uma {
 
-/// Native Kokkos+LibTorch multi-GPU evaluator (no Python / Ray / c10d).
+/// Native LibTorch multi-GPU evaluator (no Python / Ray / c10d).
 /// Process-per-rank (TorchScript is not multi-thread safe for mid-forward
 /// collectives). Requires ``model_mp_w{N}_r{R}.pt`` from export_mp_artifact.py.
 class LibtorchMpRuntime {
