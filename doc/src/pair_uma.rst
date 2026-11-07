@@ -68,12 +68,23 @@ followed by N element names, where N is the number of LAMMPS atom types:
 * artifact directory
 * N element names = mapping of UMA elements to atom types
 
-The artifact directory is produced once, offline, from a user-supplied
-FairChem UMA checkpoint with
-``src/ML-UMA/uma-engine/python/export_artifact.py`` (``--dtype float64``,
-typically ``--task omat``).  LAMMPS does not import FairChem at run time.
-The only extra-repo files are that checkpoint at **export** time and the
-artifact directory at **run** time.
+The artifact directory is produced offline from a user-supplied FairChem
+UMA checkpoint.  LAMMPS does not import FairChem at run time.  The only
+extra-repo files are that checkpoint at **export** time and the artifact
+directory at **run** time.
+
+* One MPI rank: ``src/ML-UMA/uma-engine/python/export_artifact.py``
+  (``--dtype float64``, typically ``--task omat``).  This writes
+  ``model_traced.pt`` in the directory named by *pair_coeff*.
+* W MPI ranks with *decomp graph* and *devices 1*:
+  ``src/ML-UMA/uma-engine/python/export_blocks_xpu.py`` with
+  ``EXPORT_WORLD=W`` and ``EXPORT_RANK=0..W-1``.  This writes
+  ``w{W}/r{R}/`` under the same directory *pair_coeff* names.  A
+  single-rank ``export_artifact.py`` directory will not load on
+  ``mpiexec -n W``.  The traced atom count is part of a W>1 export;
+  changing N or W requires a new export.
+
+Commands for the NaCl examples are in ``examples/PACKAGES/uma``.
 
 The pair style and uma-engine C++ are GNU GPL-2, the same as LAMMPS.
 Vendored third-party headers: vesin (BSD-3-Clause).  nlohmann JSON (MIT)

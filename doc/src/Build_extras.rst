@@ -1833,8 +1833,11 @@ requires an installed PyTorch / LibTorch that CMake can find via
 ``find_package(Torch)``.
 
 UMA model weights are **not** downloaded or shipped.  Export a FP64
-TorchScript artifact from a user-supplied FairChem checkpoint with
-``src/ML-UMA/uma-engine/python/export_artifact.py`` before running.
+TorchScript artifact from a user-supplied FairChem checkpoint before
+running.  One MPI rank uses ``export_artifact.py``; graph-parallel (one
+rank per GPU) uses ``export_blocks_xpu.py`` and writes ``w{W}/r{R}/``
+shards.  See :doc:`pair_style uma <pair_uma>` and
+``examples/PACKAGES/uma``.
 
 .. tabs::
 

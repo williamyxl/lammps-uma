@@ -1,7 +1,10 @@
 # NaCl rocksalt 3x3x3, 10-step NPT with pair_style uma (ML-UMA)
 #
 # Requires a user-exported FP64 TorchScript artifact directory.
-#   lmp -in in.nacl.npt -var uma_art /path/to/uma-s-1p2-omat-f64
+#   1 rank:  export_artifact.py  ->  lmp -in in.nacl.npt -var uma_art DIR
+#   W ranks: export_blocks_xpu.py EXPORT_WORLD=W N_LIST=3  ->
+#            mpiexec -n W lmp -in in.nacl.npt -var uma_art DIR
+#   DIR for W ranks is the parent of w{W}/r{R}/. See README.
 #
 # virial auto (default) turns on the strain-gradient virial when a
 # barostat is present. ac off is required for that path.

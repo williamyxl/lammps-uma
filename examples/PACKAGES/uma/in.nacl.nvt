@@ -1,7 +1,10 @@
 # NaCl rocksalt 3x3x3, 10-step NVT with pair_style uma (ML-UMA)
 #
 # Requires a user-exported FP64 TorchScript artifact directory.
-#   lmp -in in.nacl.nvt -var uma_art /path/to/uma-s-1p2-omat-f64
+#   1 rank:  export_artifact.py  ->  lmp -in in.nacl.nvt -var uma_art DIR
+#   W ranks: export_blocks_xpu.py EXPORT_WORLD=W N_LIST=3  ->
+#            mpiexec -n W lmp -in in.nacl.nvt -var uma_art DIR
+#   DIR for W ranks is the parent of w{W}/r{R}/. See README.
 #
 # Do not use -k on / -sf kk. newton pair must be off.
 

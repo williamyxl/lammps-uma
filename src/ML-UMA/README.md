@@ -22,9 +22,14 @@ newton off
 | `decomp` | `graph` / `spatial` | `graph` (MPI graph-parallel) |
 | `neigh` | `lammps` / `engine` | `lammps` |
 
-`pair_coeff` names a TorchScript **artifact directory** (exported once from
-a FairChem UMA checkpoint). LAMMPS does not import FairChem at run time.
-Runtime knobs are pair_style keywords only.
+`pair_coeff` names a TorchScript **artifact directory**. LAMMPS does not
+import FairChem at run time. Runtime knobs are pair_style keywords only.
+
+One MPI rank: `export_artifact.py` (``model_traced.pt`` in that directory).
+W MPI ranks, `decomp graph`, `devices 1`: `export_blocks_xpu.py` with
+`EXPORT_WORLD=W` and `EXPORT_RANK=0..W-1`, which writes `w{W}/r{R}/` under
+the same directory `pair_coeff` names. A single-rank artifact will not
+load on `mpiexec -n W`. The atom count is part of a W>1 export.
 
 Full syntax: [`doc/src/pair_uma.rst`](../../doc/src/pair_uma.rst).
 
@@ -45,9 +50,12 @@ MPI ranks (one device per rank), not `lmp -k on -sf kk`.
 
 See [`doc/src/Build_extras.rst`](../../doc/src/Build_extras.rst) (ML-UMA).
 
-Export artifacts with
+Export a one-rank artifact with
 [`uma-engine/python/export_artifact.py`](uma-engine/python/export_artifact.py)
 (`--task omat`, `--dtype float64`, `--checkpoint $UMA_CHECKPOINT`).
+Graph-parallel (one rank per GPU) uses
+[`uma-engine/python/export_blocks_xpu.py`](uma-engine/python/export_blocks_xpu.py);
+see [`examples/PACKAGES/uma`](../../examples/PACKAGES/uma).
 
 ## Examples
 

@@ -13,8 +13,9 @@ Produces energy and forces from positions. Forces are
 
 LibTorch cannot load a FairChem multihead Hydra `.pt` checkpoint.
 Export traces one energy task head (`omat`, `odac`, `omol`, …) into an
-artifact directory (`model_traced.pt` + `metadata.json`). `pair_coeff`
-names that directory.
+artifact directory. `pair_coeff` names that directory.
+
+One MPI rank:
 
 ```bash
 python src/ML-UMA/uma-engine/python/export_artifact.py \
@@ -22,7 +23,19 @@ python src/ML-UMA/uma-engine/python/export_artifact.py \
   --output /path/to/uma-s-1p2-omat-f64
 ```
 
-Do not commit checkpoints or artifacts (FAIR Chemistry License).
+W MPI ranks (`decomp graph`, one GPU per rank) need per-rank shards
+`OUT/w{W}/r{R}/`, not the single-file export above:
+
+```bash
+ENG=src/ML-UMA/uma-engine
+export PYTHONPATH=$ENG/python TRACE_DEV=cuda
+export EXPORT_WORLD=2 N_LIST=3 OUT=/path/to/uma-s-1p2-omat-f64-w2
+for R in 0 1; do EXPORT_RANK=$R python $ENG/python/export_blocks_xpu.py; done
+```
+
+`N_LIST` is the NaCl rocksalt repeat used as the trace sample (the
+PACKAGES/uma example is 3×3×3). Changing atom count or W requires a new
+export. Do not commit checkpoints or artifacts (FAIR Chemistry License).
 
 ## Build
 

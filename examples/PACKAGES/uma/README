@@ -2,16 +2,37 @@ This directory has short example scripts for pair_style uma (ML-UMA).
 
 UMA model weights are NOT shipped with LAMMPS (FAIR Chemistry License).
 Export a FP64 TorchScript artifact from a user-supplied FairChem checkpoint
-before running. pair_coeff names that artifact directory.
+before running. pair_coeff names that artifact directory. One MPI rank and
+several MPI ranks need different exports.
 
-  python src/ML-UMA/uma-engine/python/export_artifact.py \
+Single rank (one GPU, or CPU LibTorch)
+  Writes model_traced.pt + metadata.json in the output directory.
+
+  PYTHONPATH=src/ML-UMA/uma-engine/python python \
+    src/ML-UMA/uma-engine/python/export_artifact.py \
     --checkpoint $UMA_CHECKPOINT --dtype float64 --task omat \
     --output /path/to/uma-s-1p2-omat-f64
 
-Then, from this directory, with LAMMPS built -D PKG_ML-UMA=on:
-
   lmp -in in.nacl.nvt -var uma_art /path/to/uma-s-1p2-omat-f64
   lmp -in in.nacl.npt -var uma_art /path/to/uma-s-1p2-omat-f64
+
+Graph-parallel (one MPI rank per GPU, devices 1)
+  Each rank loads OUT/w{W}/r{R}/. Export W times with EXPORT_WORLD=W.
+  N_LIST is the rocksalt repeat of this example (3x3x3 -> 216 atoms).
+  Changing the atom count requires a new export.
+
+  ENG=src/ML-UMA/uma-engine
+  export PYTHONPATH=$ENG/python TRACE_DEV=cuda N_LIST=3
+  export EXPORT_WORLD=2 OUT=/path/to/uma-s-1p2-omat-f64-w2
+  for R in 0 1; do
+    EXPORT_RANK=$R python $ENG/python/export_blocks_xpu.py
+  done
+
+  mpiexec -n 2 lmp -in in.nacl.npt -var uma_art /path/to/uma-s-1p2-omat-f64-w2
+
+  pair_coeff names the parent directory (the one that contains w2/), not
+  an individual r{R} folder. Do not pass a single-rank export_artifact.py
+  directory to mpiexec -n W; the ranks will not find w{W}/r{R}.
 
 in.nacl.nvt
   NaCl rocksalt 3x3x3 (216 atoms), 10-step NVT at 300 K.
@@ -22,9 +43,6 @@ in.nacl.npt
   strain-gradient virial when the barostat is present; ac must stay off.
 
 Do not launch with -k on or -sf kk. There is no uma/kk style.
-Graph-parallel uses one MPI rank per GPU and devices 1 (the default):
-
-  mpiexec -n 12 lmp -in in.nacl.nvt -var uma_art /path/to/uma-s-1p2-omat-f64
 
 No log.* files are included: the example cannot run in default LAMMPS CI
 without LibTorch and a user artifact.
