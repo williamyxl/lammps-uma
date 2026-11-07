@@ -24,9 +24,7 @@ newton off
 
 `pair_coeff` names a TorchScript **artifact directory** (exported once from
 a FairChem UMA checkpoint). LAMMPS does not import FairChem at run time.
-Leftover `UMA_AC` / `UMA_COMPUTE_VIRIAL` / `UMA_DD` /
-`UMA_ENGINE_BUILD_GRAPH` env vars still work once with a warning; a
-keyword wins. Other `UMA_*` names are undocumented debug/perf knobs.
+Runtime knobs are pair_style keywords only.
 
 Full syntax: [`doc/src/pair_uma.rst`](../../doc/src/pair_uma.rst).
 

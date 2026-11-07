@@ -302,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
         "checkpoint": str(ckpt),
         "state_dict": str(state_path) if state_path else None,
         "ranks": results,
-        "backend": "Kokkos+LibTorch+vesin",
+        "backend": "LibTorch+vesin",
         "execution_mode": args.execution_mode,
         "merge_mole": bool(args.merge_mole),
         "notes": [

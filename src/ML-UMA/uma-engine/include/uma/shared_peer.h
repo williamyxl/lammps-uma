@@ -27,6 +27,7 @@
 #include <torch/torch.h>
 
 #include "uma/uma_peer.h"
+#include "uma/runtime_config.h"
 
 #if defined(UMA_ENGINE_USE_CUDA)
 #include <c10/cuda/CUDAStream.h>
@@ -64,7 +65,7 @@ struct NcclPerfAcc {
   bool enabled = false;
   NcclPerfAcc() {
     auto on = [](const char* k) {
-      const char* v = std::getenv(k);
+      const char* v = uma::runtime_get(k);
       return v && *v && std::string(v) != "0";
     };
     enabled = on("UMA_MP_PERF") || on("UMA_PEER_PERF");
@@ -158,7 +159,7 @@ class SharedPeerGatherSlot {
   };
 
   static int select_transport() {
-    if (const char* e = std::getenv("UMA_PEER_TRANSPORT")) {
+    if (const char* e = uma::runtime_get("UMA_PEER_TRANSPORT")) {
       if (std::strcmp(e, "shm") == 0) return kTransportShm;
       if (std::strcmp(e, "cuda_ipc") == 0) return kTransportCudaIpc;
       if (std::strcmp(e, "nccl") == 0) {
@@ -740,7 +741,7 @@ class SharedPeerGatherSlot {
   // W17: when UMA_CUDA_GRAPH=1, NCCL runs on Torch's current stream so capture
   // can include collectives (no side-stream event waits outside the graph).
   static bool nccl_on_current_stream_() {
-    const char* e = std::getenv("UMA_CUDA_GRAPH");
+    const char* e = uma::runtime_get("UMA_CUDA_GRAPH");
     return e && std::string(e) == "1";
   }
 

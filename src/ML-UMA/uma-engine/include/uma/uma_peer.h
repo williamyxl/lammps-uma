@@ -170,7 +170,7 @@ inline torch::Tensor all_reduce_sum(const std::vector<torch::Tensor>& parts,
   return acc;
 }
 
-// Thread-safe same-process gather slot (Kokkos-visible devices, single MPI rank).
+// Thread-safe same-process gather slot (visible devices, single MPI rank).
 // Generation-matched barrier — avoids pairing phase-N wait with phase-N+1.
 class PeerGatherSlot {
  public:

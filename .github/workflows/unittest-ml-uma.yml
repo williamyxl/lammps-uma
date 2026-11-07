@@ -1,0 +1,67 @@
+# Compile PKG_ML-UMA against CPU LibTorch. No inference: UMA weights
+# cannot be shipped (FAIR Chemistry License).
+name: "Unittest ML-UMA compile"
+
+on:
+  push:
+    branches:
+      - develop
+      - maintenance
+  pull_request:
+    branches:
+      - develop
+
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.event_name }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{github.event_name == 'pull_request'}}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Linux ML-UMA compile
+    if: ${{ github.repository == 'lammps/lammps' }}
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+      with:
+        fetch-depth: 2
+        persist-credentials: false
+
+    - name: Install extra packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build libopenmpi-dev python3-dev python3-pip python3-venv
+
+    - name: Install CPU LibTorch
+      run: |
+        python3 -m venv umaenv
+        source umaenv/bin/activate
+        python3 -m pip install --upgrade pip
+        python3 -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+    - name: Configure and build LAMMPS with PKG_ML-UMA
+      shell: bash
+      run: |
+        source umaenv/bin/activate
+        TORCH_PREFIX="$(python3 -c 'import torch; print(torch.utils.cmake_prefix_path)')"
+        cmake -S cmake -B build \
+              -D CMAKE_BUILD_TYPE=Release \
+              -D PKG_ML-UMA=on \
+              -D UMA_ENGINE_USE_CUDA=off \
+              -D UMA_ENGINE_USE_XPU=off \
+              -D BUILD_MPI=on \
+              -D DOWNLOAD_POTENTIALS=off \
+              -D CMAKE_PREFIX_PATH="${TORCH_PREFIX}" \
+              -G Ninja
+        cmake --build build --target lmp
+
+    - name: Check pair uma is linked
+      shell: bash
+      run: |
+        ./build/lmp -help | grep -E 'uma'

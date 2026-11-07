@@ -38,6 +38,7 @@
 #include "uma/postprocess.h"
 #include "uma/shared_peer.h"
 #include "uma/vesin_nl.h"
+#include "uma/runtime_config.h"
 
 namespace uma {
 namespace {
@@ -46,7 +47,7 @@ namespace {
 // process-constant).
 bool mp_perf_enabled() {
   static const bool on = [] {
-    const char* e = std::getenv("UMA_MP_PERF");
+    const char* e = uma::runtime_get("UMA_MP_PERF");
     return e && e[0] == '1';
   }();
   return on;
@@ -101,7 +102,7 @@ bool LibtorchMpRuntime::artifacts_present(const std::string& artifact_dir,
   if (num_devices < 2) return false;
   // Legacy wN_rR or n-specific wN_n{N}_rR (via UMA_MP_NATOMS).
   std::string ntag;
-  if (const char* e = std::getenv("UMA_MP_NATOMS")) {
+  if (const char* e = uma::runtime_get("UMA_MP_NATOMS")) {
     if (*e) ntag = std::string("_n") + e;
   }
   for (int r = 0; r < num_devices; ++r) {
@@ -198,9 +199,9 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
   {
     rt->impl_->payload_path = rt->impl_->shm_path + "_payload";
     int64_t n_hint = PayloadShm::kMaxN;
-    if (const char* e = std::getenv("UMA_STRUCTURE_NATOMS")) {
+    if (const char* e = uma::runtime_get("UMA_STRUCTURE_NATOMS")) {
       if (*e) n_hint = std::strtoll(e, nullptr, 10);
-    } else if (const char* e = std::getenv("UMA_MP_NATOMS")) {
+    } else if (const char* e = uma::runtime_get("UMA_MP_NATOMS")) {
       if (*e) n_hint = std::strtoll(e, nullptr, 10);
     }
     if (n_hint < 1) n_hint = PayloadShm::kMaxN;
@@ -234,7 +235,7 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
 
   // Resolve worker binary next to this process or via env.
   std::string worker_bin;
-  if (const char* e = std::getenv("UMA_LIBTORCH_MP_WORKER")) {
+  if (const char* e = uma::runtime_get("UMA_LIBTORCH_MP_WORKER")) {
     worker_bin = e;
   } else {
 #ifdef UMA_ENGINE_PYTHON_DIR
@@ -273,7 +274,7 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
       // CUDA_LAUNCH_BLOCKING is a large N>1 tax; opt-in for assert debug only.
       // UMA_CUDA_LAUNCH_BLOCKING=1 → force "1"; =0 → unset; unset → leave env as-is
       // (default: do NOT force on — required for multi-GPU self-scaling).
-      if (const char* blk = std::getenv("UMA_CUDA_LAUNCH_BLOCKING")) {
+      if (const char* blk = uma::runtime_get("UMA_CUDA_LAUNCH_BLOCKING")) {
         if (blk[0] == '1' && blk[1] == '\0') {
           ::setenv("CUDA_LAUNCH_BLOCKING", "1", 1);
         } else if (blk[0] == '0' && blk[1] == '\0') {
@@ -284,7 +285,7 @@ std::unique_ptr<LibtorchMpRuntime> LibtorchMpRuntime::try_create(
       }
       // Per-rank stderr log (CUDA asserts / TORCH errors).
       std::string log_dir = "/tmp/uma_mp_logs";
-      if (const char* e = std::getenv("UMA_MP_LOG_DIR")) {
+      if (const char* e = uma::runtime_get("UMA_MP_LOG_DIR")) {
         if (*e) log_dir = e;
       }
       ::setenv("UMA_MP_LOG_DIR", log_dir.c_str(), 1);
@@ -543,7 +544,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
   // Tier0/W1: coverage check once per (n, world), or every step if
   // UMA_DEBUG_PARTITION_CHECK=1.
   const bool debug_part = [] {
-    const char* e = std::getenv("UMA_DEBUG_PARTITION_CHECK");
+    const char* e = uma::runtime_get("UMA_DEBUG_PARTITION_CHECK");
     return e && e[0] == '1' && e[1] == '\0';
   }();
   const bool need_cover =
@@ -653,7 +654,7 @@ Prediction LibtorchMpRuntime::predict(const torch::Tensor& pos,
         static_cast<long long>(n_edges));
     std::string line_s(line);
     std::cerr << line_s;
-    if (const char* log_dir = std::getenv("UMA_MP_LOG_DIR")) {
+    if (const char* log_dir = uma::runtime_get("UMA_MP_LOG_DIR")) {
       if (*log_dir) {
         const std::string path = std::string(log_dir) + "/parent.log";
         FILE* fp = std::fopen(path.c_str(), "a");

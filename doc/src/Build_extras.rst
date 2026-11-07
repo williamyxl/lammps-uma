@@ -1861,9 +1861,10 @@ TorchScript artifact from a user-supplied FairChem checkpoint with
       multi-tile runs use MPI ranks (one device per rank), not
       ``lmp -k on -sf kk``.
 
-      LAMMPS CI does not build ML-UMA: GitHub runners have no GPU LibTorch,
-      and UMA weights cannot be redistributed.  The force-style YAML for
-      ``pair uma`` skips unless a user artifact is present.
+      GitHub Actions compiles ML-UMA against CPU LibTorch
+      (``.github/workflows/unittest-ml-uma.yml``).  That job does not run
+      inference: UMA weights cannot be redistributed, so the force-style
+      YAML for ``pair uma`` skips unless a user artifact is present.
 
    .. tab:: Traditional make
 

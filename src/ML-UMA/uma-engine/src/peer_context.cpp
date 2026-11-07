@@ -1,5 +1,6 @@
 #include "uma/peer_context.h"
 #include "uma/xccl_peer.h"
+#include "uma/runtime_config.h"
 
 #include <cstdlib>
 #include <stdexcept>
@@ -117,7 +118,7 @@ class AllReduceSumFn : public torch::autograd::Function<AllReduceSumFn> {
   static torch::autograd::variable_list backward(
       torch::autograd::AutogradContext* /*ctx*/,
       torch::autograd::variable_list grad_outputs) {
-    const char* mode = std::getenv("UMA_ALLREDUCE_WITH_GRAD_BWD");
+    const char* mode = uma::runtime_get("UMA_ALLREDUCE_WITH_GRAD_BWD");
     // Default ON for process-per-rank (sweep 20925383: needed for F green).
     const bool ar_bwd = !(mode && std::string(mode) == "0");
     if (ar_bwd) {

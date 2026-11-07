@@ -43,7 +43,7 @@ class PairUMA : public Pair {
   // Supported: PRECISION_DOUBLE (FP64 positions, energy, forces).
   // PRECISION_MIXED is retained only so older inputs fail with a clear error.
   enum Precision { PRECISION_MIXED = 0, PRECISION_DOUBLE = 1 };
-  // pair_style keywords (defaults match the former UMA_* getenv defaults).
+  // pair_style keywords (defaults match the former UMA_* names).
   enum VirialMode { VIRIAL_AUTO = 0, VIRIAL_YES = 1, VIRIAL_NO = 2 };
   enum AcMode { AC_OFF = 0, AC_CHUNK = 1, AC_BLOCK = 2, AC_FULL = 3 };
 
@@ -60,10 +60,8 @@ class PairUMA : public Pair {
  protected:
   virtual void allocate();
   void load_predictor();
-  // Resolve pair_style keywords vs deprecated UMA_* getenv, then push the
-  // product knobs into the environment so uma-engine (still getenv-based) sees
-  // the same values. Called from settings() after parsing.
-  void apply_runtime_config(bool virial_kw, bool ac_kw, bool decomp_kw, bool neigh_kw);
+  // Push pair_style keywords into uma-engine runtime_config. Called from settings().
+  void apply_runtime_config();
   // init_mpi_peer() builds the GP-over-MPI peer and returns true when it
   // handled construction (multi-rank, non-DD). The single-tile device pick is
   // a file-local helper in pair_uma.cpp (returns torch::Device, kept out of

@@ -112,12 +112,8 @@ The *devices* keyword selects same-node graph-parallel **fork** workers
 rank per GPU** with ``devices 1`` (the default).  Combining ``devices`` >
 1 with more than one MPI rank is an error.
 
-The *ac*, *virial*, *decomp*, and *neigh* keywords replace the former
-``UMA_AC``, ``UMA_COMPUTE_VIRIAL``, ``UMA_DD``, and
-``UMA_ENGINE_BUILD_GRAPH`` environment variables.  If a keyword is
-omitted, a leftover env var is still honored once with a warning.
-Setting the keyword ignores the env var.  Other ``UMA_*`` names are
-undocumented debug/perf knobs and are not pair_style arguments.
+The *ac*, *virial*, *decomp*, and *neigh* keywords are the only runtime
+API.  Process environment variables are not read for these knobs.
 
 Mixing, shift, table, tail correction, restart, rRESPA info
 """""""""""""""""""""""""""""""""""""""""""""""""""""""""""

@@ -6,6 +6,7 @@
 #include <string>
 
 #include "uma/libtorch_mp.h"
+#include "uma/runtime_config.h"
 
 namespace uma {
 
@@ -13,7 +14,7 @@ std::unique_ptr<GraphParallelRuntime> GraphParallelRuntime::create(
     const std::string& artifact_dir, const ArtifactMetadata& metadata,
     int num_devices, torch::ScalarType compute_dtype,
     bool activation_checkpointing) {
-  if (const char* e = std::getenv("UMA_PYTHON_GP_WORKER")) {
+  if (const char* e = uma::runtime_get("UMA_PYTHON_GP_WORKER")) {
     if (e[0] == '1' && e[1] == '\0') {
       throw std::runtime_error(
           "GraphParallelRuntime: the Python GP worker was removed. "

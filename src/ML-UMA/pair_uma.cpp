@@ -36,6 +36,7 @@
 #include "uma/predictor.h"
 #include "uma/mpi_peer_predictor.h"
 #include "uma/halo_context.h"
+#include "uma/runtime_config.h"
 
 #if defined(UMA_ENGINE_USE_XPU)
 #include <c10/xpu/XPUCachingAllocator.h>
@@ -56,22 +57,6 @@
 #include <vector>
 
 using namespace LAMMPS_NS;
-
-// One validated bool-env parse (replaces the ad-hoc `e[0]=='1'&&e[1]=='\0'`
-// idiom scattered across the file). Accepts exactly "0"/"1"; any other value is a
-// config error (warned, treated as the default) rather than silently ignored.
-// Product knobs are pair_style keywords; getenv is a deprecated fallback.
-static bool uma_env_bool(const char *name, bool dflt, Error *error = nullptr)
-{
-  const char *e = std::getenv(name);
-  if (e == nullptr || e[0] == '\0') return dflt;
-  if (e[0] == '1' && e[1] == '\0') return true;
-  if (e[0] == '0' && e[1] == '\0') return false;
-  if (error)
-    error->warning(FLERR, "Ignoring non-boolean value '{}' for {} (expected 0 or 1)",
-                   e, name);
-  return dflt;
-}
 
 static int uma_ac_from_string(const char *e)
 {
@@ -132,7 +117,7 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   map = nullptr;
   predictor = nullptr;
   mpi_peer = nullptr;
-  gpus_per_node = 4;  // override via UMA_GPUS_PER_NODE
+  gpus_per_node = 4;
   cutoff = 6.0;
   precision = PRECISION_DOUBLE;
   num_devices = 1;
@@ -141,8 +126,7 @@ PairUMA::PairUMA(LAMMPS *lmp) : Pair(lmp)
   mn_rank = 0;
   mn_active = false;
   list = nullptr;
-  // Product defaults: match former UMA_* getenv defaults. settings() may
-  // override via pair_style keywords (or a deprecated getenv fallback).
+  // Product defaults. settings() may override via pair_style keywords.
   engine_build_graph_ = false;
   want_virial_flag_ = false;
   virial_mode_ = VIRIAL_AUTO;
@@ -280,8 +264,7 @@ void PairUMA::compute(int eflag, int vflag)
   // cumulative from process start, so the last line is the run peak; the
   // fail line is what was allocated when the step threw (including OOM).
   auto mem_peak = [&](const char* tag) {
-    const char* e = std::getenv("UMA_MEM_PEAK");
-    if (!e || e[0] != '1') return;
+    if (!uma::runtime_flag_1("UMA_MEM_PEAK")) return;
     const auto agg = static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE);
     double alloc = 0.0;
     double reserved = 0.0;
@@ -530,8 +513,6 @@ void PairUMA::settings(int narg, char **arg)
   engine_build_graph_ = false;
   want_virial_flag_ = false;
 
-  bool virial_kw = false, ac_kw = false, decomp_kw = false, neigh_kw = false;
-
   int iarg = 0;
   while (iarg < narg) {
     if (strcmp(arg[iarg], "precision") == 0) {
@@ -564,7 +545,6 @@ void PairUMA::settings(int narg, char **arg)
       else
         error->all(FLERR, "Illegal pair_style uma virial {}; expected auto, yes, or no",
                    arg[iarg + 1]);
-      virial_kw = true;
       iarg += 2;
     } else if (strcmp(arg[iarg], "ac") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
@@ -574,7 +554,6 @@ void PairUMA::settings(int narg, char **arg)
         error->all(FLERR, "Illegal pair_style uma ac {}; expected off, chunk, block, or full",
                    arg[iarg + 1]);
       ac_mode_ = parsed;
-      ac_kw = true;
       iarg += 2;
     } else if (strcmp(arg[iarg], "decomp") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
@@ -585,7 +564,6 @@ void PairUMA::settings(int narg, char **arg)
       else
         error->all(FLERR, "Illegal pair_style uma decomp {}; expected graph or spatial",
                    arg[iarg + 1]);
-      decomp_kw = true;
       iarg += 2;
     } else if (strcmp(arg[iarg], "neigh") == 0) {
       if (iarg + 2 > narg) error->all(FLERR, "Illegal pair_style uma command");
@@ -596,7 +574,6 @@ void PairUMA::settings(int narg, char **arg)
       else
         error->all(FLERR, "Illegal pair_style uma neigh {}; expected lammps or engine",
                    arg[iarg + 1]);
-      neigh_kw = true;
       iarg += 2;
     } else if (strcmp(arg[iarg], "double") == 0) {
       precision = PRECISION_DOUBLE;
@@ -610,70 +587,21 @@ void PairUMA::settings(int narg, char **arg)
     }
   }
 
-  apply_runtime_config(virial_kw, ac_kw, decomp_kw, neigh_kw);
+  apply_runtime_config();
 }
 
 /* ---------------------------------------------------------------------- */
 
-void PairUMA::apply_runtime_config(bool virial_kw, bool ac_kw, bool decomp_kw, bool neigh_kw)
+void PairUMA::apply_runtime_config()
 {
-  // Deprecated getenv fallback when the keyword was omitted. If the keyword
-  // was set, it wins and a leftover UMA_* var is ignored (rank-0 note).
-  auto note = [&](const std::string &msg) {
-    if (comm->me == 0) utils::logmesg(lmp, "WARNING: {}\n", msg);
-  };
-
-  if (!virial_kw) {
-    const char *e = std::getenv("UMA_COMPUTE_VIRIAL");
-    if (e && e[0] != '\0') {
-      if (e[0] == '1' && e[1] == '\0')
-        virial_mode_ = VIRIAL_YES;
-      else if (e[0] == '0' && e[1] == '\0')
-        virial_mode_ = VIRIAL_NO;
-      note("Pair style uma: UMA_COMPUTE_VIRIAL is deprecated; use 'virial auto|yes|no'");
-    }
-  } else if (std::getenv("UMA_COMPUTE_VIRIAL")) {
-    note("Pair style uma: ignoring UMA_COMPUTE_VIRIAL; pair_style keyword virial was set");
-  }
-
-  if (!ac_kw) {
-    const char *e = std::getenv("UMA_AC");
-    if (e && e[0] != '\0') {
-      ac_mode_ = uma_ac_from_string(e);
-      note("Pair style uma: UMA_AC is deprecated; use 'ac off|chunk|block|full'");
-    }
-  } else if (std::getenv("UMA_AC")) {
-    note("Pair style uma: ignoring UMA_AC; pair_style keyword ac was set");
-  }
-
-  if (!decomp_kw) {
-    if (uma_env_bool("UMA_DD", false, error)) {
-      dd_active_ = true;
-      note("Pair style uma: UMA_DD is deprecated; use 'decomp spatial'");
-    }
-  } else if (std::getenv("UMA_DD")) {
-    note("Pair style uma: ignoring UMA_DD; pair_style keyword decomp was set");
-  }
-
-  if (!neigh_kw) {
-    if (uma_env_bool("UMA_ENGINE_BUILD_GRAPH", false, error)) {
-      engine_build_graph_ = true;
-      note("Pair style uma: UMA_ENGINE_BUILD_GRAPH is deprecated; use 'neigh engine'");
-    }
-  } else if (std::getenv("UMA_ENGINE_BUILD_GRAPH")) {
-    note("Pair style uma: ignoring UMA_ENGINE_BUILD_GRAPH; pair_style keyword neigh was set");
-  }
-
   want_virial_flag_ = (virial_mode_ == VIRIAL_YES);
-
-  // Bridge into uma-engine, which still reads these names via getenv.
-  platform::putenv(fmt::format("UMA_AC={}", uma_ac_name(ac_mode_)));
-  platform::putenv(fmt::format("UMA_DD={}", dd_active_ ? "1" : "0"));
-  platform::putenv(fmt::format("UMA_ENGINE_BUILD_GRAPH={}", engine_build_graph_ ? "1" : "0"));
+  uma::runtime_set("UMA_AC", uma_ac_name(ac_mode_));
+  uma::runtime_set("UMA_DD", dd_active_ ? "1" : "0");
+  uma::runtime_set("UMA_ENGINE_BUILD_GRAPH", engine_build_graph_ ? "1" : "0");
   if (virial_mode_ == VIRIAL_AUTO)
-    platform::unsetenv("UMA_COMPUTE_VIRIAL");
+    uma::runtime_set("UMA_COMPUTE_VIRIAL", nullptr);
   else
-    platform::putenv(fmt::format("UMA_COMPUTE_VIRIAL={}", virial_mode_ == VIRIAL_YES ? "1" : "0"));
+    uma::runtime_set("UMA_COMPUTE_VIRIAL", virial_mode_ == VIRIAL_YES ? "1" : "0");
 }
 
 /* ---------------------------------------------------------------------- */
@@ -818,12 +746,7 @@ bool PairUMA::init_mpi_peer()
     const int mn_w = comm->nprocs;   // world SIZE (not the MPI_Comm `world`)
     const int rank = comm->me;
 
-    // GPUs/tiles per node: env override else default 4.
     gpus_per_node = 4;
-    if (const char *e = std::getenv("UMA_GPUS_PER_NODE")) {
-      const int v = atoi(e);
-      if (v >= 1) gpus_per_node = v;
-    }
     // Local rank for device binding: launcher hint else me % gpus_per_node.
     int local_rank = comm->me % gpus_per_node;
     for (const char *v : {"PMI_LOCAL_RANK", "SLURM_LOCALID",
@@ -944,7 +867,7 @@ void PairUMA::init_style()
   if (atom->tag_enable == 0) error->all(FLERR, "Pair style uma requires atom IDs");
   mole_composition_done_ = false;  // re-emit the one-time DD MoLE warning per setup
 
-  // Echo the resolved runtime config once (keywords, not getenv).
+  // Echo the resolved runtime config once.
   if (comm->me == 0) {
     utils::logmesg(lmp,
                    "Pair uma config: precision={} devices={} virial={} ac={} "
@@ -971,7 +894,7 @@ void PairUMA::init_style()
   // was explicitly turned back on, which is incompatible with the strain grad.
   // The multi-node GP/DD paths still have no virial and still refuse a barostat.
   const bool multinode = (comm->nprocs > 1);
-  const bool ac_on = (ac_mode_ != AC_OFF) || uma_env_bool("UMA_CKPT", false);
+  const bool ac_on = (ac_mode_ != AC_OFF);
   bool barostat_present = false;
   const char *barostat_style = nullptr;
   for (const auto &ifix : modify->get_fix_list()) {
@@ -990,7 +913,7 @@ void PairUMA::init_style()
       virial_mode_ != VIRIAL_NO) {
     // single tile OR GP, AC-off, virial auto -> auto-enable the virial.
     want_virial_flag_ = true;
-    platform::putenv("UMA_COMPUTE_VIRIAL=1");
+    uma::runtime_set("UMA_COMPUTE_VIRIAL", "1");
     if (comm->me == 0)
       utils::logmesg(lmp,
           "Pair uma: barostat (fix {}) with activation checkpointing OFF -> "
@@ -1166,7 +1089,7 @@ void PairUMA::preflight_memory_check()
   }
 
   // AC resolution: activation checkpointing defaults OFF; opt in with ac chunk|block|full.
-  const bool ac_on = (ac_mode_ != AC_OFF) || uma_env_bool("UMA_CKPT", false);
+  const bool ac_on = (ac_mode_ != AC_OFF);
   const bool ac_off = !ac_on;
   // Measured single-point ceilings (atoms/tile), conservative:
   const double ceil_ac_on = 36000.0;         // ~N=38/12 tiles
@@ -1401,7 +1324,7 @@ void PairUMA::run_compute_dd(int eflag, int vflag)
   int dummy = 0, pad_nbr = 0;
   const int nnodes = setup_dd_pad_nodes(nall, dummy, pad_nbr);  // pad nodes
 
-  const bool dd_dbg = (std::getenv("UMA_DD_DEBUG") != nullptr);
+  const bool dd_dbg = (uma::runtime_get("UMA_DD_DEBUG") != nullptr);
   if (dd_dbg && screen)
     fprintf(screen, "uma DD[%d]: nlocal=%d nghost=%d nall=%d nnodes=%d\n",
             comm->me, nlocal, nghost, nall, nnodes);
@@ -1536,10 +1459,7 @@ void PairUMA::reduce_dd_ghost_forces(int nlocal, int nall, double **f)
 void PairUMA::dd_flag_agreement()
 {
   if (comm->nprocs <= 1) return;             // single rank: nothing to agree on
-  auto flag = [](const char *n) -> int {
-    const char *e = std::getenv(n);
-    return (e && e[0] == '1' && e[1] == '\0') ? 1 : 0;
-  };
+  auto flag = [](const char *n) -> int { return uma::runtime_flag_1(n) ? 1 : 0; };
   // [no_halo, halo_test, edge_cap]. edge_cap resolved (env or metadata) so a
   // mismatch in the *effective* cap (not just the env) is caught.
   long long local[3] = {flag("UMA_DD_NO_HALO"), flag("UMA_DD_HALO_TEST"),
@@ -1560,7 +1480,7 @@ void PairUMA::dd_flag_agreement()
 int64_t PairUMA::resolve_dd_edge_cap()
 {
   int64_t edge_cap = 0;
-  if (const char *e = std::getenv("UMA_DD_EDGE_CAP")) {
+  if (const char *e = uma::runtime_get("UMA_DD_EDGE_CAP")) {
     char *end = nullptr;
     const long long v = std::strtoll(e, &end, 10);
     if (end == e || *end != '\0' || v < 0)
@@ -1780,7 +1700,7 @@ void PairUMA::mole_composition_allreduce()
                    "composition (homogeneous approximation); multi-species DD "
                    "energies are approximate. Single-tile/GP are exact.");
 
-  static const bool dd_debug = (std::getenv("UMA_DD_DEBUG") != nullptr);
+  static const bool dd_debug = (uma::runtime_get("UMA_DD_DEBUG") != nullptr);
   if (dd_debug && screen && comm->me == 0) {
     long total = 0;
     for (long c : global_counts) total += c;
@@ -1849,8 +1769,8 @@ void PairUMA::install_halo_callbacks()
   // of that atom). Pinpoints pack/unpack/index bugs without the model.
   // install_halo_callbacks() is re-run every DD step; read
   // the debug flag ONCE (static) so the common (unset) case is a cheap branch, not
-  // a per-step getenv. The self-test aborts (error->all) after one run when set.
-  static const bool run_halo_test = (std::getenv("UMA_DD_HALO_TEST") != nullptr);
+  // a per-step flag. The self-test aborts (error->all) after one run when set.
+  static const bool run_halo_test = uma::runtime_flag_1("UMA_DD_HALO_TEST");
   if (run_halo_test) {
     const int na = atom->nlocal + atom->nghost;
     const int pn = static_cast<int>(comm_forward);

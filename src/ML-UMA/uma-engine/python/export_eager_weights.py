@@ -92,7 +92,7 @@ def export_eager_weights(
         "state_dict_keys": sorted(model.state_dict().keys())[:32],
         "state_dict_key_count": len(model.state_dict()),
         "notes": [
-            "Eager weights for native Kokkos multi-GPU path (not TorchScript).",
+            "Eager weights for native LibTorch multi-GPU path (not TorchScript).",
             "Full UMA; do not use with Ray GP worker.",
         ],
     }

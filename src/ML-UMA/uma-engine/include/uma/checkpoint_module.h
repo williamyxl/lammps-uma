@@ -13,6 +13,7 @@
 // captured as constants. Bit-exact vs the non-checkpointed forward.
 
 #include <torch/torch.h>
+#include "uma/runtime_config.h"
 #include <torch/script.h>
 #include <torch/csrc/autograd/autograd.h>
 #include <torch/csrc/autograd/custom_function.h>
@@ -81,7 +82,7 @@ struct CheckpointModuleFn
 // whole-module branch is dead (per-chunk ops short-circuit first); the
 // effective AC default is UMA_AC in block_context.cpp.
 inline bool checkpoint_enabled() {
-  const char* e = std::getenv("UMA_CKPT");
+  const char* e = uma::runtime_get("UMA_CKPT");
   if (e == nullptr) return false;
   return !(e[0] == '0' && e[1] == '\0');
 }

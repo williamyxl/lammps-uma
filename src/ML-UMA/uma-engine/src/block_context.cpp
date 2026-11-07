@@ -1,4 +1,5 @@
 #include "uma/block_context.h"
+#include "uma/runtime_config.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -33,7 +34,7 @@ namespace {
 //   UMA_NO_RECOMPUTE_EDEG=1   -> edge_degree prologue only
 // Each is evaluated once and cached.
 bool env_flag_1(const char* name) {
-  const char* e = std::getenv(name);
+  const char* e = uma::runtime_get(name);
   return e != nullptr && e[0] == '1' && e[1] == '\0';
 }
 
@@ -56,7 +57,7 @@ bool env_flag_1(const char* name) {
 enum class AcLevel { kOff, kChunk, kBlock, kFull };
 AcLevel ac_level() {
   static const AcLevel v = [] {
-    const char* e = std::getenv("UMA_AC");
+    const char* e = uma::runtime_get("UMA_AC");
     if (e == nullptr) return AcLevel::kOff;
     const std::string s(e);
     if (s == "off" || s == "0" || s.empty()) return AcLevel::kOff;
@@ -107,7 +108,7 @@ bool no_recompute_edeg() {
 // Numerically identical either way (retain vs recompute = same gradient).
 int chunk_retain_k() {
   static const int v = [] {
-    const char* e = std::getenv("UMA_CHUNK_RETAIN_K");
+    const char* e = uma::runtime_get("UMA_CHUNK_RETAIN_K");
     if (e == nullptr) return 0;
     try { return std::max(0, std::stoi(e)); } catch (...) { return 0; }
   }();

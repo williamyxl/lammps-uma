@@ -28,6 +28,7 @@
 #include "uma/xccl_peer.h"
 #include "uma/vesin_nl.h"
 #include "uma/neighbor_list.h"
+#include "uma/runtime_config.h"
 
 #include <unistd.h>
 
@@ -47,7 +48,7 @@ namespace {
 bool mn_checkpoint_enabled() {
   // Default ON for the multi-node path: large systems (the reason to go
   // multi-node) OOM without it, and it is bit-exact. UMA_MN_CKPT=0 disables.
-  const char* e = std::getenv("UMA_MN_CKPT");
+  const char* e = uma::runtime_get("UMA_MN_CKPT");
   if (e == nullptr) return true;
   return !(e[0] == '0' && e[1] == '\0');
 }
@@ -229,7 +230,7 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
   } else {
     // ---- Legacy monolithic-shard fallback (no per-rank AC artifacts). ----
     // Load this rank's shard: model_mp_w{W}_n{N}_r{R}.pt (n-specific preferred).
-    if (const char* natoms_e = std::getenv("UMA_MP_NATOMS")) {
+    if (const char* natoms_e = uma::runtime_get("UMA_MP_NATOMS")) {
       if (*natoms_e) {
         const std::string nspec = artifact_dir + "/model_mp_w" +
                                   std::to_string(world) + "_n" + natoms_e +
@@ -263,14 +264,14 @@ std::unique_ptr<MpiPeerPredictor> MpiPeerPredictor::create(
     //   UMA_SKIP_PRE_BWD_BARRIER              -> lockstep entry to mid-bwd collectives
     //   UMA_CHUNK_RETAIN_K (int)              -> backward graph shape
     // Reuses the P0.2 local_mode/all_reduce(SUM) pattern.
-    const char* ar = std::getenv("UMA_ALLREDUCE_WITH_GRAD_BWD");
+    const char* ar = uma::runtime_get("UMA_ALLREDUCE_WITH_GRAD_BWD");
     const bool ar_bwd = !(ar && std::string(ar) == "0");           // default ON
-    const char* sb = std::getenv("UMA_SKIP_PRE_BWD_BARRIER");
+    const char* sb = uma::runtime_get("UMA_SKIP_PRE_BWD_BARRIER");
     const bool skip_bar = (sb && sb[0] == '1' && sb[1] == '\0');
     // Read UMA_CHUNK_RETAIN_K inline (same parse as block_context.cpp::chunk_retain_k)
     // to avoid a header-linkage dependency on that anon-namespace-adjacent helper.
     int retain_k = 0;
-    if (const char* rk = std::getenv("UMA_CHUNK_RETAIN_K")) {
+    if (const char* rk = uma::runtime_get("UMA_CHUNK_RETAIN_K")) {
       try { retain_k = std::max(0, std::stoi(rk)); } catch (...) { retain_k = 0; }
     }
     const int local_mode = (self->impl_->ac_active ? 1 : 0) |
@@ -333,7 +334,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   const auto dev = I.device;
   const auto dtype = compute_dtype_;
   using clk = std::chrono::steady_clock;
-  const bool perf = [] { const char* e = std::getenv("UMA_MP_PERF"); return e && e[0] == '1'; }();
+  const bool perf = [] { const char* e = uma::runtime_get("UMA_MP_PERF"); return e && e[0] == '1'; }();
   auto t0 = clk::now();
 
   auto pos = torch::from_blob(const_cast<double*>(pos_xyz), {n, 3}, torch::kFloat64)
@@ -529,7 +530,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
   // Deterministic collective ordering: every rank must enter the backward's
   // mid-graph uma_peer NCCL calls in lockstep (matches the worker's pre-bwd
   // barrier). Skippable via UMA_SKIP_PRE_BWD_BARRIER=1 for perf experiments.
-  const char* skip_bar = std::getenv("UMA_SKIP_PRE_BWD_BARRIER");
+  const char* skip_bar = uma::runtime_get("UMA_SKIP_PRE_BWD_BARRIER");
   if (!(skip_bar && skip_bar[0] == '1'))
     PeerContext::instance().slot().barrier(rank_);
   std::vector<torch::Tensor> grad_inputs = {pos_grad};

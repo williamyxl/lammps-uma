@@ -1,4 +1,5 @@
 #include "uma/neighbor_list.h"
+#include "uma/runtime_config.h"
 
 #include <algorithm>
 #include <array>
@@ -462,7 +463,7 @@ NeighborGraph emit_graph(
 }
 
 bool allpairs_forced() {
-  const char* v = std::getenv("UMA_NL_ALLPAIRS");
+  const char* v = uma::runtime_get("UMA_NL_ALLPAIRS");
   return v != nullptr && v[0] != '\0' && v[0] != '0';
 }
 

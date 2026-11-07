@@ -12,6 +12,7 @@
 // others create_kvs(address). MPI touches only the KVS address, never data.
 
 #include "uma/xccl_peer.h"
+#include "uma/runtime_config.h"
 
 #include <chrono>
 #include <cstdlib>
@@ -49,7 +50,7 @@ inline double now_ms() {
 }
 inline bool split_enabled() {
   static const bool on = [] {
-    const char* e = std::getenv("UMA_PEER_SPLIT");
+    const char* e = uma::runtime_get("UMA_PEER_SPLIT");
     return e && e[0] == '1';
   }();
   return on;

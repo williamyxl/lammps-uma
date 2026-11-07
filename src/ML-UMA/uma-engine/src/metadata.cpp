@@ -1,4 +1,5 @@
 #include "uma/metadata.h"
+#include "uma/runtime_config.h"
 
 #include <cstdlib>
 #include <fstream>
@@ -22,7 +23,7 @@ std::string read_file(const std::string& path) {
 }
 
 bool env_flag(const char* name) {
-  const char* e = std::getenv(name);
+  const char* e = uma::runtime_get(name);
   return e && e[0] == '1' && e[1] == '\0';
 }
 

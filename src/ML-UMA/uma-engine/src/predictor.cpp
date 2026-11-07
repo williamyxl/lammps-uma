@@ -18,6 +18,7 @@
 #include "uma/postprocess.h"
 #include "uma/graph_shard.h"
 #include "uma/vesin_nl.h"
+#include "uma/runtime_config.h"
 
 namespace {
 
@@ -42,7 +43,7 @@ void disable_torchscript_texpr_once() {
 // Single-tile phase timers, same MP_PERF line as MpiPeerPredictor so one parser
 // covers W=1 and W>1. All-reduce fields are zero: there is no XCCL on this path.
 bool mp_perf_on() {
-  const char* e = std::getenv("UMA_MP_PERF");
+  const char* e = uma::runtime_get("UMA_MP_PERF");
   return e && e[0] == '1';
 }
 
@@ -188,7 +189,7 @@ Predictor Predictor::from_artifact(const std::string& artifact_dir,
 
   // UMA_EAGER_CKPT used to route single-GPU through an eager FairChem Python
   // worker. That worker was removed; traced AC is pair_style keyword ac.
-  if (const char* e = std::getenv("UMA_EAGER_CKPT")) {
+  if (const char* e = uma::runtime_get("UMA_EAGER_CKPT")) {
     if (e[0] == '1' && e[1] == '\0') {
       throw std::runtime_error(
           "UMA_EAGER_CKPT was removed with the Python GP worker. "

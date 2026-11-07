@@ -39,6 +39,7 @@ if(UMA_ENGINE_USE_XPU)
     src/block_context.cpp
     src/halo_context.cpp
     src/mpi_peer_predictor.cpp
+    src/runtime_config.cpp
   )
 else()
   set(UMA_ENGINE_SOURCES
@@ -52,6 +53,7 @@ else()
     src/halo_context.cpp
     src/libtorch_mp.cpp
     src/mpi_peer_predictor.cpp
+    src/runtime_config.cpp
   )
 endif()
 

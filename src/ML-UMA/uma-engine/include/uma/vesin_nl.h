@@ -4,6 +4,7 @@
 // Builds FairChem-compatible graphs for UMA (edge flip happens in Predictor).
 
 #include <algorithm>
+#include "uma/runtime_config.h"
 #include <stdexcept>
 #include <unordered_map>
 #include <utility>
@@ -185,7 +186,7 @@ inline VesinGraphDevice vesin_build_graph_cuda_impl(torch::Tensor pos_cuda,
     // skips the whole check (and its sync) — bit-identical when the cap wouldn't
     // fire (which the caller asserts by setting the flag). Default: keep the check.
     static const bool skip_cap = [] {
-      const char* e = std::getenv("UMA_SKIP_MAXNBR_CAP");
+      const char* e = uma::runtime_get("UMA_SKIP_MAXNBR_CAP");
       return e != nullptr && e[0] == '1' && e[1] == '\0';
     }();
     if (!skip_cap) {
