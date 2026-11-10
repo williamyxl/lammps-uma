@@ -1,0 +1,181 @@
+#!/bin/bash -l
+#PBS -N nitro-gate
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# lammps-uma-nitro gate: build (per-commit dir) + export + NaCl 14^3 W=12 FP64
+# NVT and NPT, 10 steps, with a force dump at steps 0 and 10.
+# Pass bar: |dPE| < 1e-8 eV against the recorded Wave E / Wave 0 values.
+#
+# Submit from this directory (queue debug or debug-scaling only):
+#   cd pbs/nitro && qsub -v NITRO_TAG=nitro/base-verify/r1 run_gate.pbs
+# Optional:
+#   NITRO_ART=<dir>        reuse an existing W=12 artifact instead of re-exporting
+#   NITRO_SKIP_BUILD=1     reuse an existing build for this commit
+# ---------------------------------------------------------------------------
+set -uo pipefail
+HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
+[[ -f "${HERE}/env.inc" ]] || { echo "NITRO_FAIL: run qsub from pbs/nitro (or set NITRO_HERE)"; exit 1; }
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+nitro_check_tree
+
+SHA7=$(git -C "${REL}" rev-parse --short=7 HEAD)
+export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+
+N=14
+EXPECT=$((8 * N * N * N))
+W=12
+PPN=12
+NSTEPS=10
+CHUNK=65536
+# Recorded Wave 0 / Wave E values for NaCl 14^3 W=12 FP64 (uma-s-1p2)
+REF_STEP0_PE=-7.4142191907631001e+04
+REF_NVT_PE10=-7.4095578889731943e+04
+REF_NPT_PE10=-7.4098199120459016e+04
+TOL=1e-8
+
+OUTROOT="${REL}/pbs/out/nitro_gate_${PBS_JOBID:-manual}"
+RUNDIR="${OUTROOT}/n${N}"
+mkdir -p "${RUNDIR}"
+if [[ -n "${NITRO_ART:-}" ]]; then
+  ART="${NITRO_ART}"
+else
+  ART="${RUNDIR}/artifact"
+fi
+
+echo "NITRO_GATE host=$(hostname) job=${PBS_JOBID:-none} REL=${REL} sha=${SHA7} queue=${PBS_QUEUE:-unknown}"
+python -c "import torch; assert '+xpu' in torch.__version__, torch.__version__; print('TORCH_OK', torch.__version__)"
+
+module load cmake 2>/dev/null || true
+GCC=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg
+MPICH=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-v2spaxy
+export CC="${GCC}/bin/gcc" CXX="${GCC}/bin/g++"
+TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
+SYCL_LIB_DIR="${CONDA_PREFIX}/lib"
+SYCL_INC_DIR="${CONDA_PREFIX}/include"
+
+if [[ "${NITRO_SKIP_BUILD:-0}" == "1" && -x "${LMP}" ]]; then
+  echo "BUILD_SKIPPED reuse ${LMP}"
+else
+  echo "########## cmake $(date -Is) ##########"
+  cmake -S "${REL}/cmake" -B "${LMP_BUILD}" \
+    -D CMAKE_BUILD_TYPE=Release \
+    -D BUILD_MPI=ON -D BUILD_OMP=ON \
+    -D CMAKE_C_COMPILER="${GCC}/bin/gcc" \
+    -D CMAKE_CXX_COMPILER="${GCC}/bin/g++" \
+    -D CMAKE_CXX_STANDARD=17 \
+    -D MPI_CXX_COMPILER="${MPICH}/bin/mpicxx" \
+    -D MPI_C_COMPILER="${MPICH}/bin/mpicc" \
+    -D CMAKE_PREFIX_PATH="${TORCH_CMAKE}" \
+    -D PKG_KOKKOS=OFF \
+    -D PKG_ML-UMA=ON \
+    -D UMA_ENGINE_USE_XPU=ON \
+    -D UMA_ENGINE_USE_CUDA=OFF \
+    -D UMA_ENGINE_USE_XCCL=ON \
+    -D UMA_ICPX="$(which icpx)" \
+    -D ONECCL_ROOT="${CONDA_PREFIX}" \
+    -D UMA_ENGINE_ROOT="${ENG}" \
+    -D SYCL_LIBRARY="${SYCL_LIB_DIR}/libsycl.so" \
+    -D SYCL_LIBRARY_DIR="${SYCL_LIB_DIR}" \
+    -D SYCL_INCLUDE_DIR="${SYCL_INC_DIR}" \
+    -D SYCL_INCLUDE_SYCL_DIR="${SYCL_INC_DIR}/sycl" \
+    -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" \
+    -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,${SYCL_LIB_DIR} -Wl,-rpath,${TORCH_LIB} -Wl,-rpath,${MPICH}/lib" \
+    2>&1 | tee "${OUTROOT}/cmake.log"
+  [[ "${PIPESTATUS[0]}" -eq 0 ]] || nitro_die "cmake configure failed"
+  echo "########## cmake --build $(date -Is) ##########"
+  cmake --build "${LMP_BUILD}" -j 32 2>&1 | tee "${OUTROOT}/build.log"
+  [[ "${PIPESTATUS[0]}" -eq 0 ]] || nitro_die "cmake build failed"
+fi
+[[ -x "${LMP}" ]] || nitro_die "missing lmp ${LMP}"
+echo "BUILD_OK ${LMP}"
+grep -E 'vesin|XCCL' "${OUTROOT}/cmake.log" 2>/dev/null | head -5 || true
+
+python "${HERE}/make_nacl.py" "${N}" "${RUNDIR}"
+NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/data.nacl")"
+[[ "${NAT}" -eq "${EXPECT}" ]] || nitro_die "cell has ${NAT} atoms; require ${EXPECT}"
+
+if [[ -n "${NITRO_ART:-}" ]]; then
+  [[ -f "${ART}/metadata.json" ]] || nitro_die "NITRO_ART has no metadata.json: ${ART}"
+  echo "EXPORT_REUSED ${ART}"
+else
+  rm -rf "${ART}"
+  mkdir -p "${ART}"
+  export OUT="${ART}" EXPORT_WORLD="${W}" EXPORT_ATOMS="${RUNDIR}/structure.xyz"
+  export EDGE_AC_CHUNK="${CHUNK}" UMA_MP_NATOMS="${NAT}"
+  export ENG_EXPORT="${ENG}/python/export_blocks_xpu.py"
+  echo "########## export W=${W} nat=${NAT} $(date -Is) ##########"
+  mpiexec -n "${W}" --ppn "${PPN}" gpu_tile_compact.sh \
+    bash "${HERE}/export_one_rank.sh"
+  okn=$(find "${ART}/w${W}" -name model_traced.pt | wc -l)
+  [[ "${okn}" -eq "${W}" ]] || {
+    tail -30 "${ART}/exp_r0.log" 2>/dev/null || true
+    nitro_die "export incomplete got=${okn} want=${W}"
+  }
+  cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
+  echo "EXPORT_OK ${ART}"
+fi
+
+export UMA_MP_NATOMS="${NAT}"
+nitro_runtime_env
+
+nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" "${NSTEPS}"
+nitro_write_in npt "fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0" "${NSTEPS}" "${NSTEPS}"
+
+nvt_rc=0 npt_rc=0
+nitro_run_ens nvt && nvt_rc=0 || nvt_rc=$?
+nitro_run_ens npt && npt_rc=0 || npt_rc=$?
+
+pe_ok=0
+if [[ "${nvt_rc}" -eq 0 && "${npt_rc}" -eq 0 ]]; then
+  python "${HERE}/compare.py" bar "${RUNDIR}/log.nvt" 0  "${REF_STEP0_PE}" "${TOL}" || pe_ok=1
+  python "${HERE}/compare.py" bar "${RUNDIR}/log.npt" 0  "${REF_STEP0_PE}" "${TOL}" || pe_ok=1
+  python "${HERE}/compare.py" bar "${RUNDIR}/log.nvt" 10 "${REF_NVT_PE10}" "${TOL}" || pe_ok=1
+  python "${HERE}/compare.py" bar "${RUNDIR}/log.npt" 10 "${REF_NPT_PE10}" "${TOL}" || pe_ok=1
+else
+  pe_ok=1
+fi
+
+# The checkpoint path under hen/uma-cache is allowed and appears in the log; only
+# the hen code root (UMA_HEN_ROOT) or hen python paths are forbidden.
+if grep -qE 'UMA_HEN_ROOT|hen/(patches|shim|scripts)' "${RUNDIR}/lmp.nvt.log" 2>/dev/null; then
+  echo "WARN: hen code reference seen in lmp.nvt.log (gate requires none)"
+  pe_ok=1
+fi
+python "${HERE}/compare.py" perf "${RUNDIR}/lmp.nvt.log" 5 > "${OUTROOT}/perf_nvt.json" 2>/dev/null || true
+python "${HERE}/meta.py" "${OUTROOT}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
+  --tag "${NITRO_TAG}" --extra "N=${N}" "W=${W}" "nsteps=${NSTEPS}" || true
+
+{
+  echo "NITRO_ART=${ART}"
+  echo "NITRO_LMP=${LMP}"
+  echo "NITRO_NAT=${NAT}"
+  echo "NITRO_GIT_SHA=$(git -C "${REL}" rev-parse HEAD)"
+  echo "NITRO_OUTROOT=${OUTROOT}"
+} > "${OUTROOT}/run.env"
+
+SUM="${OUTROOT}/SUMMARY.txt"
+{
+  echo "gate job=${PBS_JOBID:-none} tag=${NITRO_TAG} sha=${SHA7} nat=${NAT} W=${W} nsteps=${NSTEPS}"
+  echo "nvt_rc=${nvt_rc} npt_rc=${npt_rc} pe_ok=${pe_ok}"
+  echo "lmp=${LMP}"
+  echo "artifact=${ART}"
+  echo "----- NVT thermo tail -----"
+  tail -14 "${RUNDIR}/log.nvt" 2>/dev/null || true
+  echo "----- NPT thermo tail -----"
+  tail -14 "${RUNDIR}/log.npt" 2>/dev/null || true
+} > "${SUM}"
+echo "NITRO_GATE_DONE nvt_rc=${nvt_rc} npt_rc=${npt_rc} pe_ok=${pe_ok} ${OUTROOT}"
+if [[ "${nvt_rc}" -ne 0 || "${npt_rc}" -ne 0 || "${pe_ok}" -ne 0 ]]; then
+  exit 1
+fi
+exit 0

@@ -1,0 +1,79 @@
+#!/bin/bash -l
+#PBS -N nitro-e0
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+# ---------------------------------------------------------------------------
+# E0 noise floor / bitwise repeat: REPS identical NVT runs (NSTEPS steps each) of
+# the NaCl 14^3 W=12 FP64 gate cell in ONE job, reusing the binary and artifact
+# produced by run_gate.pbs. Reports MP_PERF medians per run, run-to-run PE
+# differences (bitwise?) and force differences.
+#
+#   cd pbs/nitro && qsub -v NITRO_TAG=nitro-base,NITRO_REF=<gate OUTROOT> run_timing.pbs
+# Optional: REPS (default 3), NSTEPS (default 30)
+# ---------------------------------------------------------------------------
+set -uo pipefail
+HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
+[[ -f "${HERE}/env.inc" ]] || { echo "NITRO_FAIL: run qsub from pbs/nitro (or set NITRO_HERE)"; exit 1; }
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+nitro_check_tree
+
+[[ -n "${NITRO_REF:-}" && -f "${NITRO_REF}/run.env" ]] \
+  || nitro_die "set NITRO_REF to a gate output dir containing run.env"
+# shellcheck disable=SC1091
+source "${NITRO_REF}/run.env"
+[[ "${NITRO_GIT_SHA}" == "$(git -C "${REL}" rev-parse HEAD)" ]] \
+  || nitro_die "binary was built from ${NITRO_GIT_SHA}, HEAD differs"
+export NITRO_BUILD
+NITRO_BUILD="$(dirname "${NITRO_LMP}")"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+[[ "${LMP}" == "${NITRO_LMP}" ]] || nitro_die "LMP mismatch ${LMP} vs ${NITRO_LMP}"
+[[ -x "${LMP}" && -f "${NITRO_ART}/metadata.json" ]] || nitro_die "missing lmp or artifact"
+
+W=12
+PPN=12
+NAT="${NITRO_NAT}"
+ART="${NITRO_ART}"
+REPS="${REPS:-3}"
+NSTEPS="${NSTEPS:-30}"
+OUTROOT="${REL}/pbs/out/nitro_e0_${PBS_JOBID:-manual}"
+RUNDIR="${OUTROOT}/n14"
+mkdir -p "${RUNDIR}"
+cp -f "${NITRO_REF}/n14/data.nacl" "${RUNDIR}/data.nacl"
+
+echo "NITRO_E0 host=$(hostname) job=${PBS_JOBID:-none} reps=${REPS} nsteps=${NSTEPS} queue=${PBS_QUEUE:-unknown}"
+export UMA_MP_NATOMS="${NAT}"
+nitro_runtime_env
+
+fail=0
+for r in $(seq 1 "${REPS}"); do
+  nitro_write_in "nvt_t${r}" "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" "${NSTEPS}"
+  nitro_run_ens "nvt_t${r}" || fail=1
+done
+
+{
+  echo "e0 job=${PBS_JOBID:-none} tag=${NITRO_TAG} reps=${REPS} nsteps=${NSTEPS} lmp=${LMP}"
+  for r in $(seq 1 "${REPS}"); do
+    echo "--- run ${r} perf ---"
+    python "${HERE}/compare.py" perf "${RUNDIR}/lmp.nvt_t${r}.log" 5 || fail=1
+  done
+  for r in $(seq 2 "${REPS}"); do
+    echo "--- run 1 vs run ${r} ---"
+    python "${HERE}/compare.py" bit "${RUNDIR}/log.nvt_t1" "${RUNDIR}/log.nvt_t${r}" 0 || fail=1
+    python "${HERE}/compare.py" bit "${RUNDIR}/log.nvt_t1" "${RUNDIR}/log.nvt_t${r}" "${NSTEPS}" || fail=1
+    python "${HERE}/diff_forces.py" "${RUNDIR}/forces.nvt_t1.dump" "${RUNDIR}/forces.nvt_t${r}.dump" || fail=1
+  done
+} > "${OUTROOT}/SUMMARY.txt" 2>&1
+cat "${OUTROOT}/SUMMARY.txt"
+
+python "${HERE}/meta.py" "${OUTROOT}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
+  --tag "${NITRO_TAG}" --extra "reps=${REPS}" "nsteps=${NSTEPS}" "ref=${NITRO_REF}" || true
+echo "NITRO_E0_DONE fail=${fail} ${OUTROOT}"
+exit "${fail}"
