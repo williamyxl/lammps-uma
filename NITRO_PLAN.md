@@ -201,7 +201,7 @@ Exit: no "TBD" or stale statement left in R, P, 1; H-table all closed; then step
 
 ### H.7 Rules that apply to every H stage
 
-- Do not start Hn+1 until H1…Hn are closed (same convention as the PR waves).
+- **Sequential close (rule, 2026-11-11).** Never open an item in a later stage while any item in an earlier stage is not fully closed. A stage is fully closed only when **every** item in it is done: its exit criteria met, its plan status updated, and its commit pushed (or the push explicitly waived for that stage per the rule below). This applies to items within a stage as well as to whole stages: no H2 work starts while any H1 item is open, and so on through H6, then step 7 onward. A blocked item stays in its own stage; do not skip ahead and come back.
 - Compute only in `debug` / `debug-scaling`, `walltime=01:00:00`, FP64, no login-node compute, tagged immutable commit before every `qsub`, syntax-check subagent before every `qsub`.
 - A failed gate means: revert that stage's commit, do not tag, do not advance.
 - **Commit and push at the end of every stage (rule, 2026-11-11).** A stage is closed only after all of:
