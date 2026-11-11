@@ -85,7 +85,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | 0 | Clone and create `uma-nitro` | no | done |
 | 1 | Harness in `pbs/nitro/` committed on `uma-nitro` (`7da48ce5`); `nitro-origin` tag | no | done (ABBA runner was **missing**, see H2) |
 | H1 | Restore perf/debug instrumentation (nitro tree only) | build only | closed (this commit; compute proof is H3). Allowlist: `UMA_MP_PERF`, `UMA_MEM_PEAK`, `UMA_MP_NATOMS`, `UMA_MN_CKPT`, `UMA_ALLOW_LEGACY_METADATA`, `UMA_NITRO_*`. Audit: `pbs/nitro/ENV_AUDIT.md` |
-| H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | open |
+| H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | closed (this commit). Dry-run slot order and `compare.py abba-test` passed on the login node. Compute use starts at H3 |
 | H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug`) | open |
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug`) | open |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug`) | open |
@@ -159,6 +159,8 @@ Status: **closed** in the H1 commit. `MP_PERF` rows are still unproven until H3.
 7. **Syntax-check subagent** on all edited `.sh/.pbs/.inc/.py` (`python3.10 -m py_compile`, `bash -n`) before commit and before any `qsub`.
 
 Exit: syntax check COMPILE_OK; dry-run of `run_abba.pbs` logic with a fake spec on the login node (no torch compute) produces the expected slot order and metadata skeleton; `compare.py abba` unit-tested on synthetic per-job data (sign-disagreement ⇒ no-win; spread larger than gain ⇒ no-win).
+
+Status: **closed** in the H2 commit. Files: `abba.inc`, `run_abba.pbs`, `compare.py abba` / `abba-test`, `meta.py` (`nitro_tag`, versions, `artifact_kept`), tree check, MPICH from `env.inc`, exit-trap deletion. The 9072484 artifact is not marked owned and stays until H5.
 
 ### H3 — Re-verify BASE and freeze it (`debug`, 1 node)
 

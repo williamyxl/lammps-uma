@@ -40,6 +40,15 @@ export HF_HUB_OFFLINE=1 FAIRCHEM_OFFLINE=1 PYTHONUNBUFFERED=1
 export ZE_FLAT_DEVICE_HIERARCHY=FLAT
 unset UMA_CKPT
 
+# MPICH prefix. Override with MPICH=...; otherwise use the recorded Aurora fallback.
+MPICH_FALLBACK="${MPICH_FALLBACK:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-v2spaxy}"
+MPICH="${MPICH:-${MPICH_FALLBACK}}"
+export MPICH MPICH_FALLBACK
+if [[ ! -x "${MPICH}/bin/mpicc" ]]; then
+  echo "NITRO_FAIL: MPICH not usable at ${MPICH} (set MPICH to a prefix with bin/mpicc)" >&2
+  exit 1
+fi
+
 TORCH_LIB=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'lib'))")
 ICPX_LIB=$(dirname "$(dirname "$(which icpx)")")/lib
 # compat dir lives under pbs/out (git-excluded), not in the tracked tree

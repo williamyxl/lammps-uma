@@ -7,6 +7,8 @@
 #PBS -l walltime=01:00:00
 #PBS -j oe
 #PBS -k doe
+#PBS -o ../out/
+#PBS -e ../out/
 # ---------------------------------------------------------------------------
 # lammps-uma-nitro gate: build (per-commit dir) + export + NaCl 14^3 W=12 FP64
 # NVT and NPT, 10 steps, with a force dump at steps 0 and 10.
@@ -16,7 +18,10 @@
 #   cd pbs/nitro && qsub -v NITRO_TAG=nitro/base-verify/r1 run_gate.pbs
 # Optional:
 #   NITRO_ART=<dir>        reuse an existing W=12 artifact instead of re-exporting
+#   NITRO_REF=<dir>        same as NITRO_ART, but the path is never deleted
 #   NITRO_SKIP_BUILD=1     reuse an existing build for this commit
+#   KEEP_ARTIFACT=1        keep an artifact this job exported (default: delete at exit)
+#   NITRO_EXPORT_RANKS=1   export one rank (microbenchmarks); default is W=12
 # ---------------------------------------------------------------------------
 set -uo pipefail
 HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
@@ -46,55 +51,33 @@ TOL=1e-8
 OUTROOT="${REL}/pbs/out/nitro_gate_${PBS_JOBID:-manual}"
 RUNDIR="${OUTROOT}/n${N}"
 mkdir -p "${RUNDIR}"
+nitro_install_cleanup_trap
+# NITRO_REF is a read-only input. It is never marked owned, so the exit trap
+# cannot delete it. NITRO_ART is the same reuse path.
+if [[ -n "${NITRO_REF:-}" && -z "${NITRO_ART:-}" ]]; then
+  NITRO_ART="${NITRO_REF}"
+fi
 if [[ -n "${NITRO_ART:-}" ]]; then
   ART="${NITRO_ART}"
+  ART_KEPT=yes
 else
   ART="${RUNDIR}/artifact"
+  ART_KEPT=no
+  [[ "${KEEP_ARTIFACT:-0}" == "1" ]] && ART_KEPT=yes
 fi
 
 echo "NITRO_GATE host=$(hostname) job=${PBS_JOBID:-none} REL=${REL} sha=${SHA7} queue=${PBS_QUEUE:-unknown}"
 python -c "import torch; assert '+xpu' in torch.__version__, torch.__version__; print('TORCH_OK', torch.__version__)"
 
 module load cmake 2>/dev/null || true
-GCC=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg
-MPICH=/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-v2spaxy
-export CC="${GCC}/bin/gcc" CXX="${GCC}/bin/g++"
-TORCH_CMAKE=$(python -c "import torch,os;print(os.path.join(os.path.dirname(torch.__file__),'share','cmake'))")
-SYCL_LIB_DIR="${CONDA_PREFIX}/lib"
-SYCL_INC_DIR="${CONDA_PREFIX}/include"
+nitro_require_mpich
+export CC="${GCC_PREFIX:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg}/bin/gcc"
+export CXX="${GCC_PREFIX:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg}/bin/g++"
 
 if [[ "${NITRO_SKIP_BUILD:-0}" == "1" && -x "${LMP}" ]]; then
   echo "BUILD_SKIPPED reuse ${LMP}"
 else
-  echo "########## cmake $(date -Is) ##########"
-  cmake -S "${REL}/cmake" -B "${LMP_BUILD}" \
-    -D CMAKE_BUILD_TYPE=Release \
-    -D BUILD_MPI=ON -D BUILD_OMP=ON \
-    -D CMAKE_C_COMPILER="${GCC}/bin/gcc" \
-    -D CMAKE_CXX_COMPILER="${GCC}/bin/g++" \
-    -D CMAKE_CXX_STANDARD=17 \
-    -D MPI_CXX_COMPILER="${MPICH}/bin/mpicxx" \
-    -D MPI_C_COMPILER="${MPICH}/bin/mpicc" \
-    -D CMAKE_PREFIX_PATH="${TORCH_CMAKE}" \
-    -D PKG_KOKKOS=OFF \
-    -D PKG_ML-UMA=ON \
-    -D UMA_ENGINE_USE_XPU=ON \
-    -D UMA_ENGINE_USE_CUDA=OFF \
-    -D UMA_ENGINE_USE_XCCL=ON \
-    -D UMA_ICPX="$(which icpx)" \
-    -D ONECCL_ROOT="${CONDA_PREFIX}" \
-    -D UMA_ENGINE_ROOT="${ENG}" \
-    -D SYCL_LIBRARY="${SYCL_LIB_DIR}/libsycl.so" \
-    -D SYCL_LIBRARY_DIR="${SYCL_LIB_DIR}" \
-    -D SYCL_INCLUDE_DIR="${SYCL_INC_DIR}" \
-    -D SYCL_INCLUDE_SYCL_DIR="${SYCL_INC_DIR}/sycl" \
-    -D CMAKE_CXX_FLAGS="-O2 -Wno-tautological-compare" \
-    -D CMAKE_EXE_LINKER_FLAGS="-Wl,-rpath,${SYCL_LIB_DIR} -Wl,-rpath,${TORCH_LIB} -Wl,-rpath,${MPICH}/lib" \
-    2>&1 | tee "${OUTROOT}/cmake.log"
-  [[ "${PIPESTATUS[0]}" -eq 0 ]] || nitro_die "cmake configure failed"
-  echo "########## cmake --build $(date -Is) ##########"
-  cmake --build "${LMP_BUILD}" -j 32 2>&1 | tee "${OUTROOT}/build.log"
-  [[ "${PIPESTATUS[0]}" -eq 0 ]] || nitro_die "cmake build failed"
+  nitro_cmake_build
 fi
 [[ -x "${LMP}" ]] || nitro_die "missing lmp ${LMP}"
 echo "BUILD_OK ${LMP}"
@@ -109,20 +92,10 @@ if [[ -n "${NITRO_ART:-}" ]]; then
   echo "EXPORT_REUSED ${ART}"
 else
   rm -rf "${ART}"
-  mkdir -p "${ART}"
-  export OUT="${ART}" EXPORT_WORLD="${W}" EXPORT_ATOMS="${RUNDIR}/structure.xyz"
-  export EDGE_AC_CHUNK="${CHUNK}" UMA_MP_NATOMS="${NAT}"
-  export ENG_EXPORT="${ENG}/python/export_blocks_xpu.py"
-  echo "########## export W=${W} nat=${NAT} $(date -Is) ##########"
-  mpiexec -n "${W}" --ppn "${PPN}" gpu_tile_compact.sh \
-    bash "${HERE}/export_one_rank.sh"
-  okn=$(find "${ART}/w${W}" -name model_traced.pt | wc -l)
-  [[ "${okn}" -eq "${W}" ]] || {
-    tail -30 "${ART}/exp_r0.log" 2>/dev/null || true
-    nitro_die "export incomplete got=${okn} want=${W}"
-  }
-  cp -f "${ART}/w${W}/r0/metadata.json" "${ART}/metadata.json"
-  echo "EXPORT_OK ${ART}"
+  nitro_own_artifact "${ART}"
+  export EDGE_AC_CHUNK="${CHUNK}"
+  echo "EXPORT_RANKS $(nitro_export_world)"
+  nitro_export_artifact "$(nitro_export_world)"
 fi
 
 export UMA_MP_NATOMS="${NAT}"
@@ -153,7 +126,9 @@ if grep -qE 'UMA_HEN_ROOT|hen/(patches|shim|scripts)' "${RUNDIR}/lmp.nvt.log" 2>
 fi
 python "${HERE}/compare.py" perf "${RUNDIR}/lmp.nvt.log" 5 > "${OUTROOT}/perf_nvt.json" 2>/dev/null || true
 python "${HERE}/meta.py" "${OUTROOT}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
-  --tag "${NITRO_TAG}" --extra "N=${N}" "W=${W}" "nsteps=${NSTEPS}" || true
+  --tag "${NITRO_TAG}" --log "${RUNDIR}/lmp.nvt.log" \
+  --artifact-kept "${ART_KEPT}" \
+  --extra "N=${N}" "W=${W}" "nsteps=${NSTEPS}" "mpich=${MPICH}" || nitro_die "meta.py failed"
 
 {
   echo "NITRO_ART=${ART}"
@@ -168,7 +143,9 @@ SUM="${OUTROOT}/SUMMARY.txt"
   echo "gate job=${PBS_JOBID:-none} tag=${NITRO_TAG} sha=${SHA7} nat=${NAT} W=${W} nsteps=${NSTEPS}"
   echo "nvt_rc=${nvt_rc} npt_rc=${npt_rc} pe_ok=${pe_ok}"
   echo "lmp=${LMP}"
-  echo "artifact=${ART}"
+  echo "artifact=${ART} artifact_kept=${ART_KEPT}"
+  echo "----- fairchem -----"
+  nitro_fairchem_note || true
   echo "----- NVT thermo tail -----"
   tail -14 "${RUNDIR}/log.nvt" 2>/dev/null || true
   echo "----- NPT thermo tail -----"

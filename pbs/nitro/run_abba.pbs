@@ -1,0 +1,143 @@
+#!/bin/bash -l
+#PBS -N nitro-abba
+#PBS -q debug
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o ../out/
+#PBS -e ../out/
+# ---------------------------------------------------------------------------
+# ABBA timing. Spec lines are: LABEL TAG [artifact=PATH] [KEY=VAL ...]
+# The first arm is BASE. Each later arm B runs as BASE, B, B, BASE.
+# List risky arms last. A failing slot does not stop the later slots.
+#
+#   cd pbs/nitro && qsub -v NITRO_TAG=nitro-base,NITRO_SPEC=abba.spec run_abba.pbs
+#
+# Login-node dry run (no torch, no mpiexec):
+#   NITRO_DRY_RUN=1 NITRO_SPEC=spec NITRO_DRY_OUT=/tmp/abba bash run_abba.pbs
+#
+# An arm without artifact= is exported only when NITRO_EXPORT_RANKS=1
+# (one rank). A reused artifact= path is never deleted.
+# KEEP_ARTIFACT=1 keeps an artifact this job created.
+# ---------------------------------------------------------------------------
+set -uo pipefail
+HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
+[[ -f "${HERE}/env.inc" ]] || { echo "NITRO_FAIL: run qsub from pbs/nitro (or set NITRO_HERE)"; exit 1; }
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+# shellcheck disable=SC1091
+source "${HERE}/abba.inc"
+
+[[ -n "${NITRO_SPEC:-}" && -f "${NITRO_SPEC}" ]] || nitro_die "set NITRO_SPEC to an arm spec file"
+
+if [[ "${NITRO_DRY_RUN:-0}" == "1" ]]; then
+  OUT="${NITRO_DRY_OUT:-${REL}/pbs/out/nitro_abba_dry}"
+  nitro_abba_write_skeleton "${NITRO_SPEC}" "${OUT}"
+  exit 0
+fi
+
+nitro_check_tree
+SHA7=$(git -C "${REL}" rev-parse --short=7 HEAD)
+export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+nitro_require_mpich
+
+N=14
+W=12
+PPN=12
+NSTEPS=30
+OUTROOT="${REL}/pbs/out/nitro_abba_${PBS_JOBID:-manual}"
+mkdir -p "${OUTROOT}"
+nitro_install_cleanup_trap
+nitro_abba_expand "${NITRO_SPEC}"
+
+declare -A LMP_FOR_TAG SRC_FOR_TAG
+for ((i = 0; i < NITRO_ABBA_N; i++)); do
+  tag="${NITRO_ABBA_TAG[i]}"
+  if [[ -z "${LMP_FOR_TAG[${tag}]:-}" ]]; then
+    nitro_ensure_lmp "${tag}"
+    LMP_FOR_TAG[${tag}]="${LMP}"
+    SRC_FOR_TAG[${tag}]="${NITRO_LAST_SRC}"
+  fi
+done
+
+fail=0
+hostname > "${OUTROOT}/hostnames.txt"
+if [[ -n "${PBS_NODEFILE:-}" && -f "${PBS_NODEFILE}" ]]; then
+  sort -u "${PBS_NODEFILE}" >> "${OUTROOT}/hostnames.txt"
+fi
+
+for ((i = 0; i < NITRO_SLOT_N; i++)); do
+  label="${NITRO_SLOT_LABEL[i]}"
+  tag="${NITRO_SLOT_TAG[i]}"
+  name=$(printf '%02d_%s' "${i}" "${label}")
+  slot="${OUTROOT}/slots/${name}"
+  mkdir -p "${slot}"
+  printf '%s\n' "${label}" > "${slot}/label"
+  cp -f "${OUTROOT}/hostnames.txt" "${slot}/hostnames.txt"
+  LMP="${LMP_FOR_TAG[${tag}]}"
+  NITRO_SLOT_ENV="${NITRO_SLOT_ENVSTR[i]}"
+  RUNDIR="${slot}"
+  ART="${NITRO_SLOT_ART[i]}"
+  kept=yes
+  if [[ -z "${ART}" ]]; then
+    if [[ "${NITRO_EXPORT_RANKS:-0}" != "1" ]]; then
+      echo "NITRO_FAIL: slot ${i} ${label} has no artifact= (set artifact= or NITRO_EXPORT_RANKS=1)"
+      fail=1
+      continue
+    fi
+    ART="${slot}/artifact"
+    kept=no
+    [[ "${KEEP_ARTIFACT:-0}" == "1" ]] && kept=yes
+    if [[ ! -f "${slot}/data.nacl" ]]; then
+      python "${HERE}/make_nacl.py" "${N}" "${slot}" || { fail=1; continue; }
+    fi
+    NAT="$(awk '/atoms/{print $1; exit}' "${slot}/data.nacl")"
+    nitro_own_artifact "${ART}"
+    NITRO_EXPORT_ENG="${SRC_FOR_TAG[${tag}]}/src/ML-UMA/uma-engine"
+    nitro_export_artifact 1 || { fail=1; continue; }
+  fi
+  [[ -f "${ART}/metadata.json" ]] || {
+    echo "NITRO_FAIL: slot ${i} ${label} missing metadata.json in ${ART}"
+    fail=1
+    continue
+  }
+  if [[ ! -f "${slot}/data.nacl" ]]; then
+    python "${HERE}/make_nacl.py" "${N}" "${slot}" || { fail=1; continue; }
+  fi
+  NAT="$(awk '/atoms/{print $1; exit}' "${slot}/data.nacl")"
+  nitro_runtime_env
+  nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" 0
+  if nitro_run_ens nvt; then
+    python "${HERE}/compare.py" perf "${slot}/lmp.nvt.log" 5 > "${slot}/perf.json" || fail=1
+  else
+    fail=1
+    echo '{"n_rows": 0}' > "${slot}/perf.json"
+  fi
+  python "${HERE}/meta.py" "${slot}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
+    --tag "${tag}" --require-base --artifact-kept "${kept}" \
+    --log "${slot}/lmp.nvt.log" \
+    --extra "slot=${i}" "label=${label}" "nsteps=${NSTEPS}" "mpich=${MPICH}" \
+    || fail=1
+done
+
+: > "${OUTROOT}/slot_order.txt"
+for ((i = 0; i < NITRO_SLOT_N; i++)); do
+  printf '%d\t%s\t%s\t%s\t%s\n' \
+    "${i}" "${NITRO_SLOT_LABEL[i]}" "${NITRO_SLOT_TAG[i]}" \
+    "${NITRO_SLOT_ENVSTR[i]}" "${NITRO_SLOT_ART[i]}" >> "${OUTROOT}/slot_order.txt"
+done
+{
+  echo "abba job=${PBS_JOBID:-none} spec=${NITRO_SPEC} slots=${NITRO_SLOT_N} fail=${fail}"
+  echo "----- fairchem -----"
+  nitro_fairchem_note || true
+  echo "----- slot order -----"
+  cat "${OUTROOT}/slot_order.txt"
+} > "${OUTROOT}/SUMMARY.txt"
+echo "NITRO_ABBA_DONE fail=${fail} ${OUTROOT}"
+exit "${fail}"

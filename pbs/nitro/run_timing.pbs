@@ -7,6 +7,8 @@
 #PBS -l walltime=01:00:00
 #PBS -j oe
 #PBS -k doe
+#PBS -o ../out/
+#PBS -e ../out/
 # ---------------------------------------------------------------------------
 # E0 noise floor / bitwise repeat: REPS identical NVT runs (NSTEPS steps each) of
 # the NaCl 14^3 W=12 FP64 gate cell in ONE job, reusing the binary and artifact
@@ -60,6 +62,8 @@ done
 
 {
   echo "e0 job=${PBS_JOBID:-none} tag=${NITRO_TAG} reps=${REPS} nsteps=${NSTEPS} lmp=${LMP}"
+  echo "----- fairchem -----"
+  nitro_fairchem_note || true
   for r in $(seq 1 "${REPS}"); do
     echo "--- run ${r} perf ---"
     python "${HERE}/compare.py" perf "${RUNDIR}/lmp.nvt_t${r}.log" 5 || fail=1
@@ -74,6 +78,9 @@ done
 cat "${OUTROOT}/SUMMARY.txt"
 
 python "${HERE}/meta.py" "${OUTROOT}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
-  --tag "${NITRO_TAG}" --extra "reps=${REPS}" "nsteps=${NSTEPS}" "ref=${NITRO_REF}" || true
+  --tag "${NITRO_TAG}" --require-base --artifact-kept yes \
+  --log "${RUNDIR}/lmp.nvt_t1.log" \
+  --extra "reps=${REPS}" "nsteps=${NSTEPS}" "ref=${NITRO_REF}" "mpich=${MPICH}" \
+  || nitro_die "meta.py failed"
 echo "NITRO_E0_DONE fail=${fail} ${OUTROOT}"
 exit "${fail}"
