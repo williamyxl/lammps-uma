@@ -6,7 +6,10 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status: harness written (`pbs/nitro/`); baseline not yet verified in this tree. Gains are estimates.
+Status (revision 5, 2026-11-11): harness committed (`7da48ce5`). BASE gate job 9072484 passed the **PE bars**
+(step-0 |ΔE| 0 / 1.5e-11, step-10 exact) but its **timing path is dead** (0 `MP_PERF` lines, empty `perf_nvt.json`;
+see section H, finding F1). `nitro-base` is **not yet tagged**. No activity work starts before stages H1–H6 are closed.
+Gains are estimates and come from the pre-`getenv`-removal tree; they are re-measured in H4/H5.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate = NaCl 14³ (21,952 atoms), W=12,
 NVT + NPT 10 steps; one branch per activity, immutable tag before each submit.
@@ -28,7 +31,7 @@ NVT + NPT 10 steps; one branch per activity, immutable tag before each submit.
 | Path | `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro` |
 | Source | `https://github.com/williamyxl/lammps-uma.git`, branch `lmp-uma-release` (single-branch clone; `origin` = GitHub) |
 | Base commit | `a240ba3485` ("fix export MPI ranks"). Verified identical to the HEAD of `lammps-uma-release`. |
-| Working branch | `uma-nitro` (created from `lmp-uma-release`; local only, **not pushed**) |
+| Working branch | `uma-nitro` (created from `lmp-uma-release`). **Revision 5:** pushed to `origin/uma-nitro` at the end of every stage (H.7); `lmp-uma-release` is never pushed to from this clone. |
 | Clone size | 1.4 GB |
 
 ### R.2 Where things may be edited
@@ -70,21 +73,150 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - FP64 only for all model numerics and custom kernels.
 - No torch/XPU compute on login nodes. Compiling is fine.
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
-- Disk: Flare project quota is 27.57T used of 40T (69%). Each W=12 N=14 artifact is about 27 GB.
+- Disk: Flare project quota is 27.57T used of 40T (69%). Each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6).
+- Before any measurement: stages H1–H6 closed (section H).
 
-### R.6 Execution sequence (revised)
+### R.6 Execution sequence (revision 5 — supersedes revision 4)
 
-| Step | Action | Needs compute node |
+Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order, before step 7.**
+
+| Step | Action | Needs compute node | Status |
+|---|---|---|---|
+| 0 | Clone and create `uma-nitro` | no | done |
+| 1 | Harness in `pbs/nitro/` committed on `uma-nitro` (`7da48ce5`); `nitro-origin` tag | no | done (ABBA runner was **missing**, see H2) |
+| H1 | Restore perf/debug instrumentation (nitro tree only) | build only | open |
+| H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | open |
+| H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug`) | open |
+| H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug`) | open |
+| H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug`) | open |
+| H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | open |
+| 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug`) | blocked by H6 |
+| 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug`) | blocked by H6 |
+| 9 | Continue with S1–S5, then N2, N5 microbenchmarks, N3, N4, stack (§1, §5) | yes | blocked by H6 |
+
+H1–H6 close "plan ready for execution". The activities then proceed in the order in §1.
+
+---
+
+## H. Hardening stages before any activity (revision 5, 2026-11-11)
+
+Source: robustness review of revision 4 checked against the tree and BASE gate job 9072484.
+
+### H.0 Decisions recorded (user answers, 2026-11-11)
+
+| Topic | Decision |
+|---|---|
+| Instrumentation fix location | **Nitro tree only** (`uma-nitro`). The PR tree (`lammps-ml-uma`) is not changed. Consequence: `nitro-base` = `a240ba3485` + harness + instrumentation commit, so "BASE equals the PR branch head" is **no longer true** and must be stated as "equals PR head + instrumentation-only commit `<sha>`". |
+| Overall target | **≥ 1.5× end-to-end step time** (BASE median / best stack median, NaCl 14³, W=12, FP64). Continue to N5 regardless of earlier gains; N5 blocks are still individually gated by their microbenchmarks (≥ 1.5×). The Amdahl ledger (H6) states whether 1.5× is reachable on paper; if it is not, say so in the final report. |
+| Replication | Every go/no-go claim needs **≥ 3 PBS jobs on different nodes**; the replicate unit is the job (per-job medians), not the step. |
+| Disk | Artifacts exported by a job are **deleted at job exit by default**; a flag keeps them (H2.6). |
+| Host-build control | The shard-local / OpenMP host-build control arm was **declined**. N1 stays "device build vs current host build". |
+
+### H.1 Findings and where each is closed
+
+| ID | Finding | Closed in |
 |---|---|---|
-| 0 | Clone and create `uma-nitro` | no (done) |
-| 1 | Tag `nitro-origin`; add `.git/info/exclude`; add `pbs/nitro/` (build include, env include, export script, Wave E job as a BASE template, ABBA runner, `meta.json` writer, force/virial compare script); syntax-check; commit on `uma-nitro`; tag `nitro-base` after step 2 | no |
-| 2 | Verify BASE: build in the nitro tree, run the NaCl 14³ W=12 NVT+NPT gate once, expect step-0 PE −74142.191907631001 eV and step-10 PEs matching Wave E to ≤ 1e-8 eV | yes (`debug`) |
-| 3 | E0 noise floor and bitwise BASE repeat (3 runs in one job, then 3 jobs) | yes (`debug`) |
-| 4 | S0 of the SYCL prototype (§4), on branch `nitro/n5-proto` | yes (`debug`) |
-| 5 | N1 control: time the host graph build against the device build, ABBA | yes (`debug`) |
-| 6 | Continue with S1–S5, then N2, N5 microbenchmarks, N3, N4, stack (§1, §5) | yes |
+| F1 | `getenv` → in-process map (`b6ca79f8`) silently disabled `UMA_MP_PERF`, `UMA_MEM_PEAK`, `UMA_MP_NATOMS`, `UMA_MN_CKPT`: 0 `MP_PERF` lines, empty `perf_nvt.json`; all quoted ms figures are from the old tree | H1, H3 |
+| F2 | P.3 item 3 ("gate new behaviour behind env vars") does not work for any `UMA_*` name that is not set by a `pair_style` keyword | H1.4 |
+| F3 | `nitro-base` not tagged; `meta.json` has `nitro_base_sha: null` | H3 |
+| F4 | No ABBA runner (P.3 and R.6 assumed one); `run_gate.pbs` / `run_timing.pbs` are single-commit | H2.1 |
+| F5 | Statistics treat steps as independent; one job, one node, autocorrelated | H2.2, H4 |
+| F6 | No artifact disk policy (27 GB each; `/lus/flare` 65% used) | H2.6 |
+| F7 | `nitro_check_tree` ignores untracked files; PBS `.o`/`.e` files land in `pbs/nitro/` | H2.4 |
+| F8 | MPICH path hard-coded in `run_gate.pbs` | H2.5 |
+| F9 | `UMA_ALLOW_FAIRCHEM_MISMATCH=1` is set globally; the fairchem version actually used is not recorded | H2.5 |
+| F10 | The ~400 ms all-reduce (0.81 GB over 15 calls ≈ 2 GB/s) is probably waiting, not transfer; it is the largest slice and unmeasured | H5 |
+| F11 | Plan numbers (828 / 390 / 118 ms) come from a different tree; Amdahl ceiling not stated | H6 |
+| F12 | Stale statements (baseline "not verified", R.4 rows) | H3, H6 |
+| F13 | Inherited PR-tree issues (CPU compile untested; `devices > 1` workers cannot see the runtime map) | Out of scope here (see H.8) |
 
-Steps 1–2 close "plan ready for execution" for the harness; the activities then proceed in the order in §1.
+### H1 — Restore instrumentation in the nitro tree (code; `uma-nitro`)
+
+Goal: perf and debug knobs work again, and new arm toggles have a legal, documented mechanism.
+
+1. **Audit.** List every name read via `uma::runtime_get` / `runtime_flag_1` (`git grep`). Classify each as: (a) set by `apply_runtime_config()` from a keyword (`UMA_AC`, `UMA_DD`, `UMA_ENGINE_BUILD_GRAPH`, `UMA_COMPUTE_VIRIAL`); (b) perf/debug (`UMA_MP_PERF`, `UMA_MEM_PEAK`, …); (c) functional (`UMA_MP_NATOMS`, `UMA_MN_CKPT`, `UMA_ALLOW_LEGACY_METADATA`, …). Record the table in `pbs/nitro/ENV_AUDIT.md`.
+2. **Fix.** In `runtime_config.cpp`, `runtime_get(name)` returns the map value; if absent and `name` is in a compiled-in **allowlist**, fall back to `std::getenv(name)`. The allowlist holds the (b) and (c) names that the harness exports plus every arm toggle added later (`UMA_NITRO_*`). Names in (a) never fall back (keywords win). This is nitro-only and is not to be ported to the PR tree.
+3. **Mark the commit** `nitro: instrumentation-only env fallback` and keep it free of any numerics change; it becomes part of `nitro-base`.
+4. **Arm-toggle rule (replaces P.3 item 3 wording).** A new behaviour is added as `UMA_NITRO_<ID>` in the allowlist, default = BASE (unset ⇒ BASE path), read once at construction and logged on rank 0 (`NITRO_FLAGS: ...`) so a log proves which arm ran.
+5. **Syntax-check subagent** (`grok-4.7-high`, `shell`) after the edit and before any `qsub`.
+
+Exit: build succeeds; `git grep` shows each allowlisted name documented in `ENV_AUDIT.md`; no change outside `runtime_config.cpp`, its header if needed, and `ENV_AUDIT.md`. Compute proof is H3.
+
+### H2 — Harness hardening (no compute)
+
+1. **ABBA runner** `pbs/nitro/run_abba.pbs` + `abba.inc`. Input: a spec file of arms, each = (label, tag, optional env toggles, artifact path). It builds each distinct tag (or reuses `pbs/bin/<sha7>/lmp` if its sha256 matches), runs the order A B B A (BASE first), 30-step NVT per slot, and keeps going after a failing arm (risky arms last). Output per slot: log, `MP_PERF` JSON, hostnames, `meta.json`.
+2. **Replicate-aware compare.** `compare.py abba` takes the outputs of ≥ 3 jobs and reports per-job medians per arm, the paired per-job difference, the between-job spread, and a verdict under the **revised effect threshold**: an arm wins only if (i) all replicate jobs show the same sign of gain, **and** (ii) the median per-job gain exceeds `max(3 × pooled within-job MAD, between-job range)`. Per-step intervals remain descriptive only. P.2 is updated accordingly (H6).
+3. **`meta.json` completeness.** Fill `nitro_base_sha` (from the `nitro-base` tag; fail if absent in timing jobs), `nitro_tag`, and record versions: `torch`, `fairchem` (actual vs expected 2.21.0), `icpx --version`, resolved `libsycl`, MPICH path, `ONECCL_ROOT`, plus `NITRO_FLAGS` from the log.
+4. **Tree check and stray files.** `nitro_check_tree` must also fail on **untracked, non-ignored** files under `src/` and `pbs/nitro/`. Add `pbs/nitro/*.o*`, `pbs/nitro/*.e*` to `.git/info/exclude` (or set `#PBS -o`/`-e` into `pbs/out/`). Remove the existing `nitro-gate.o9072484` from the work tree after copying it into its `pbs/out/` run directory.
+5. **Environment portability.** Resolve the MPICH path from a variable in `env.inc` with a recorded fallback instead of a literal in `run_gate.pbs`; fail with a clear message if missing. Keep `UMA_ALLOW_FAIRCHEM_MISMATCH=1` but log the actual fairchem version and a warning line in `SUMMARY.txt`, so a mismatch is visible in every result.
+6. **Artifact policy (feature).** Every job that exports an artifact **deletes it at exit** by default (`trap ... EXIT`; also on failure and on `qdel`/walltime where the shell still runs). Flag: `KEEP_ARTIFACT=1` (set with `qsub -v`) keeps it. Rules:
+   - A job deletes only artifacts **it created** (marker file written at export start); artifacts reused through `NITRO_REF` are read-only inputs and are never removed.
+   - `meta.json` records `artifact_kept: true|false` and the artifact size and sha-of-manifest before deletion.
+   - The existing BASE artifact from job 9072484 (about 27 GB) is kept as the BASE reference through H5; delete it when H5 closes unless later arms still need it.
+   - Microbenchmark and single-rank export jobs export one rank only.
+7. **Syntax-check subagent** on all edited `.sh/.pbs/.inc/.py` (`python3.10 -m py_compile`, `bash -n`) before commit and before any `qsub`.
+
+Exit: syntax check COMPILE_OK; dry-run of `run_abba.pbs` logic with a fake spec on the login node (no torch compute) produces the expected slot order and metadata skeleton; `compare.py abba` unit-tested on synthetic per-job data (sign-disagreement ⇒ no-win; spread larger than gain ⇒ no-win).
+
+### H3 — Re-verify BASE and freeze it (`debug`, 1 node)
+
+1. Commit H1 and H2 on `uma-nitro`; tag `nitro/base-verify/r2`.
+2. Run `run_gate.pbs` on that tag (clean tracked tree; `KEEP_ARTIFACT` unset; reuse the 9072484 artifact via `NITRO_REF`).
+3. Pass bars: all P.1 PE bars unchanged (step-0 |ΔE| ≤ 1e-8, step-10 NVT/NPT PEs equal the recorded values to ≤ 1e-8); `MP_PERF rank=0` rows present for every step; `perf_nvt.json` non-empty; `NITRO_FLAGS` line present; `meta.json` has no null fields and records `nitro_base_sha`.
+4. If the PE differs from the earlier gate beyond 1e-11, the instrumentation commit changed numerics: revert it and redo H1.
+5. On pass: create annotated tag **`nitro-base`** on that commit; update R.1 ("Base commit" row) and R.3 to say "PR head `a240ba3485` + instrumentation commit `<sha>`".
+
+Exit: `nitro-base` exists and is the commit that H4/H5 and all arms are built from.
+
+### H4 — E0: noise floor and replication (`debug`, 3 jobs on different nodes)
+
+1. Use `run_timing.pbs` (REPS = 3 per job) in **3 separate jobs**, submitted so the node sets differ (check `hostnames` in `meta.json`; resubmit a job that lands on a repeated node set or a throttled node).
+2. Measure: (a) bitwise repeat of PE and forces within a job and across jobs (`compare.py bit`, `diff_forces.py`); (b) BASE-vs-BASE max|ΔF| and max|ΔW| (these set the force/virial bars in P.1); (c) per-job median step time and `MP_PERF` fields; within-job MAD and between-job range; (d) one extra pair with `UMA_MP_PERF` off vs on (instrumentation effect).
+3. Output `pbs/out/nitro_e0/E0_SUMMARY.md` with the **minimum detectable effect** (the larger of 3 × within-job MAD and the between-job range, in ms and %), and the calibrated force/virial tolerances. Copy the values into P.1/P.2.
+4. If BASE is not bitwise reproducible, P.1 "Bit-identity" is relaxed to the calibrated tolerance for all arms and this is written down.
+5. If the minimum detectable effect exceeds 5% of the step time, add a rule to P.2: arms with an expected gain below the MDE (N3, N4) are judged only inside a stack, with ≥ 5 jobs.
+
+Exit: E0_SUMMARY.md written; tolerances and MDE entered in the plan.
+
+### H5 — Step-time decomposition (`debug`, 1 node; diagnostic only)
+
+Question: is the ~400 ms in-graph all-reduce real communication or waiting for other ranks (compute imbalance, stream sync, `MP_PERF` event syncs)? It is the largest slice (≈ 48%) and no Nitro activity touches it.
+
+1. Add an opt-in diagnostic knob `UMA_NITRO_PERF_BARRIER=1` (allowlisted, default off, perf-only): a timed `MPI_Barrier` / device sync immediately before each collective, so `ms_wait` and `ms_xfer` are reported separately. This is a small code change on branch `nitro/h5-diag` cut from `nitro-base` (not part of `nitro-base`); syntax-check first.
+2. Run in one job, ABBA: BASE with `UMA_MP_PERF` on, BASE with it off (step time only), BASE with the barrier diagnostic. Three jobs on different nodes (H4 rule), same scripts.
+3. Report: `ms_wait` vs `ms_xfer` per collective; effective GB/s per rank against the expected link/XCCL rate; per-rank compute time spread (is one rank always last?).
+4. Decision rules (recorded, not acted on here): if waiting dominates, the cause is imbalance or sync, and the finding is added to X1 with the per-rank evidence; if transfer dominates at ≈ 2 GB/s, the finding is added to X1 as "transport inefficiency, outside Nitro scope". Either way the result feeds H6; it does not change the user's decision to continue to N5.
+
+Exit: `pbs/out/nitro_h5/H5_SUMMARY.md` with the wait/transfer split and per-rank spread.
+
+### H6 — Refresh the plan (no compute)
+
+1. **Amdahl ledger.** Replace the 828 / 390 / 118 ms narrative with a table from H3–H5 of the BASE step: host graph build, compute (fwd + bwd without collectives), collective wait, collective transfer, other; each with median, MAD and share. For each activity, add its upper bound as a function of the ledger (e.g. N1 ≤ host-build share; N5 ≤ compute share) and the cumulative ceiling versus the 1.5× target.
+2. **Update expectations** in N1–N5 ("Expected gain" lines) and X1 with the measured ledger; mark N3 as "small by design (real edges ≈ 58–60k vs cap 65 536)".
+3. **Update P.1–P.4**: calibrated tolerances and MDE (H4), replicate rule and revised effect threshold (H2.2), arm-toggle rule (H1.4), ABBA runner row and `run_abba.pbs`, `abba.inc`, `ENV_AUDIT.md` rows in the harness file table.
+4. **Fix stale text**: "baseline not yet verified", R.4 rows ("`pbs/` harness missing", the artifact row), R.5 disk line (artifacts auto-deleted; project at the measured usage), P.3 item 3.
+5. **Close-out table** at the end of this section: each F-item with its closing stage and result.
+
+Exit: no "TBD" or stale statement left in R, P, 1; H-table all closed; then step 7 may start.
+
+### H.7 Rules that apply to every H stage
+
+- Do not start Hn+1 until H1…Hn are closed (same convention as the PR waves).
+- Compute only in `debug` / `debug-scaling`, `walltime=01:00:00`, FP64, no login-node compute, tagged immutable commit before every `qsub`, syntax-check subagent before every `qsub`.
+- A failed gate means: revert that stage's commit, do not tag, do not advance.
+- **Commit and push at the end of every stage (rule, 2026-11-11).** A stage is closed only after all of:
+  1. Its exit criteria are met and the plan's stage-status table (R.6) and any numbers it produced are updated **in the same commit**.
+  2. Syntax-check subagent passed for any code touched (H.7 rule above).
+  3. `git commit` on the branch the stage's work lives on (`uma-nitro` for H1–H4 and H6; `nitro/h5-diag` for the H5 diagnostic code, with the H5 summary and plan update committed on `uma-nitro`). Message: `nitro: stage H<n> closed — <one line>`. Include small result files (`E0_SUMMARY.md`, `H5_SUMMARY.md`, `ENV_AUDIT.md`); never `pbs/out/` data, artifacts, binaries or `build-*/`.
+  4. `git push origin <same branch>` (remote `origin` = `github.com/williamyxl/lammps-uma`), plus `git push origin <tag>` for any tag created in the stage (`nitro-base`, `nitro/<id>/r<k>`). Tags are immutable: never move or re-push a tag.
+  5. Never force-push; never push to `lmp-uma-release` or any branch that is not the stage's own branch; never push before the syntax check.
+  - If the push fails (this login node has had no GitHub credentials), the agent records `push pending` in the R.6 status column, gives the user the exact `git push` commands, and the **next stage does not start until the user confirms the push** (or explicitly waives it for that stage).
+
+### H.8 Deliberately out of scope here
+
+- Inherited PR-tree issues (F13): CPU-only compile test and `devices > 1` worker environment propagation. They do not affect the W=12 `devices 1` gate; they are tracked in `lammps-ml-uma` and not fixed in the nitro tree.
+- The shard-local / OpenMP host-build control arm (declined in H.0).
+- Any change to the stock UMA model or to the PR tree.
 
 ---
 
@@ -116,14 +248,15 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 - Timing runs: **30 steps** NVT; steps 0–4 are warm-up and are discarded. Gate runs of 10 steps are for correctness only.
 - Statistic: **median** over steps 5–29 of `ms_total` and each `MP_PERF` field, with MAD, min and max (`compare.py perf`).
 - Instrumentation: `MP_PERF` synchronizes, so compare arms with the same instrumentation on, and take one extra pair of runs with it off to confirm.
-- **Effect threshold:** an arm wins only if the paired step-time difference has a 95% interval excluding 0 **and** the median gain exceeds 3 × the pooled MAD; treat 5% as a priority signal, not a pass/fail line, so small deterministic savings (N3, N4) can still be judged in a stack.
+- **Replication (revision 5, H.0/H2.2):** the replicate unit is the PBS job; every claim needs ≥ 3 jobs on different nodes. Verdict: the gain has the same sign in all jobs **and** the median per-job gain exceeds `max(3 × pooled within-job MAD, between-job range)`. The per-step interval below is descriptive only.
+- **Effect threshold (per-step, descriptive):** the paired step-time difference has a 95% interval excluding 0 **and** the median gain exceeds 3 × the pooled MAD; treat 5% as a priority signal, not a pass/fail line, so small deterministic savings (N3, N4) can still be judged in a stack.
 - Speedup = `median(BASE) / median(arm)`, labelled with cell, W and queue.
 
 ### P.3 Control of variables
 
 1. One PBS job holds several arms in **ABBA** order (BASE, A, A, BASE).
 2. One factor changes per comparison; binary, artifact, env, deck, seed, run length, rank-to-tile mapping stay frozen.
-3. Gate new behaviour behind env vars or `pair_style` keywords with default = BASE, so one binary serves both arms where possible.
+3. Gate new behaviour behind `UMA_NITRO_<ID>` toggles (allowlisted env fallback, H1.4) or `pair_style` keywords with default = BASE, so one binary serves both arms where possible. Plain `UMA_*` env vars are **ignored** by the engine unless allowlisted.
 4. If an arm changes export, re-export and also run BASE on that re-exported artifact.
 5. Fixed `velocity ... loop geom`-equivalent seed and an identical `data.nacl` (`make_nacl.py`).
 6. Record hostnames and tile state; discard a job whose nodes throttle.
@@ -228,7 +361,7 @@ Severity: **S** can ship wrong physics or invalidate results; **H** likely to bl
 ### Applies to all
 | # | Sev | Failure point | Mitigation |
 |---|---|---|---|
-| X1 | H | Upside is capped: Nitro has nothing for the in-graph all-reduce wall (~390 of 828 ms). Realistic total ≈ 1.2–1.5×. | State the cap before work starts |
+| X1 | H | Upside is capped: Nitro has nothing for the in-graph all-reduce wall (~390 of 828 ms, old tree). Even zero compute gives only ≈ 1.57×; target is ≥ 1.5× (H.0), which is near that ceiling. | H5 splits wait from transfer; H6 writes the Amdahl ledger before work starts |
 | X2 | H | Nitro's Triton/CuTe kernels cannot run in the Python-free C++ engine. | Prototype one trivial SYCL op end-to-end (export → load → autograd) first |
 | X3 | S | Checkpoint mismatch: Nitro is validated for `uma-s-1p2p1`; local is `uma-s-1p2` (composition embedding differs). | Reuse edge-side designs only; parity vs the pinned fairchem 2.21.0 forward |
 | X4 | H | Every compute activity needs export, re-export (27 GB artifacts) and re-validation. | Disk and job budget up front |
