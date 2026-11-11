@@ -84,7 +84,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 |---|---|---|---|
 | 0 | Clone and create `uma-nitro` | no | done |
 | 1 | Harness in `pbs/nitro/` committed on `uma-nitro` (`7da48ce5`); `nitro-origin` tag | no | done (ABBA runner was **missing**, see H2) |
-| H1 | Restore perf/debug instrumentation (nitro tree only) | build only | open |
+| H1 | Restore perf/debug instrumentation (nitro tree only) | build only | closed (this commit; compute proof is H3). Allowlist: `UMA_MP_PERF`, `UMA_MEM_PEAK`, `UMA_MP_NATOMS`, `UMA_MN_CKPT`, `UMA_ALLOW_LEGACY_METADATA`, `UMA_NITRO_*`. Audit: `pbs/nitro/ENV_AUDIT.md` |
 | H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | open |
 | H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug`) | open |
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug`) | open |
@@ -140,7 +140,9 @@ Goal: perf and debug knobs work again, and new arm toggles have a legal, documen
 4. **Arm-toggle rule (replaces P.3 item 3 wording).** A new behaviour is added as `UMA_NITRO_<ID>` in the allowlist, default = BASE (unset ⇒ BASE path), read once at construction and logged on rank 0 (`NITRO_FLAGS: ...`) so a log proves which arm ran.
 5. **Syntax-check subagent** (`grok-4.7-high`, `shell`) after the edit and before any `qsub`.
 
-Exit: build succeeds; `git grep` shows each allowlisted name documented in `ENV_AUDIT.md`; no change outside `runtime_config.cpp`, its header if needed, and `ENV_AUDIT.md`. Compute proof is H3.
+Exit: build succeeds; `git grep` shows each allowlisted name documented in `ENV_AUDIT.md`; code changes are `runtime_config.cpp`, its header, and `ENV_AUDIT.md` (this plan's R.6 row is updated in the same commit by the H.7 close rule). Compute proof is H3.
+
+Status: **closed** in the H1 commit. `MP_PERF` rows are still unproven until H3.
 
 ### H2 — Harness hardening (no compute)
 
