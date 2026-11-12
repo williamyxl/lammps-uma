@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 9, 2026-11-12): H1–H6 are closed. A second test system, ZIF-8 3×3×3, was added; its stage **Z1** must close before step 7 (see Z1 below). The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. Activity work may start at step 7. The ledger is in H6.
+Status (revision 10, 2026-11-12): H1–H6 are closed. **S0 is closed** (job 9083937, tag `nitro/s0/r2`). ZIF-8 3×3×3 is stage **Z1**, still open; the user waived "Z1 before step 7" to run S0, and Z1 still blocks step 8. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -76,7 +76,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 
 ### R.6 Execution sequence (revision 5 — supersedes revision 4)
 
-Steps 0–1 are done. **Stages H1–H6 (section H) and Z1 (the ZIF-8 test system) must all be closed, in order, before step 7.**
+Steps 0–1 are done. H1–H6 are closed. S0 (step 7) is closed. **Z1 is still open and blocks step 8** (the user waived Z1-before-step-7 so S0 could run).
 
 | Step | Action | Needs compute node | Status |
 |---|---|---|---|
@@ -88,8 +88,8 @@ Steps 0–1 are done. **Stages H1–H6 (section H) and Z1 (the ZIF-8 test system
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug-scaling`, 1 node) | closed. MDE 6.27 ms (0.76% of 823 ms). Jobs 9078185, 9078330, 9078397, plus perf-off 9078443. |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug-scaling`, 1 node) | closed. The ~390 ms is ~360 ms local queue drain, ~20 ms rank skew, ~12 ms transfer at ~65 GB/s. |
 | H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | closed. BASE step 825 ms. Compute is 659 ms (80%); N1 can supply at most 118 ms (15%). |
-| Z1 | ZIF-8 3×3×3 second test system: BASE reference PEs, verification gate, noise floor, step ledger | yes (`debug-scaling`) | **open.** Z1.1 code and Z1.2 syntax check done; Z1.3–Z1.7 need compute and are not started. Must close before step 7. |
-| 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug-scaling`) | not started |
+| Z1 | ZIF-8 3×3×3 second test system: BASE reference PEs, verification gate, noise floor, step ledger | yes (`debug-scaling`) | **open.** Z1.1 code and Z1.2 syntax check done; Z1.3–Z1.7 need compute and are not started. The user waived Z1-before-step-7 for S0. Z1 still blocks step 8. |
+| 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug-scaling`) | closed. Job 9083937, tag `nitro/s0/r2` = `693d955518`. FP64 `mymuladd` rel. error 1.537e-16. |
 | 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug-scaling`) | not started |
 | 9 | Continue with S1–S5, then N2, N5 (stages N5.0–N5.9 in §5), N3, N4, stack (§1, §5) | yes | not started |
 
@@ -585,6 +585,8 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 | S3 | Link into `uma_engine` and rebuild `lmp`; run the existing NaCl 14³ W=12 NVT+NPT gate with the op linked but **unused** | `debug` job, ABBA vs BASE | Step-0 PE = −74142.191907631001 eV (|ΔE| ≤ 1e-8), identical to BASE; no regression in step time beyond noise; no new static-init or load errors |
 | S4 | 12-tile run: `mpiexec -n 12` test that calls the op repeatedly interleaved with an `uma_peer` all-reduce | 1 compute node | No hang; results identical on all ranks; op and collective ordering unchanged |
 | S5 | Cost measurement: launch overhead per call, FP64 bandwidth vs `torch` elementwise on the same tensors at the real chunk shapes | 1 compute node | Report only; this is the baseline for the N5 micro stages |
+
+**S0 result (2026-11-12).** Job 9083937 on `debug-scaling`, node x4009c2s7b0n0, tag `nitro/s0/r2`. Torch 2.13.0+xpu, icpx 2026.1.0. FP64 `y = a*b+c` on 2^20 elements: abs 1.776e-15, rel 1.537e-16, `S0_PASS`, exit 0. The `.so` loaded `libsycl.so.9` from the `hen-xpu` env (no load error). Code is on `nitro/n5-proto`, not on `uma-nitro`.
 
 **Gate to N5:** S0–S4 pass. If S1 or S2 fail for a reason that cannot be fixed within the engine's build, N5 and N2-b are dropped, and the plain-torch options (N1-a, N2-a, N3, N4) are what remains.
 
