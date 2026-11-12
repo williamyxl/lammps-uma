@@ -87,7 +87,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | H1 | Restore perf/debug instrumentation (nitro tree only) | build only | closed (this commit; compute proof is H3). Allowlist: `UMA_MP_PERF`, `UMA_MEM_PEAK`, `UMA_MP_NATOMS`, `UMA_MN_CKPT`, `UMA_ALLOW_LEGACY_METADATA`, `UMA_NITRO_*`. Audit: `pbs/nitro/ENV_AUDIT.md` |
 | H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | closed (this commit). Dry-run slot order and `compare.py abba-test` passed on the login node. Compute use starts at H3 |
 | H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug-scaling`, 1 node) | closed. Job 9077571, tag `nitro/base-verify/r3` = `efae85ff72`. `nitro-base` is that commit. |
-| H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug`) | open |
+| H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug-scaling`, 1 node) | closed. MDE 6.27 ms (0.76% of 823 ms). Jobs 9078185, 9078330, 9078397, plus perf-off 9078443. |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug`) | open |
 | H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | open |
 | 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug`) | blocked by H6 |
@@ -188,6 +188,10 @@ Status: **closed**. The 10-minute status poll for 9077571 is stopped.
 
 Exit: E0_SUMMARY.md written; tolerances and MDE entered in the plan.
 
+Result: three nodes (x4114, x4504, x4500), all different, jobs 9078185, 9078330, 9078397, `fail=0`. Perf-off job 9078443 on x4010 ran and wrote no `MP_PERF` lines; its loop time does not show a sync cost above the node spread. Summary: `pbs/out/nitro_e0/E0_SUMMARY.md`. The 10-minute poll is stopped.
+
+Status: **closed**.
+
 ### H5 — Step-time decomposition (`debug`, 1 node; diagnostic only)
 
 Question: is the ~400 ms in-graph all-reduce real communication or waiting for other ranks (compute imbalance, stream sync, `MP_PERF` event syncs)? It is the largest slice (≈ 48%) and no Nitro activity touches it.
@@ -245,9 +249,9 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 | NPT | volume moves, no "virial refused" | needs virial, AC off |
 | No hen code | no `UMA_HEN_ROOT` and no hen code paths (patches, shim, scripts) in the log | the checkpoint path under `hen/uma-cache` is allowed |
 | Step-0 \|ΔPE\| vs BASE | ≤ 1e−8 eV | reorder-only changes gave 1.5e−11…5.8e−11 in Waves A–E |
-| Forces | max\|ΔF\| ≤ max(1e−9 eV/Å, 10 × BASE-vs-BASE noise) | calibrate in E0 (`diff_forces.py`) |
-| Virial (NPT) | max\|ΔW\| ≤ 1e−7 eV | calibrate in E0 |
-| Bit-identity | exact | only for arms claiming "same ops, same order"; **first measure BASE-vs-BASE bitwise** (BASE has `index_add_`, which may not be reproducible); if not, relax to tolerance |
+| Forces | max\|ΔF\| ≤ max(1e−9 eV/Å, 10 × BASE-vs-BASE noise) | E0 max noise 7.35e−14 eV/Å, so 10× noise is below 1e−9 and the bar stays **1e−9 eV/Å** |
+| Virial (NPT) | max\|ΔW\| ≤ 1e−7 eV | E0 was NVT and did not dump the virial; bar unchanged |
+| Bit-identity | \|ΔPE\| ≤ 1e−10 eV | E0 is not bitwise (max \|ΔPE\| 5.821e−11 eV). Arms that claim the same ops use this tolerance |
 | Independent checks | relative force error to force RMS; finite-difference check on a few atoms; NVE 200-step drift | a noise-scaled bar alone can hide a real bug |
 | Worker ladder | any arm touching the graph, autograd or kernels passes on a small DIAG cell at W=1 first, then W=2 → 4 → 6 → 12, before the W=12 gate counts | DIAG cells are labelled and never used to claim a result |
 | NPT/virial parity | mandatory for N1, N2, N5 | stress path is `dE/dcell` through edge vectors |
@@ -259,6 +263,7 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 - Statistic: **median** over steps 5–29 of `ms_total` and each `MP_PERF` field, with MAD, min and max (`compare.py perf`).
 - Instrumentation: `MP_PERF` synchronizes, so compare arms with the same instrumentation on, and take one extra pair of runs with it off to confirm.
 - **Replication (revision 5, H.0/H2.2):** the replicate unit is the PBS job; every claim needs ≥ 3 jobs on different nodes. Verdict: the gain has the same sign in all jobs **and** the median per-job gain exceeds `max(3 × pooled within-job MAD, between-job range)`. The per-step interval below is descriptive only.
+- **E0 MDE (H4):** 6.27 ms, 0.76% of the 822.6 ms median `ms_total`. It is the between-job range. 3 × the pooled within-run MAD is 1.57 ms. The MDE is under 5% of the step, so N3 and N4 are not forced onto a five-job stack by that rule.
 - **Effect threshold (per-step, descriptive):** the paired step-time difference has a 95% interval excluding 0 **and** the median gain exceeds 3 × the pooled MAD; treat 5% as a priority signal, not a pass/fail line, so small deterministic savings (N3, N4) can still be judged in a stack.
 - Speedup = `median(BASE) / median(arm)`, labelled with cell, W and queue.
 
