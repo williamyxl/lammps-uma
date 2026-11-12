@@ -88,7 +88,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | closed (this commit). Dry-run slot order and `compare.py abba-test` passed on the login node. Compute use starts at H3 |
 | H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug-scaling`, 1 node) | closed. Job 9077571, tag `nitro/base-verify/r3` = `efae85ff72`. `nitro-base` is that commit. |
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug-scaling`, 1 node) | closed. MDE 6.27 ms (0.76% of 823 ms). Jobs 9078185, 9078330, 9078397, plus perf-off 9078443. |
-| H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug`) | open |
+| H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug-scaling`, 1 node) | closed. The ~390 ms is ~360 ms local queue drain, ~20 ms rank skew, ~12 ms transfer at ~65 GB/s. |
 | H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | open |
 | 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug`) | blocked by H6 |
 | 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug`) | blocked by H6 |
@@ -202,6 +202,10 @@ Question: is the ~400 ms in-graph all-reduce real communication or waiting for o
 4. Decision rules (recorded, not acted on here): if waiting dominates, the cause is imbalance or sync, and the finding is added to X1 with the per-rank evidence; if transfer dominates at ≈ 2 GB/s, the finding is added to X1 as "transport inefficiency, outside Nitro scope". Either way the result feeds H6; it does not change the user's decision to continue to N5.
 
 Exit: `pbs/out/nitro_h5/H5_SUMMARY.md` with the wait/transfer split and per-rank spread.
+
+Result: jobs 9079409, 9079449, 9079543 on x4010, x4018, and x4112. Code is `nitro/h5-diag` `d14cdc36b5`, not `nitro-base`. Post-warmup medians: local drain 358–362 ms, all-reduce barrier 17–27 ms, all-reduce transfer 12.4–12.5 ms (0.809 GB, ~65 GB/s). Ranks 6 and 7 are last most often. The `fail=1` flag is the `UMA_MP_PERF=0` arm. The 10-minute poll is stopped.
+
+Status: **closed**.
 
 ### H6 — Refresh the plan (no compute)
 
@@ -376,7 +380,7 @@ Severity: **S** can ship wrong physics or invalidate results; **H** likely to bl
 ### Applies to all
 | # | Sev | Failure point | Mitigation |
 |---|---|---|---|
-| X1 | H | Upside is capped: Nitro has nothing for the in-graph all-reduce wall (~390 of 828 ms, old tree). Even zero compute gives only ≈ 1.57×; target is ≥ 1.5× (H.0), which is near that ceiling. | H5 splits wait from transfer; H6 writes the Amdahl ledger before work starts |
+| X1 | H | The ~390 ms all-reduce timer is mostly the local XPU queue draining (~360 ms). Rank skew is ~20 ms and the transfer is ~12 ms at ~65 GB/s (H5). Nitro has no activity for that local queue. The old "zero compute ⇒ 1.57×" cap counted this drain as communication. | H6 puts the drain, the skew, and the transfer on separate ledger rows |
 | X2 | H | Nitro's Triton/CuTe kernels cannot run in the Python-free C++ engine. | Prototype one trivial SYCL op end-to-end (export → load → autograd) first |
 | X3 | S | Checkpoint mismatch: Nitro is validated for `uma-s-1p2p1`; local is `uma-s-1p2` (composition embedding differs). | Reuse edge-side designs only; parity vs the pinned fairchem 2.21.0 forward |
 | X4 | H | Every compute activity needs export, re-export (27 GB artifacts) and re-validation. | Disk and job budget up front |
