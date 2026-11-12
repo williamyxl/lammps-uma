@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 7, 2026-11-12): H1–H6 are closed. The dedicated N5 step plan is §5. `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. Activity work may start at step 7. The ledger is in H6.
+Status (revision 8, 2026-11-12): H1–H6 are closed. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. Activity work may start at step 7. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate = NaCl 14³ (21,952 atoms), W=12,
 NVT + NPT 10 steps; one branch per activity, immutable tag before each submit.
@@ -87,7 +87,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug-scaling`, 1 node) | closed. Job 9077571, tag `nitro/base-verify/r3` = `efae85ff72`. `nitro-base` is that commit. |
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug-scaling`, 1 node) | closed. MDE 6.27 ms (0.76% of 823 ms). Jobs 9078185, 9078330, 9078397, plus perf-off 9078443. |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug-scaling`, 1 node) | closed. The ~390 ms is ~360 ms local queue drain, ~20 ms rank skew, ~12 ms transfer at ~65 GB/s. |
-| H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | closed. BASE step 825 ms. 1.5× needs a 275 ms cut. N1 can supply at most 118 ms. |
+| H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | closed. BASE step 825 ms. Compute is 659 ms (80%); N1 can supply at most 118 ms (15%). |
 | 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug-scaling`) | not started |
 | 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug-scaling`) | not started |
 | 9 | Continue with S1–S5, then N2, N5 (stages N5.0–N5.9 in §5), N3, N4, stack (§1, §5) | yes | not started |
@@ -105,8 +105,8 @@ Source: robustness review of revision 4 checked against the tree and BASE gate j
 | Topic | Decision |
 |---|---|
 | Instrumentation fix location | **Nitro tree only** (`uma-nitro`). The PR tree (`lammps-ml-uma`) is not changed. Consequence: `nitro-base` = `a240ba3485` + harness + instrumentation commit, so "BASE equals the PR branch head" is **no longer true** and must be stated as "equals PR head + instrumentation-only commit `<sha>`". |
-| Overall target | **≥ 1.5× end-to-end step time** (BASE median / best stack median, NaCl 14³, W=12, FP64). Continue to N5 regardless of earlier gains; N5 blocks are still individually gated by their microbenchmarks (≥ 1.5×). The Amdahl ledger (H6) states whether 1.5× is reachable on paper; if it is not, say so in the final report. |
-| Replication | Every go/no-go claim needs **≥ 3 PBS jobs on different nodes**; the replicate unit is the job (per-job medians), not the step. |
+| Objective and decision policy (revision 8, replaces the earlier ≥ 1.5× target) | **No speedup target and no speed threshold anywhere in this plan.** The objective is to exhaust the options and report the best correct configuration: BASE median / best stack median (NaCl 14³, W=12, FP64) with its run-to-run range, as a measurement and not a pass/fail. Rules: (1) **Correctness is the only hard gate** (P.1 bars). (2) **Every planned activity and block is attempted**, whatever its expected size; ordering by measured share is for priority only, never for skipping. (3) **Each result gets a verdict by the replication rule**: win (beyond the MDE and the between-job range), flat, or loss. A win goes into the stack. Flat and loss are recorded with their numbers and stay out. (4) **Every custom kernel gets a tuning round** (work-group and sub-group shape, local-memory use, vendor library versus custom) before it is closed flat or loss. (5) A stage can also close as **infeasible** (cannot be built or cannot be made correct) with the blocker documented. (6) **There is no stop rule by speed.** The program ends when every item has a verdict and the final stack (with leave-one-out and add-one-in checks) is measured. The Amdahl ledger (H6) is information, not a goal. |
+| Replication | Every verdict (win, flat, loss) needs **≥ 3 PBS jobs on different nodes**; the replicate unit is the job (per-job medians), not the step. |
 | Disk | Artifacts exported by a job are **deleted at job exit by default**; a flag keeps them (H2.6). |
 | Host-build control | The shard-local / OpenMP host-build control arm was **declined**. N1 stays "device build vs current host build". |
 
@@ -207,7 +207,7 @@ Status: **closed**.
 
 ### H6 — Refresh the plan (no compute)
 
-1. **Amdahl ledger.** Replace the 828 / 390 / 118 ms narrative with a table from H3–H5 of the BASE step: host graph build, compute (fwd + bwd without collectives), collective wait, collective transfer, other; each with median, MAD and share. For each activity, add its upper bound as a function of the ledger (e.g. N1 ≤ host-build share; N5 ≤ compute share) and the cumulative ceiling versus the 1.5× target.
+1. **Amdahl ledger.** Replace the 828 / 390 / 118 ms narrative with a table from H3–H5 of the BASE step: host graph build, compute (fwd + bwd without collectives), collective wait, collective transfer, other; each with median, MAD and share. For each activity, add its upper bound as a function of the ledger (e.g. N1 ≤ host-build share; N5 ≤ compute share) and the cumulative ceiling versus the BASE step.
 2. **Update expectations** in N1–N5 ("Expected gain" lines) and X1 with the measured ledger; mark N3 as "small by design (real edges ≈ 58–60k vs cap 65 536)".
 3. **Update P.1–P.4**: calibrated tolerances and MDE (H4), replicate rule and revised effect threshold (H2.2), arm-toggle rule (H1.4), ABBA runner row and `run_abba.pbs`, `abba.inc`, `ENV_AUDIT.md` rows in the harness file table.
 4. **Fix stale text**: "baseline not yet verified", R.4 rows ("`pbs/` harness missing", the artifact row), R.5 disk line (artifacts auto-deleted; project at the measured usage), P.3 item 3.
@@ -230,15 +230,15 @@ Source: H5 ON slots, three nodes, 104 post-warmup steps each. The number below i
 | Other (force all-reduce) | 1 | 0.2 | 0.1% |
 | Step (`ms_total`) | 825 | 3 | 100% |
 
-A 1.5× step is 550 ms, so the program must remove **275 ms**. N1 can remove at most the 118 ms host neighbor build, which is 1.17×. The other **157 ms** has to come out of the 659 ms compute row (24% of it) from N2 and N5. Communication is 40 ms. Removing it would not reach 1.5×, and Nitro does not target it. Removing graph and compute entirely would leave 41 ms (20×). That ceiling is not a forecast.
+N1 can remove at most the 118 ms host neighbor build (14% of the step). The rest of the reachable time is in the 659 ms compute row (80%), through N2 and N5. Communication is 40 ms (5%), and Nitro does not target it. Removing graph and compute entirely would leave 41 ms. That ceiling is not a forecast. There is no speedup target (H.0); this ledger shows where the time is.
 
-| Activity | Upper bound | Versus 1.5× |
+| Activity | Upper bound | Note |
 |---|---|---|
-| N1 | 118 ms (`ms_vesin`) | 1.17× alone |
-| N2 | unmeasured; only the part of the 659 ms that is `index_add_` | counts toward the 157 ms |
-| N3 | small by design: real edges are about 58–60k against the 65,536 cap | cleanup, not the 157 ms |
-| N4 | about 1% of the step, ~8 ms | optional; near the 6.27 ms MDE |
-| N5 | at most the 659 ms compute row | the 1.5× target needs ~157 ms of it after a full N1 win |
+| N1 | 118 ms (`ms_vesin`) | 14% of the step |
+| N2 | unmeasured; only the part of the 659 ms that is `index_add_` | part of the compute row |
+| N3 | small by design: real edges are about 58–60k against the 65,536 cap | cleanup, not a large lever |
+| N4 | about 1% of the step, ~8 ms | small; near the 6.27 ms MDE, judged in the stack |
+| N5 | at most the 659 ms compute row | the largest lever; the FP64 GEMM part of it is not fusable |
 
 ### Close-out
 
@@ -361,17 +361,17 @@ qsub -v NITRO_TAG=nitro/e0/r1,NITRO_REF=<gate OUTROOT>,REPS=3 run_timing.pbs
 ## 1. Activities
 
 Each activity has: Nitro source idea, what we do, a **control** (the Nitro-referenced comparison that
-decides go/no-go), and its own failure points.
+decides keep or drop by the H.0 verdict), and its own failure points.
 
 ### N1 — Device-side radius-graph build with fixed capacity and overflow flag
 - **Nitro idea:** `padded_radius_graph` (`bucket_fill_direct` → `fused_candidates` → `graph_scan` → `edge_emit`) rebuilds the graph on the device every step; an overflow flag is checked after the build.
 - **Do:**
   - N1-a: build the graph on XPU with composed torch ops, FP64. **Output order must equal the reference builder's order: by center ascending, then (distance, neighbor, ox, oy, oz)** (`emit_graph` in `neighbor_list.cpp`). That order is also the `max_neighbors` truncation tie-break, and it keeps the summation order identical to BASE.
-  - N1-b: custom SYCL kernels with the same stages, only if N1-a is correct but slow.
+  - N1-b: custom SYCL kernels with the same stages, run whenever N1-a is correct (after its tuning round), whether N1-a was a win or not.
   - Reuse the existing cross-rank pad-cap overflow check in `mpi_peer_predictor.cpp` (all-reduce of an overflow flag before the forward); add the device builder's own overflow flag to it. On overflow all ranks stop with an explicit error.
-- **Control:** time the current host `build_neighbor_graph` + H2D copy with device events, then N1-a/N1-b in the same job (ABBA). Proceed only if N1-a ≤ ~25% of the host time.
+- **Control:** time the current host `build_neighbor_graph` + H2D copy with device events, then N1-a/N1-b in the same job (ABBA). Record the device-build time as a fraction of the host time. There is no cutoff: N1-a is adopted only if it is correct and a win by the H.0 verdict.
 - **Tests:** edge-set equality vs the current builder; ΔPE/ΔF/Δvirial vs BASE; NPT parity; W ladder.
-- **Expected gain:** at most 118 ms (`ms_vesin`), 14% of the 825 ms step, 1.17×. The host build is measured (H6). The control is still that the device build must be ≤ ~25% of that host time.
+- **Expected gain:** at most 118 ms (`ms_vesin`), 14% of the 825 ms step, 1.17×. The host build is measured (H6). The device build is adopted only if it is correct and a win.
 
 ### N2 — Target-sorted edge→node segmented reduction
 - **Nitro idea:** `EdgeCSR` (edges sorted by target node) with `_segreduce_tgt_*` / `fused_m0_segreduce` instead of atomic scatter.
@@ -379,14 +379,14 @@ decides go/no-go), and its own failure points.
 - **Do:**
   - N2-a: per-segment reduction with torch ops over the already center-sorted edges (offsets from a bincount/cumsum of centers).
   - N2-b: SYCL kernel, one work-group per segment, with custom backward.
-- **Control:** microbenchmark vs the current `index_add_` on the real chunk shapes, forward and forward+backward. Proceed only if ≥ 1.3×.
-- **Expected gain:** only the `index_add_` share of the 659 ms compute row. Unmeasured. It counts toward the 157 ms that N1 cannot supply.
+- **Control:** microbenchmark vs the current `index_add_` on the real chunk shapes, forward and forward+backward. Record the ratio; N2-b follows N2-a whenever the SYCL gate (S0–S4) has passed. Either is adopted only if correct and a win.
+- **Expected gain:** only the `index_add_` share of the 659 ms compute row. Unmeasured.
 
 ### N3 — Measured edge capacity with margin
 - **Nitro idea:** `plan_capacities` / `_measured_caps` with `EDGE_MARGIN` (1.30) instead of a worst-case cap.
 - **Do:** export with cap = measured max per-rank shard edges × {1.05, 1.10, 1.30}, rounded up (N3-a/b/c). Nitro's remeasure-and-retry is **not** copied (capacity is baked into the traced model); overflow is a hard error.
 - **Control:** the three margins against the current cap 65 536.
-- **Expected gain:** small by design. Real edges are about 58–60k against the 65,536 cap, so the padded fraction is under about 12% of edge slots. That is cleanup, not the 157 ms.
+- **Expected gain:** small by design. Real edges are about 58–60k against the 65,536 cap, so the padded fraction is under about 12% of edge slots. That is cleanup, not a large lever.
 
 ### N4 — MOLE merge at export, keyed by composition
 - **Nitro idea:** merge the mixture-of-linear-experts per system (`_composition_key`, `prepare_for_inference`).
@@ -397,7 +397,7 @@ decides go/no-go), and its own failure points.
 - **Expected gain:** about 8 ms (1% of 825 ms), near the 6.27 ms MDE. Optional.
 
 ### N5 — Fused edge-chain blocks (Nitro kernel set)
-Each block: **microbenchmark → one layer → all layers → gate**. Drop a block whose FP64 microbenchmark is under ~1.5× the unfused torch sequence.
+Each block: **microbenchmark → one layer → all layers → gate**. Every block is attempted. A block whose FP64 microbenchmark is not detectably faster than the unfused torch sequence (after a tuning round) is closed flat or loss and stays out of the stack.
 
 | ID | Block | Nitro source |
 |---|---|---|
@@ -410,7 +410,7 @@ Each block: **microbenchmark → one layer → all layers → gate**. Drop a blo
 | F7 | Side-queue concurrency of independent sub-graphs | `_parallel`, `_side_streams` |
 
 - **Backend:** must run in the Python-free C++ engine, so SYCL/oneDNN custom ops registered in C++ with an exporter change (Triton and CuTe are not usable as-is). F7 is **deferred** by default.
-- **Expected gain:** at most the 659 ms compute row. A 100–200 ms cut is 15–30% of that row and is inside the budget. After a full N1 win, 1.5× still needs about 157 ms from N2 and N5. Low confidence until the microbenchmarks.
+- **Expected gain:** at most the 659 ms compute row. The size is unknown until the microbenchmarks. No threshold applies.
 
 ### Order
 (N5 execution detail is in §5; F6 is folded into each block stage there.)
@@ -432,7 +432,7 @@ Severity: **S** can ship wrong physics or invalidate results; **H** likely to bl
 | X2 | H | Nitro's Triton/CuTe kernels cannot run in the Python-free C++ engine. | Prototype one trivial SYCL op end-to-end (export → load → autograd) first |
 | X3 | S | Checkpoint mismatch: Nitro is validated for `uma-s-1p2p1`; local is `uma-s-1p2` (composition embedding differs). | Reuse edge-side designs only; parity vs the pinned fairchem 2.21.0 forward |
 | X4 | H | Every compute activity needs export, re-export (27 GB artifacts) and re-validation. | Disk and job budget up front |
-| X5 | M | Nitro's speedups are NVIDIA-tuned; PVC FP64 behaviour differs. | Per-block microbenchmark go/no-go |
+| X5 | M | Nitro's speedups are NVIDIA-tuned; PVC FP64 behaviour differs. | Per-block microbenchmark verdict |
 | X6 | M | Licence: adapting MIT/BSD code into the GPL-2 tree needs notices; CUTLASS DSL is NVIDIA-licensed. | Clean-room re-implementation |
 
 ### N1
@@ -455,7 +455,7 @@ Severity: **S** can ship wrong physics or invalidate results; **H** likely to bl
 ### N3
 | # | Sev | Failure point | Mitigation |
 |---|---|---|---|
-| N3-1 | H | Tighter cap turns a density/NPT excursion into a mid-run crash for ≤ ~11% gain. | Opt-in only; likely drop |
+| N3-1 | H | Tighter cap turns a density/NPT excursion into a mid-run crash for ≤ ~11% gain. | Opt-in only because of the crash risk; measured regardless |
 | N3-2 | M | Cap must cover the max over ranks and is coupled to chunk size. | Existing cross-rank agreement; one export per cap |
 
 ### N4
@@ -463,7 +463,7 @@ Severity: **S** can ship wrong physics or invalidate results; **H** likely to bl
 |---|---|---|---|
 | N4-1 | S | Silent wrong energy if the folded artifact is used with a different composition/charge/spin, or composition changes mid-run. | Metadata key; refuse mismatch |
 | N4-2 | M | Coefficients are a runtime input in some modules and constant in one; interface changes. | Per-module audit |
-| N4-3 | M | ~1% gain will not clear a threshold alone. | Judge in a stack, or drop |
+| N4-3 | M | ~1% gain will not clear a threshold alone. | Judge in a stack; recorded even if flat |
 
 ### N5
 | # | Sev | Failure point | Mitigation |
@@ -488,7 +488,7 @@ Decisions: goal = step time on the NaCl 14³ W=12 gate case; SYCL kernel depende
 | B4 host build | **Resolved.** CPU neighbor list. H6 measured `ms_vesin` 118 ms and `ms_graph` 124 ms on the BASE step. |
 | B5 VCS | **Decided**: commit harness on `uma-nitro`; run outputs/binaries excluded via `.git/info/exclude`; clean check = tracked files only. |
 | B2 SYCL op | Open, but now permitted. Prior art found (PyTorch `SyclExtension`) and the engine already compiles `icpx` objects that use torch's XPU queue (`xccl_peer.cpp`). Needs the prototype in §4 before N5. |
-| B3 device-build speed | Open. Decided by the N1 go/no-go. |
+| B3 device-build speed | Open. Decided by the N1 measurement. |
 
 ### 3.1 Blocking items (resolve before any implementation)
 
@@ -496,7 +496,7 @@ Decisions: goal = step time on the NaCl 14³ W=12 gate case; SYCL kernel depende
 |---|---|---|---|
 | B1 | **Architecture match is inferred, and the code contradicts itself.** The traced chunk shows 9×9 Wigner and `[3,4,2]` m-splits (lmax=2), but `export_blocks_xpu.py` docstrings and comments repeatedly say `[Ec,25,25]` wigner (lmax=4). Every N5 kernel shape depends on this. | `export_blocks_xpu.py` lines 20, 145, 336, 385 vs traced `torch.zeros([1,9,9])` | Read `lmax`, `mmax`, `sphere_channels`, `num_layers` from the actual checkpoint config (`backbone.lmax`) on a compute node and write them into this plan. Do not start N5 before this |
 | B2 | **No SYCL/C++ custom compute op exists in the engine yet.** Only SYCL use is `xccl_peer.cpp` compiled by `icpx` into an object; the registered ops (`uma_ckpt`, `uma_halo`, `uma_peer`) are checkpoint/communication ops. A compute kernel needs an `icpx` kernel object, a `TORCH_LIBRARY` registration with Autograd, an exporter-side stand-in, and a validated trace. | `CMakeLists.txt` lines 97–156; `TORCH_LIBRARY` greps | Run the X2 prototype (one trivial elementwise SYCL op through export → traced load → autograd → W=12) and record whether it works. N5 is blocked until it does |
-| B3 | **Device-build speed is not a given.** The code comment in `mpi_peer_predictor.cpp` reports a vesin rebuild of ~1534 ms/step at N=32 (CUDA vesin), i.e. a device build can be slower than the 118 ms host build. | `mpi_peer_predictor.cpp` ~lines 375–381 | Keep the N1 go/no-go (≤ ~25% of host time) as a hard gate; do not assume the Nitro-style builder wins |
+| B3 | **Device-build speed is not a given.** The code comment in `mpi_peer_predictor.cpp` reports a vesin rebuild of ~1534 ms/step at N=32 (CUDA vesin), i.e. a device build can be slower than the 118 ms host build. | `mpi_peer_predictor.cpp` ~lines 375–381 | Measure it; adopt N1-a only if correct and a win; do not assume the Nitro-style builder wins |
 | B4 | **Host build premise still unconfirmed in the actual build.** The vesin branch needs `third_party/vesin/lib/libvesin_torch.so`; it is empty here, so the CPU `build_neighbor_graph` branch should be the one compiled, but the actual `build-uma` CMake output was not located. The host builder is single-threaded (no OpenMP) and runs on all 12 ranks. | `CMakeLists.txt` 196–211; `neighbor_list.cpp` (no OpenMP) | Confirm from the build's CMake cache/log, or from the first N1 control run that times the host build |
 | B5 | **Resolved by the fresh clone (R.4).** The old tree had untracked `PR_CLEANUP_PLAN.md` and `pbs/`; the new clone has none, so the clean-tree check is meaningful. | — | Commit the harness on `uma-nitro`; exclude `pbs/out/`, `pbs/bin/`, `build-*/` |
 | B6 | **Gate rule status.** The PR-cleanup wave rule applies to `lammps-uma-release/`, which this plan no longer edits. Every `nitro/*` branch still has to pass the NaCl 14³ FP64 W=12 NVT+NPT gate before it counts as closed. | `PR_CLEANUP_PLAN.md` lines 24–26 | Never merge `nitro/*` into `lmp-uma-release` unreviewed |
@@ -560,7 +560,7 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 | S2 | Export round trip: trace the small module with the Python stand-in, save the `.pt`, load it in a C++ process that links the op, run forward+backward | 1 compute node | Loads without "unknown builtin op"; outputs and gradients equal eager torch (≤ 1e-15 / 1e-9) |
 | S3 | Link into `uma_engine` and rebuild `lmp`; run the existing NaCl 14³ W=12 NVT+NPT gate with the op linked but **unused** | `debug` job, ABBA vs BASE | Step-0 PE = −74142.191907631001 eV (|ΔE| ≤ 1e-8), identical to BASE; no regression in step time beyond noise; no new static-init or load errors |
 | S4 | 12-tile run: `mpiexec -n 12` test that calls the op repeatedly interleaved with an `uma_peer` all-reduce | 1 compute node | No hang; results identical on all ranks; op and collective ordering unchanged |
-| S5 | Cost measurement: launch overhead per call, FP64 bandwidth vs `torch` elementwise on the same tensors at the real chunk shapes | 1 compute node | Report only; this is the N5 go/no-go input (a fused op must beat the unfused torch sequence by ≥ 1.5× per block) |
+| S5 | Cost measurement: launch overhead per call, FP64 bandwidth vs `torch` elementwise on the same tensors at the real chunk shapes | 1 compute node | Report only; this is the baseline for the N5 micro stages |
 
 **Gate to N5:** S0–S4 pass. If S1 or S2 fail for a reason that cannot be fixed within the engine's build, N5 and N2-b are dropped, and the plain-torch options (N1-a, N2-a, N3, N4) are what remains.
 
@@ -580,7 +580,7 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 
 ### 4.5 What the prototype deliberately does not do
 
-It does not fuse any real UMA block, change the exported model, or alter `max_neighbors`/edge sets. It is a toolchain and integration test only. Real fusions (F1–F6) start only after the gate in §4.3 passes and the per-block microbenchmark clears the 1.5× bar.
+It does not fuse any real UMA block, change the exported model, or alter `max_neighbors`/edge sets. It is a toolchain and integration test only. Real fusions (F1–F6) start only after the gate in §4.3 passes. Each block is then microbenchmarked and judged by the H.0 verdict.
 
 ---
 
@@ -611,9 +611,10 @@ Facts that shape the plan:
 
 ### 5.2 Rules specific to N5
 
-- **Stage entry gate (N5.0).** N5 starts only after S0–S4 pass (§4.3, S5 reported) and the N1 and N2 go/no-go decisions are recorded (closed means decided, not necessarily won). If S1 or S2 fail unfixably, N5 is dropped (§4.3).
-- **Share rule.** A block enters its own stage only if the N5.1 profile gives it a measured share of at least 19 ms of the 659 ms compute row. At a 1.5× speedup a block saves a third of its share, and 19 ms × 1/3 ≈ 6.3 ms, which is the E0 MDE (6.27 ms). A smaller block cannot be detected and is dropped without a stage.
-- **Speed rule.** A block passes its micro stage only if fused (forward + backward, all three passes counted) is at least 1.5× the unfused torch sequence on the real shapes, median of ≥30 repeats, same sign on 3 different nodes.
+- **Stage entry gate (N5.0).** N5 starts only after S0–S4 pass (§4.3, S5 reported) and the N1 and N2 verdicts are recorded (closed means a verdict is recorded, not necessarily a win). If S1 or S2 fail unfixably, N5 is dropped (§4.3).
+- **No size filter.** Every block gets its stage, whatever its measured share. The N5.1 profile orders the blocks and tells us how small a gain to expect; it never removes one. A block too small to detect is closed flat with its profile number.
+- **Micro verdict.** Fused (forward + backward, all three passes counted) against the unfused torch sequence on the real shapes, median of ≥30 repeats per job, ≥3 jobs on different nodes. Win, flat or loss by the H.0 rule (same sign in all jobs and a median gain above the larger of 3 × pooled within-job MAD and the between-job range). There is no ratio threshold. Only a win moves on to the in-model stages.
+- **Tuning round.** Before a block is closed flat or loss, try at least: three work-group shapes, sub-group 16 and 32, with and without local memory, and vendor library against custom code for the GEMM parts. Record each variant's number.
 - **Correctness bars.** Per block, FP64: forward relative max error ≤ 1e-12 against stock eager; gradients ≤ 1e-12 relative; `torch.autograd.gradcheck` (FP64, small shapes) passes. In the model the P.1 bars apply unchanged (step-0 |ΔPE| ≤ 1e-8 eV, force 1e-9 eV/Å, virial 1e-7 eV). A miss is investigated, never loosened.
 - **Backward in two steps.** (a) Scaffold: the op's backward calls `autograd.grad` on the torch reference. This proves plumbing and checkpoint recompute only, and **no timing is claimed from it** (it does extra work). (b) Hand-written SYCL backward, which is the only timed variant. So F6 is folded into each block stage and is not a separate stage.
 - **No architecture change.** Fused ops compute the same math (the §4 and `uma-architecture-immutable` rules). Weights are passed to the ops as tensors taken from the exported module, so MOLE-merged weights are used as they are.
@@ -625,24 +626,24 @@ Facts that shape the plan:
 | Stage | Work | Compute | Exit criteria |
 |---|---|---|---|
 | **N5.0** Entry gate | Checklist only: S0–S4 closed, S5 reported, N1 and N2 decisions recorded, H1–H6 closed. | no | All boxes ticked in this table; status line updated. |
-| **N5.1** Op-level profile (diagnostic) | Standalone script (not LAMMPS) on one tile: real chunk shapes dumped from one rank of the 14³ W=12 run, stock eager `forward_chunk` in FP64, XPU profiler, three passes per layer. Output the per-op device time, then group into the table in 5.1. Calibrate against the 659 ms row (4 layers, one chunk per rank): sum must land within ±15%, otherwise find the gap before continuing. Confirm the shapes and that weights do not require grad. | 1 node, 1 tile, `debug-scaling` | `pbs/out/nitro_n5/N5_PROFILE.md` with: shares in ms, GEMM floor measured, feasibility ceiling = Σ share × (1 − 1/s) with s = 2 (best case) against the cut still needed after N1/N2, and the ordered list of blocks that clear the share rule. **If the ceiling is below the needed cut, report to the user before N5.2** (the s15 rule says continue; the user decides whether to). |
+| **N5.1** Op-level profile (diagnostic) | Standalone script (not LAMMPS) on one tile: real chunk shapes dumped from one rank of the 14³ W=12 run, stock eager `forward_chunk` in FP64, XPU profiler, three passes per layer. Output the per-op device time, then group into the table in 5.1. Calibrate against the 659 ms row (4 layers, one chunk per rank): the sum should land within ±15%; if not, find the gap before continuing. Confirm the shapes and that weights do not require grad. | 1 node, 1 tile, `debug-scaling` | `pbs/out/nitro_n5/N5_PROFILE.md` with: shares in ms, the measured GEMM floor, and the blocks ordered by share (priority only). Nothing is filtered out. |
 | **N5.2** Fixtures and reference harness | Save one rank's chunk inputs (`x_full`, `edge_index`, `wigner`, `wigner_inv_envelope`, `x_edge`) and reference outputs and gradients from stock eager FP64, in scratch (not committed). Write `pbs/nitro/n5_bench.py`: runs a block unfused vs fused, reports error, max abs gradient error, time (median, MAD, 30 repeats), traffic estimate, GB/s. | 1 node | Harness reproduces the stock result bitwise against itself; a no-op "fused = stock" arm shows ratio 1.00 ± MDE. |
 | **N5.3** Infra | Shared header for op schemas; build rule linking the N5 `.o` files into `uma_engine` (as `xccl_peer.o`, from S3); exporter flags with a Python stand-in for every op (`torch.library`) and an eager fallback; manifest and engine load check; measure export time and per-arm job time for the budget. | build, then 1 node ABBA | Export with an empty flag set produces an artifact whose traced graph equals BASE (manifest hash equal); BASE gate unchanged (step-0 PE −74142.191907631001, ABBA vs BASE within MDE); job-time budget recorded (how many arms fit in 01:00:00). |
-| **N5.4** F2 Gate | Fused sigmoid + expand + SiLU-scalar + multiply + concat. Micro: fwd, backward scaffold, then hand-written backward. In-model arms `L0` (layer 0 only) and `ALL`. | micro: 3 jobs; model: 3 jobs | Micro passes the speed and correctness rules; `L0` and `ALL` pass step-0 PE and NVT parity; ABBA verdict recorded (win, flat, or loss). Branch merged to `nitro/n5-stack` only if micro passed. A failed micro closes the stage as "dropped" with the number. |
+| **N5.4** F2 Gate | Fused sigmoid + expand + SiLU-scalar + multiply + concat. Micro: fwd, backward scaffold, then hand-written backward. In-model arms `L0` (layer 0 only) and `ALL`. | micro: 3 jobs; model: 3 jobs | Correctness bars met; tuning round done; micro verdict recorded. If the micro is a win, `L0` and `ALL` pass step-0 PE and NVT parity and their ABBA verdicts are recorded. Branch merged to `nitro/n5-stack` only for a win. Flat or loss closes the stage with its numbers. |
 | **N5.5** F4 Wigner + conv1 | Fused gather, concat, rotate, radial multiply, `fc_m0` and block GEMMs (GEMM part may stay on the vendor library; the fusion is the memory-bound prologue and epilogue). Same sub-steps as N5.4. | 3 + 3 jobs | As N5.4, plus force parity ≤ 1e-9 eV/Å. |
 | **N5.6** F5 Inverse rotation + conv2 + reduce | Includes the sorted segment reduction (N2-b if it passed) and its backward. Needs the center-sorted assertion (N2-1) and a test across a chunk boundary. | 3 + 3 jobs | As N5.5, plus NPT 10-step parity (virial ≤ 1e-7 eV). |
-| **N5.7** F1 LN+SiLU | Only if N5.1 shows it clears the share rule (likely it will not). | 3 + 3 jobs | As N5.4, or closed as "below share rule" with the profile number. |
-| **N5.8** F3 Radial chain | Merge the radial MLPs across layers (one batched first Linear for 4 layers), fused LN+SiLU between Linears. Only if it clears the share rule. | 3 + 3 jobs | As N5.4. |
-| **N5.9** Stack gate | All passing blocks together on `nitro/n5-stack`; ABBA vs BASE, ≥3 jobs on different nodes; NVT and NPT 10-step parity; if W=12 fails, first run the same artifact at W=1 to decide kernel or multi-tile cause. | 3 jobs + diagnostics | Verdict per the replication rule; step time and speedup vs BASE reported; stack result handed to the §1 "stack" step. |
+| **N5.7** F1 LN+SiLU | Expected to be small (tensors are only [E,128]); attempted anyway. | 3 + 3 jobs | As N5.4. |
+| **N5.8** F3 Radial chain | Merge the radial MLPs across layers (one batched first Linear for 4 layers), fused LN+SiLU between Linears. | 3 + 3 jobs | As N5.4. |
+| **N5.9** Stack gate | All passing blocks together on `nitro/n5-stack`; ABBA vs BASE, ≥3 jobs on different nodes; NVT and NPT 10-step parity; if W=12 fails, first run the same artifact at W=1 to decide kernel or multi-tile cause. | 3 jobs + diagnostics | Verdict per the replication rule; step time and the BASE / stack ratio reported as measurements; leave-one-out and add-one-in arms for the N5 blocks; result handed to the §1 "stack" step. |
 | **N5.10** F7 side queues | Deferred. Opens only if N5.9 is closed and the user asks for it. | n/a | n/a |
 
-Default block order is N5.4 → N5.5 → N5.6 → N5.7 → N5.8. N5.1 may reorder it by measured share; the reorder is recorded in the N5.1 closure. A dropped block still closes its stage (with the measured number), so the next stage can start.
+Default block order is N5.4 → N5.5 → N5.6 → N5.7 → N5.8. N5.1 may reorder it by measured share; the reorder is recorded in the N5.1 closure. A flat or loss block still closes its stage (with the measured numbers), so the next stage can start.
 
 ### 5.4 Failure points specific to this plan
 
 | # | Sev | Failure point | Mitigation |
 |---|---|---|---|
-| N5.a | H | FP64 GEMMs are about a third to a half of the compute row, so even perfect fusion of the rest may not reach the needed cut. | N5.1 ceiling check, reported before any kernel work |
+| N5.a | M | FP64 GEMMs are about a third to a half of the compute row and fusion cannot remove them, so the N5 gain is bounded by the rest. | N5.1 measures the split; reported, not a gate |
 | N5.b | S | Backward misses a path (gradient through `wigner`, `wigner_inv_envelope` or `x_edge` carries forces and virial). | `gradcheck`, FD spot checks, NPT parity, scaffold backward as a cross-check |
 | N5.c | S | Checkpoint recompute: the op must have the Autograd key and give identical outputs in the no-grad and the grad pass. | S1 test through a checkpoint-style no-grad forward then recompute (P-6) |
 | N5.d | H | Atomics or sorted reduce change the summation order, so results are not bitwise equal to BASE. | Tolerance bars above; document, do not claim bit-identity (P-7) |
@@ -654,6 +655,6 @@ Default block order is N5.4 → N5.5 → N5.6 → N5.7 → N5.8. N5.1 may reorde
 
 ### 5.5 Decisions that belong to the user
 
-1. **Start N5 before N1 and N2?** Plan order says N1, N2, then N5. N1 can give at most 118 ms; the rest of the 275 ms cut must come from compute. Default: keep the order (nothing opens early).
+1. **Start N5 before N1 and N2?** Plan order says N1, N2, then N5. Default: keep the order (nothing opens early).
 2. **Block order** is default F2, F4, F5, F1, F3 until N5.1 measures shares. Say if you want a different order.
-3. **If the N5.1 ceiling is below the needed cut**, stop at N5.1 or continue (the s15 rule says continue; this section asks first).
+3. (Removed in revision 8: there is no ceiling or stop rule by speed.)
