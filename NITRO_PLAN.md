@@ -114,6 +114,8 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 
 Name legend: **H** = hardening, **Z** = ZIF-8 test system, **S** = SYCL prototype stage, **N** = optimization activity (N5.x = a stage inside N5), **F** = a fused block built inside an N5 step. Sub-items such as Z1.3 or N1-a belong to the step that names them.
 
+**Labeling rule (user, 2026-11-12).** No new label letters or prefixes are added to this plan. New work takes the next free plain step number, or becomes a sub-item of an existing step under its existing label. If a new letter seems necessary, ask the user first. Every status message names work as "step N (name)".
+
 
 ---
 
