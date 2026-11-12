@@ -6,10 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 5, 2026-11-11): harness committed (`7da48ce5`). BASE gate job 9072484 passed the **PE bars**
-(step-0 |ΔE| 0 / 1.5e-11, step-10 exact) but its **timing path is dead** (0 `MP_PERF` lines, empty `perf_nvt.json`;
-see section H, finding F1). `nitro-base` is **not yet tagged**. No activity work starts before stages H1–H6 are closed.
-Gains are estimates and come from the pre-`getenv`-removal tree; they are re-measured in H4/H5.
+Status (revision 6, 2026-11-12): H1–H6 are closed. `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. Activity work may start at step 7. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate = NaCl 14³ (21,952 atoms), W=12,
 NVT + NPT 10 steps; one branch per activity, immutable tag before each submit.
@@ -64,8 +61,8 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 |---|---|
 | B5 (untracked `pbs/` and `PR_CLEANUP_PLAN.md`) | **Resolved.** The clone has no untracked files, so a clean-tree check is meaningful. Rule: commit harness files on `uma-nitro`; keep `pbs/out/`, `pbs/bin/`, `build-*/` out of git via `.git/info/exclude`. |
 | Missing build script | **Resolved.** The clone has no `scripts/build_lammps_uma.sh` either. The working recipe is the `cmake` call in `lammps-uma-release/pbs/pr_gate/run_waveE.pbs` (GCC 13.4, MPICH 5.0, torch cmake path from `fxpu`, `UMA_ENGINE_USE_XPU=ON`, `UMA_ENGINE_USE_XCCL=ON`, `UMA_ICPX`, `ONECCL_ROOT=$CONDA_PREFIX`, `PKG_ML-UMA=ON`, `PKG_KOKKOS=OFF`). Copy it into the clone as `pbs/nitro/build.inc`, with `LMP_BUILD` set per arm (`build-nitro/<sha7>/`). Wave E built inside the debug job; keep that. |
-| `pbs/` harness missing | **Written** in `pbs/nitro/` (see P.4); not yet committed or verified on a compute node. |
-| Existing W=12 N=14 artifact | Lives in `lammps-uma-release/pbs/out/pr_gate_wE_9040639.../n14/artifact`. Valid as a BASE input only while the exporter and engine sources equal `a240ba3485`; any arm that changes export re-exports into the nitro tree. |
+| `pbs/` harness | **Committed and used.** Gate 9077571, E0 jobs 9078185/9078330/9078397, and H5 jobs 9079409/9079449/9079543 ran from `pbs/nitro/`. |
+| Existing W=12 N=14 artifact | The BASE artifact is `lammps-uma-nitro/pbs/out/nitro_gate_9072484.../n14/artifact`, reused by the H3 gate and by H4/H5. Any arm that changes export re-exports into the nitro tree and deletes that export at job exit unless `KEEP_ARTIFACT=1`. |
 
 ### R.5 Standing rules for every job in this tree
 
@@ -73,8 +70,9 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - FP64 only for all model numerics and custom kernels.
 - No torch/XPU compute on login nodes. Compiling is fine.
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
-- Disk: Flare project quota is 27.57T used of 40T (69%). Each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6).
-- Before any measurement: stages H1–H6 closed (section H).
+- Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
+- Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 10 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
+- H1–H6 are closed. Step 7 is the next stage.
 
 ### R.6 Execution sequence (revision 5 — supersedes revision 4)
 
@@ -89,10 +87,10 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug-scaling`, 1 node) | closed. Job 9077571, tag `nitro/base-verify/r3` = `efae85ff72`. `nitro-base` is that commit. |
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug-scaling`, 1 node) | closed. MDE 6.27 ms (0.76% of 823 ms). Jobs 9078185, 9078330, 9078397, plus perf-off 9078443. |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug-scaling`, 1 node) | closed. The ~390 ms is ~360 ms local queue drain, ~20 ms rank skew, ~12 ms transfer at ~65 GB/s. |
-| H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | open |
-| 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug`) | blocked by H6 |
-| 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug`) | blocked by H6 |
-| 9 | Continue with S1–S5, then N2, N5 microbenchmarks, N3, N4, stack (§1, §5) | yes | blocked by H6 |
+| H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | closed. BASE step 825 ms. 1.5× needs a 275 ms cut. N1 can supply at most 118 ms. |
+| 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug-scaling`) | not started |
+| 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug-scaling`) | not started |
+| 9 | Continue with S1–S5, then N2, N5 microbenchmarks, N3, N4, stack (§1, §5) | yes | not started |
 
 H1–H6 close "plan ready for execution". The activities then proceed in the order in §1.
 
@@ -217,8 +215,54 @@ Status: **closed**.
 
 Exit: no "TBD" or stale statement left in R, P, 1; H-table all closed; then step 7 may start.
 
+### Measured BASE step (H6)
+
+Source: H5 ON slots, three nodes, 104 post-warmup steps each. The number below is the median of the three job medians. Within-job MAD of `ms_total` is about 0.6–1.1 ms. The between-job range of `ms_total` is 6.5 ms (H4 MDE is 6.27 ms).
+
+`ms_fwd` + `ms_bwd` include the in-graph collective. H5 showed that collective's 390 ms timer is 358 ms of local queue drain, 20.5 ms of rank skew, and 12.5 ms of all-reduce transfer. The drain stays in compute. All-gather adds 0.5 ms of wait and 6.7 ms of transfer.
+
+| Row | Median (ms) | MAD across the 3 jobs (ms) | Share of 825 ms |
+|---|---|---|---|
+| Host graph build (`ms_graph`; 118 ms of it is `ms_vesin`) | 124 | 0.1 | 15% |
+| Compute (forward + backward, without rank-wait and transfer) | 659 | 1 | 80% |
+| Collective wait (MPI barrier after the local drain) | 21 | 3 | 2.5% |
+| Collective transfer (all-reduce 12.5 ms + all-gather 6.7 ms) | 19 | 0.1 | 2.3% |
+| Other (force all-reduce) | 1 | 0.2 | 0.1% |
+| Step (`ms_total`) | 825 | 3 | 100% |
+
+A 1.5× step is 550 ms, so the program must remove **275 ms**. N1 can remove at most the 118 ms host neighbor build, which is 1.17×. The other **157 ms** has to come out of the 659 ms compute row (24% of it) from N2 and N5. Communication is 40 ms. Removing it would not reach 1.5×, and Nitro does not target it. Removing graph and compute entirely would leave 41 ms (20×). That ceiling is not a forecast.
+
+| Activity | Upper bound | Versus 1.5× |
+|---|---|---|
+| N1 | 118 ms (`ms_vesin`) | 1.17× alone |
+| N2 | unmeasured; only the part of the 659 ms that is `index_add_` | counts toward the 157 ms |
+| N3 | small by design: real edges are about 58–60k against the 65,536 cap | cleanup, not the 157 ms |
+| N4 | about 1% of the step, ~8 ms | optional; near the 6.27 ms MDE |
+| N5 | at most the 659 ms compute row | the 1.5× target needs ~157 ms of it after a full N1 win |
+
+### Close-out
+
+| ID | Result |
+|---|---|
+| F1 | Closed in H1 and proved in H3: `MP_PERF` rows are present. |
+| F2 | Closed in H1: new arms use `UMA_NITRO_*`. |
+| F3 | Closed in H3: `nitro-base` is `efae85ff72`. |
+| F4 | Closed in H2: `run_abba.pbs`. |
+| F5 | Closed in H2 and H4: the job is the replicate. MDE is 6.27 ms. |
+| F6 | Closed in H2: exports are deleted unless `KEEP_ARTIFACT=1`. |
+| F7 | Closed in H2: untracked source fails the tree check; PBS logs go to `pbs/out/`. |
+| F8 | Closed in H2: `MPICH` comes from `env.inc`. |
+| F9 | Closed in H2 and H3: fairchem 2.21.0 is recorded and matches. |
+| F10 | Closed in H5: the 390 ms timer is 358 ms local drain, 20 ms rank skew, 12.5 ms transfer at ~65 GB/s. |
+| F11 | Closed in H6: this ledger. |
+| F12 | Closed in H6: the stale harness and baseline lines in R and the status header are updated. |
+| F13 | Still out of scope (H.8). |
+
+Status: **closed**. Step 7 may start.
+
 ### H.7 Rules that apply to every H stage
 
+- **Report closure (rule, 2026-11-12).** Every status report says whether the stage in progress is closed, and lists the earlier stages that are already closed.
 - **Sequential close (rule, 2026-11-11).** Never open an item in a later stage while any item in an earlier stage is not fully closed. A stage is fully closed only when **every** item in it is done: its exit criteria met, its plan status updated, and its commit pushed (or the push explicitly waived for that stage per the rule below). This applies to items within a stage as well as to whole stages: no H2 work starts while any H1 item is open, and so on through H6, then step 7 onward. A blocked item stays in its own stage; do not skip ahead and come back.
 - Compute only in `debug` / `debug-scaling`, `walltime=01:00:00`, FP64, no login-node compute, tagged immutable commit before every `qsub`, syntax-check subagent before every `qsub`.
 - A failed gate means: revert that stage's commit, do not tag, do not advance.
@@ -292,7 +336,10 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 | `export_one_rank.sh` | one rank of the W=12 export |
 | `run_gate.pbs` | build into `build-nitro/<sha7>/`, export (or reuse), NVT+NPT 10 steps, PE bars against the recorded values, force dump at steps 0 and 10, `SUMMARY.txt`, `meta.json`, `run.env` |
 | `run_timing.pbs` | E0: `REPS` identical 30-step NVT runs in one job; MP_PERF medians, bitwise PE and force repeat |
-| `compare.py` | `pe`, `bar`, `perf`, `bit` subcommands over LAMMPS and MP_PERF logs |
+| `run_abba.pbs` | ABBA slots for one job (H2). H5 used it. |
+| `abba.inc` | Parses an arm spec into BASE, arm, arm, BASE order |
+| `ENV_AUDIT.md` | Allowlist of `UMA_*` names that may fall back to the environment (H1) |
+| `compare.py` | `pe`, `bar`, `perf`, `bit`, `abba`, `abba-test` |
 | `diff_forces.py` | frame-by-frame force dump comparison (max, rms, relative, bitwise atom count) |
 | `meta.py` | writes `meta.json` |
 
@@ -324,7 +371,7 @@ decides go/no-go), and its own failure points.
   - Reuse the existing cross-rank pad-cap overflow check in `mpi_peer_predictor.cpp` (all-reduce of an overflow flag before the forward); add the device builder's own overflow flag to it. On overflow all ranks stop with an explicit error.
 - **Control:** time the current host `build_neighbor_graph` + H2D copy with device events, then N1-a/N1-b in the same job (ABBA). Proceed only if N1-a ≤ ~25% of the host time.
 - **Tests:** edge-set equality vs the current builder; ΔPE/ΔF/Δvirial vs BASE; NPT parity; W ladder.
-- **Expected gain:** up to ~110 ms/step (~13%) if the host-build hypothesis holds (unverified).
+- **Expected gain:** at most 118 ms (`ms_vesin`), 14% of the 825 ms step, 1.17×. The host build is measured (H6). The control is still that the device build must be ≤ ~25% of that host time.
 
 ### N2 — Target-sorted edge→node segmented reduction
 - **Nitro idea:** `EdgeCSR` (edges sorted by target node) with `_segreduce_tgt_*` / `fused_m0_segreduce` instead of atomic scatter.
@@ -333,13 +380,13 @@ decides go/no-go), and its own failure points.
   - N2-a: per-segment reduction with torch ops over the already center-sorted edges (offsets from a bincount/cumsum of centers).
   - N2-b: SYCL kernel, one work-group per segment, with custom backward.
 - **Control:** microbenchmark vs the current `index_add_` on the real chunk shapes, forward and forward+backward. Proceed only if ≥ 1.3×.
-- **Expected gain:** a few % if `index_add_` is hot, ~0 otherwise.
+- **Expected gain:** only the `index_add_` share of the 659 ms compute row. Unmeasured. It counts toward the 157 ms that N1 cannot supply.
 
 ### N3 — Measured edge capacity with margin
 - **Nitro idea:** `plan_capacities` / `_measured_caps` with `EDGE_MARGIN` (1.30) instead of a worst-case cap.
 - **Do:** export with cap = measured max per-rank shard edges × {1.05, 1.10, 1.30}, rounded up (N3-a/b/c). Nitro's remeasure-and-retry is **not** copied (capacity is baked into the traced model); overflow is a hard error.
 - **Control:** the three margins against the current cap 65 536.
-- **Expected gain:** ≤ ~11% of edge work (unmeasured). Lowest priority.
+- **Expected gain:** small by design. Real edges are about 58–60k against the 65,536 cap, so the padded fraction is under about 12% of edge slots. That is cleanup, not the 157 ms.
 
 ### N4 — MOLE merge at export, keyed by composition
 - **Nitro idea:** merge the mixture-of-linear-experts per system (`_composition_key`, `prepare_for_inference`).
@@ -347,7 +394,7 @@ decides go/no-go), and its own failure points.
   - N4-a: fold the per-system expert coefficients at export; store composition + charge + spin in metadata and refuse a mismatch.
   - N4-b: fold other composition-constant subgraphs.
 - **Control:** unfolded vs folded artifact; bit-level or tolerance equality of PE/F.
-- **Expected gain:** ~1% time, some memory. Optional.
+- **Expected gain:** about 8 ms (1% of 825 ms), near the 6.27 ms MDE. Optional.
 
 ### N5 — Fused edge-chain blocks (Nitro kernel set)
 Each block: **microbenchmark → one layer → all layers → gate**. Drop a block whose FP64 microbenchmark is under ~1.5× the unfused torch sequence.
@@ -363,7 +410,7 @@ Each block: **microbenchmark → one layer → all layers → gate**. Drop a blo
 | F7 | Side-queue concurrency of independent sub-graphs | `_parallel`, `_side_streams` |
 
 - **Backend:** must run in the Python-free C++ engine, so SYCL/oneDNN custom ops registered in C++ with an exporter change (Triton and CuTe are not usable as-is). F7 is **deferred** by default.
-- **Expected gain:** ~100–200 ms (12–25%) if the edge chain is memory-bound; low confidence.
+- **Expected gain:** at most the 659 ms compute row. A 100–200 ms cut is 15–30% of that row and is inside the budget. After a full N1 win, 1.5× still needs about 157 ms from N2 and N5. Low confidence until the microbenchmarks.
 
 ### Order
 N1 → N2 → N5 microbenchmarks (F1, F2, F4, F5, F6, F3) → N5 in-model for blocks that passed → N3 → N4 → stack the passing activities (`nitro/stack/s<k>`) and run the gate.
@@ -395,7 +442,7 @@ Severity: **S** can ship wrong physics or invalidate results; **H** likely to bl
 | N1-3 | H | Overflow cannot be remeasured (baked cap). | Read the flag every step; fail fast |
 | N1-4 | M | Ranks could build different edge sets. | Cross-rank checksum on debug runs |
 | N1-5 | M | Boundary flips at r ≈ 6.0 (negligible energy effect, not bit-identical). | Tolerance band in the equality test |
-| N1-6 | M | Host-build premise unverified. | The N1 control measures it |
+| N1-6 | M | Host-build time. | Measured in H6: `ms_graph` 124 ms, of which `ms_vesin` is 118 ms. The N1 control still has to beat that host time |
 
 ### N2
 | # | Sev | Failure point | Mitigation |
@@ -437,7 +484,7 @@ Decisions: goal = step time on the NaCl 14³ W=12 gate case; SYCL kernel depende
 | Item | Status |
 |---|---|
 | B1 architecture | **Resolved** from `hen/uma-cache/uma-s-1p2.pt` pickle: `lmax=2`, `mmax=2`, `sphere_channels=128`, `hidden_channels=128`, `edge_channels=128`, `num_layers=4`, `cutoff=6`, `max_neighbors=300`, `num_experts=64`. The `[Ec,25,25]` comments are stale. Nitro's edge-side shapes match. |
-| B4 host build | **Resolved** from the Wave E build log: `uma-engine: vesin not found; using CPU neighbor list`. The 118 ms is the single-threaded host builder on all 12 ranks. |
+| B4 host build | **Resolved.** CPU neighbor list. H6 measured `ms_vesin` 118 ms and `ms_graph` 124 ms on the BASE step. |
 | B5 VCS | **Decided**: commit harness on `uma-nitro`; run outputs/binaries excluded via `.git/info/exclude`; clean check = tracked files only. |
 | B2 SYCL op | Open, but now permitted. Prior art found (PyTorch `SyclExtension`) and the engine already compiles `icpx` objects that use torch's XPU queue (`xccl_peer.cpp`). Needs the prototype in §4 before N5. |
 | B3 device-build speed | Open. Decided by the N1 go/no-go. |
