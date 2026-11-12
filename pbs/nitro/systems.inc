@@ -39,11 +39,11 @@ mass            2 35.453"
 mass            2 12.011
 mass            3 14.0067
 mass            4 65.38"
-      # Not recorded yet. Stage H7 records them from the first BASE gate job.
-      # Until then run_gate.pbs runs in record-only mode (no pass bar).
-      SYS_REF_STEP0_PE=""
-      SYS_REF_NVT_PE10=""
-      SYS_REF_NPT_PE10=""
+      # Recorded in step 10 (Z1.4) from record job 9084279 (tag nitro/z1/r1, FP64, W=12).
+      # NVT and NPT step-0 PE differ by 2.4e-10 eV; the NVT value is the reference.
+      SYS_REF_STEP0_PE=-4.5916897506276422e+04
+      SYS_REF_NVT_PE10=-4.6244412436485371e+04
+      SYS_REF_NPT_PE10=-4.6245409267788964e+04
       ;;
     *)
       nitro_die "unknown NITRO_SYSTEM '${NITRO_SYSTEM}' (want nacl or zif8)"

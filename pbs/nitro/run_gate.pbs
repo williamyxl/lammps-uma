@@ -112,7 +112,7 @@ nitro_run_ens npt && npt_rc=0 || npt_rc=$?
 
 pe_ok=0
 if [[ "${nvt_rc}" -eq 0 && "${npt_rc}" -eq 0 && "${RECORD_ONLY}" -eq 1 ]]; then
-  echo "RECORD_ONLY: no reference PE for ${NITRO_SYSTEM}; record these values in systems.inc (stage H7)"
+  echo "RECORD_ONLY: no reference PE for ${NITRO_SYSTEM}; record these values in systems.inc (step 10, Z1.4)"
   for ens in nvt npt; do
     for st in 0 ${NSTEPS}; do
       python "${HERE}/compare.py" pe "${RUNDIR}/log.${ens}" "${st}" || pe_ok=1
