@@ -6,10 +6,10 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 8, 2026-11-12): H1–H6 are closed. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. Activity work may start at step 7. The ledger is in H6.
+Status (revision 9, 2026-11-12): H1–H6 are closed. A second test system, ZIF-8 3×3×3, was added; its stage **Z1** must close before step 7 (see Z1 below). The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. Activity work may start at step 7. The ledger is in H6.
 
-Fixed conditions: FP64 only; stock UMA model unchanged; gate = NaCl 14³ (21,952 atoms), W=12,
-NVT + NPT 10 steps; one branch per activity, immutable tag before each submit.
+Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
+NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
 
 ---
 
@@ -76,7 +76,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 
 ### R.6 Execution sequence (revision 5 — supersedes revision 4)
 
-Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order, before step 7.**
+Steps 0–1 are done. **Stages H1–H6 (section H) and Z1 (the ZIF-8 test system) must all be closed, in order, before step 7.**
 
 | Step | Action | Needs compute node | Status |
 |---|---|---|---|
@@ -88,6 +88,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug-scaling`, 1 node) | closed. MDE 6.27 ms (0.76% of 823 ms). Jobs 9078185, 9078330, 9078397, plus perf-off 9078443. |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug-scaling`, 1 node) | closed. The ~390 ms is ~360 ms local queue drain, ~20 ms rank skew, ~12 ms transfer at ~65 GB/s. |
 | H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | closed. BASE step 825 ms. Compute is 659 ms (80%); N1 can supply at most 118 ms (15%). |
+| Z1 | ZIF-8 3×3×3 second test system: BASE reference PEs, verification gate, noise floor, step ledger | yes (`debug-scaling`) | **open.** Z1.1 code and Z1.2 syntax check done; Z1.3–Z1.7 need compute and are not started. Must close before step 7. |
 | 7 | S0 of the SYCL prototype (§4), on `nitro/n5-proto` | yes (`debug-scaling`) | not started |
 | 8 | N1 control: time the host graph build against the device build, ABBA | yes (`debug-scaling`) | not started |
 | 9 | Continue with S1–S5, then N2, N5 (stages N5.0–N5.9 in §5), N3, N4, stack (§1, §5) | yes | not started |
@@ -106,6 +107,7 @@ Source: robustness review of revision 4 checked against the tree and BASE gate j
 |---|---|
 | Instrumentation fix location | **Nitro tree only** (`uma-nitro`). The PR tree (`lammps-ml-uma`) is not changed. Consequence: `nitro-base` = `a240ba3485` + harness + instrumentation commit, so "BASE equals the PR branch head" is **no longer true** and must be stated as "equals PR head + instrumentation-only commit `<sha>`". |
 | Objective and decision policy (revision 8, replaces the earlier ≥ 1.5× target) | **No speedup target and no speed threshold anywhere in this plan.** The objective is to exhaust the options and report the best correct configuration: BASE median / best stack median (NaCl 14³, W=12, FP64) with its run-to-run range, as a measurement and not a pass/fail. Rules: (1) **Correctness is the only hard gate** (P.1 bars). (2) **Every planned activity and block is attempted**, whatever its expected size; ordering by measured share is for priority only, never for skipping. (3) **Each result gets a verdict by the replication rule**: win (beyond the MDE and the between-job range), flat, or loss. A win goes into the stack. Flat and loss are recorded with their numbers and stay out. (4) **Every custom kernel gets a tuning round** (work-group and sub-group shape, local-memory use, vendor library versus custom) before it is closed flat or loss. (5) A stage can also close as **infeasible** (cannot be built or cannot be made correct) with the blocker documented. (6) **There is no stop rule by speed.** The program ends when every item has a verdict and the final stack (with leave-one-out and add-one-in checks) is measured. The Amdahl ledger (H6) is information, not a goal. |
+| Test systems (revision 9) | Two systems, **identical protocol** (W=12, FP64, NVT and NPT, 300 K, velocity seed 4928459, timestep 0.001 ps, same fixes, same bars); only the structure differs. **NaCl** rocksalt 14³ (21,952 atoms, `make_nacl.py`). **ZIF-8** 3×3×3 (7,452 atoms: 3,240 H, 2,592 C, 1,296 N, 324 Zn; 50.97 Å cube; `make_zif8.py` from the rosen_uma_ZIF 4×4×4 CIF, same 0.05 Å rattle with seed 0 as NaCl). Selected per job with `NITRO_SYSTEM=nacl|zif8` (`pbs/nitro/systems.inc`). Defaults, change if you disagree: (1) **correctness** gates run on both systems and both must pass; (2) **timing verdicts are per system**, reported side by side, never pooled (each has its own ledger and MDE); (3) a change enters the stack if it is correct on both and is a win on at least one and a loss on neither; (4) per-activity ABBA and the stack gates run on both systems, micro stages use NaCl shapes with ZIF-8 shapes reported alongside. |
 | Replication | Every verdict (win, flat, loss) needs **≥ 3 PBS jobs on different nodes**; the replicate unit is the job (per-job medians), not the step. |
 | Disk | Artifacts exported by a job are **deleted at job exit by default**; a flag keeps them (H2.6). |
 | Host-build control | The shard-local / OpenMP host-build control arm was **declined**. N1 stays "device build vs current host build". |
@@ -260,6 +262,26 @@ N1 can remove at most the 118 ms host neighbor build (14% of the step). The rest
 
 Status: **closed**. Step 7 may start.
 
+### Z1 — ZIF-8 3×3×3 as a second test system (`debug-scaling`, 1 node per job)
+
+Added in revision 9. Same protocol as NaCl; only the structure differs. The H.7 rules (sequential close, commit and push, closure report) apply.
+
+The structure: the P1 4×4×4 CIF in the read-only project `rosen_uma_ZIF` is reduced to the 276-atom conventional cell (a = 16.99 Å) and replicated 3×3×3, with the same 0.05 Å Gaussian rattle (seed 0) as NaCl. Without the rattle the data file equals the existing `zif8_3x3x3_npt_nvt_chain/sim/data.zif8` exactly (checked). Element order H, C, N, Zn (types 1–4). Timestep stays 0.001 ps as for NaCl (the rosen runs use 0.0005; for a 10-step parity gate this does not matter, and it keeps the protocol identical).
+
+| Item | Work | Exit |
+|---|---|---|
+| Z1.1 Code | `make_zif8.py`, `systems.inc`, and `lib.inc`, `run_gate.pbs`, `run_timing.pbs`, `run_abba.pbs` take `NITRO_SYSTEM` (default `nacl`; the NaCl deck is unchanged). Without recorded reference PEs, `run_gate.pbs` runs record-only. | Done: atom count 7,452 and type counts match; unrattled data equals the rosen file; the NaCl and ZIF-8 decks print correctly; an unknown system name fails. |
+| Z1.2 Syntax check | Subagent (`grok-4.7-high`) on the edited `.py`, `.inc`, `.pbs` files before any `qsub`. | `COMPILE_OK`. Done for this commit (`py_compile` with 3.11, `bash -n`, sourcing test for `nacl`, `zif8` and an unknown name). Re-run after any further edit and before the first `qsub`. |
+| Z1.3 Record job | Tag `nitro/z1/r1`; `qsub -v NITRO_TAG=nitro/z1/r1,NITRO_SYSTEM=zif8,KEEP_ARTIFACT=1 run_gate.pbs`. | NVT and NPT exit 0, volume moves, no "virial refused"; step-0 PE equal in NVT and NPT; the three reference values printed (`RECORD_ONLY`). |
+| Z1.4 Record | Write step-0, NVT step-10 and NPT step-10 PE into `systems.inc`; commit; tag `nitro/z1/r2`. | References in the repo. |
+| Z1.5 Verify job | `qsub -v NITRO_TAG=nitro/z1/r2,NITRO_SYSTEM=zif8 run_gate.pbs` on a different node. | All four \|ΔPE\| < 1e−8 eV against the recorded values. |
+| Z1.6 Noise floor and ledger | Three jobs on different nodes with `run_timing.pbs` (reps 3, 30 steps, reusing the kept artifact through `NITRO_REF`). Report ZIF-8 MDE (between-job range and 3 × pooled MAD), bitwise or not, force noise, and the step ledger rows (graph, compute, wait, transfer, other) with shares. Record real edges per rank against the 65,536 cap, and the maximum neighbours per atom against `max_neighbors` = 300. | `pbs/out/nitro_z1/Z1_SUMMARY.md`. |
+| Z1.7 Plan | Put the ZIF-8 numbers into P.1, P.2 and a ZIF-8 ledger next to the NaCl one; update R.6; commit and push. | Z1 marked closed; step 7 may start. |
+
+Failure points: (a) the exported artifact is system-specific, so never reuse a NaCl artifact for ZIF-8 (and the reverse); (b) a ZIF-8 reference taken from one node must reproduce on another (Z1.5 checks); (c) ZIF-8 has light H atoms, so 0.001 ps with H is a looser integrator than the rosen runs, which is acceptable for 10–30 steps but not for physics claims; (d) the rattle is not in the rosen data files, so ZIF-8 PEs here are not comparable with the rosen logs.
+
+Status: **open**.
+
 ### H.7 Rules that apply to every H stage
 
 - **Report closure (rule, 2026-11-12).** Every status report says whether the stage in progress is closed, and lists the earlier stages that are already closed.
@@ -287,7 +309,7 @@ Status: **closed**. Step 7 may start.
 ### P.1 Correctness bars
 
 Every arm is compared with a BASE run **in the same allocation**. Reference values for absolute sanity
-(NaCl 14³, W=12, FP64, `uma-s-1p2`, seed 0): step-0 PE −74142.191907631001 eV; step-10 PE NVT
+(NaCl 14³, W=12, FP64, `uma-s-1p2`, seed 0; the ZIF-8 values are recorded in `systems.inc` by stage Z1): step-0 PE −74142.191907631001 eV; step-10 PE NVT
 −74095.578889731943 eV, NPT −74098.199120459016 eV.
 
 | Check | Pass bar | Notes |
@@ -321,7 +343,7 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 2. One factor changes per comparison; binary, artifact, env, deck, seed, run length, rank-to-tile mapping stay frozen.
 3. Gate new behaviour behind `UMA_NITRO_<ID>` toggles (allowlisted env fallback, H1.4) or `pair_style` keywords with default = BASE, so one binary serves both arms where possible. Plain `UMA_*` env vars are **ignored** by the engine unless allowlisted.
 4. If an arm changes export, re-export and also run BASE on that re-exported artifact.
-5. Fixed `velocity ... loop geom`-equivalent seed and an identical `data.nacl` (`make_nacl.py`).
+5. Fixed `velocity ... loop geom`-equivalent seed and an identical data file for the chosen system (`make_nacl.py` or `make_zif8.py`, `NITRO_SYSTEM`).
 6. Record hostnames and tile state; discard a job whose nodes throttle.
 7. Every run writes `meta.json` (`meta.py`): git describe/SHA, branch, tag, `nitro-base` SHA, binary sha256, artifact id, env, hosts, queue, jobid.
 8. Every PBS job uses a per-run `timeout`, records exit codes and keeps going after a failing arm; risky arms run last.
@@ -333,6 +355,8 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 | `env.inc` | compute-node environment (`fxpu` conda env, per-arm `NITRO_BUILD`, checkpoint path) |
 | `lib.inc` | clean-tree/tag check, runtime env, LAMMPS deck writer (optional force dump), `mpiexec` runner |
 | `make_nacl.py` | NaCl N×N×N data and xyz files (same construction as Wave E) |
+| `make_zif8.py` | ZIF-8 N×N×N data and xyz files from the rosen 4×4×4 CIF (same rattle as NaCl) |
+| `systems.inc` | per-system settings (`NITRO_SYSTEM` = `nacl` or `zif8`): data file, elements, masses, atom count, reference PEs |
 | `export_one_rank.sh` | one rank of the W=12 export |
 | `run_gate.pbs` | build into `build-nitro/<sha7>/`, export (or reuse), NVT+NPT 10 steps, PE bars against the recorded values, force dump at steps 0 and 10, `SUMMARY.txt`, `meta.json`, `run.env` |
 | `run_timing.pbs` | E0: `REPS` identical 30-step NVT runs in one job; MP_PERF medians, bitwise PE and force repeat |
@@ -627,7 +651,7 @@ Facts that shape the plan:
 |---|---|---|---|
 | **N5.0** Entry gate | Checklist only: S0–S4 closed, S5 reported, N1 and N2 decisions recorded, H1–H6 closed. | no | All boxes ticked in this table; status line updated. |
 | **N5.1** Op-level profile (diagnostic) | Standalone script (not LAMMPS) on one tile: real chunk shapes dumped from one rank of the 14³ W=12 run, stock eager `forward_chunk` in FP64, XPU profiler, three passes per layer. Output the per-op device time, then group into the table in 5.1. Calibrate against the 659 ms row (4 layers, one chunk per rank): the sum should land within ±15%; if not, find the gap before continuing. Confirm the shapes and that weights do not require grad. | 1 node, 1 tile, `debug-scaling` | `pbs/out/nitro_n5/N5_PROFILE.md` with: shares in ms, the measured GEMM floor, and the blocks ordered by share (priority only). Nothing is filtered out. |
-| **N5.2** Fixtures and reference harness | Save one rank's chunk inputs (`x_full`, `edge_index`, `wigner`, `wigner_inv_envelope`, `x_edge`) and reference outputs and gradients from stock eager FP64, in scratch (not committed). Write `pbs/nitro/n5_bench.py`: runs a block unfused vs fused, reports error, max abs gradient error, time (median, MAD, 30 repeats), traffic estimate, GB/s. | 1 node | Harness reproduces the stock result bitwise against itself; a no-op "fused = stock" arm shows ratio 1.00 ± MDE. |
+| **N5.2** Fixtures and reference harness | Save one rank's chunk inputs (for NaCl and for ZIF-8) (`x_full`, `edge_index`, `wigner`, `wigner_inv_envelope`, `x_edge`) and reference outputs and gradients from stock eager FP64, in scratch (not committed). Write `pbs/nitro/n5_bench.py`: runs a block unfused vs fused, reports error, max abs gradient error, time (median, MAD, 30 repeats), traffic estimate, GB/s. | 1 node | Harness reproduces the stock result bitwise against itself; a no-op "fused = stock" arm shows ratio 1.00 ± MDE. |
 | **N5.3** Infra | Shared header for op schemas; build rule linking the N5 `.o` files into `uma_engine` (as `xccl_peer.o`, from S3); exporter flags with a Python stand-in for every op (`torch.library`) and an eager fallback; manifest and engine load check; measure export time and per-arm job time for the budget. | build, then 1 node ABBA | Export with an empty flag set produces an artifact whose traced graph equals BASE (manifest hash equal); BASE gate unchanged (step-0 PE −74142.191907631001, ABBA vs BASE within MDE); job-time budget recorded (how many arms fit in 01:00:00). |
 | **N5.4** F2 Gate | Fused sigmoid + expand + SiLU-scalar + multiply + concat. Micro: fwd, backward scaffold, then hand-written backward. In-model arms `L0` (layer 0 only) and `ALL`. | micro: 3 jobs; model: 3 jobs | Correctness bars met; tuning round done; micro verdict recorded. If the micro is a win, `L0` and `ALL` pass step-0 PE and NVT parity and their ABBA verdicts are recorded. Branch merged to `nitro/n5-stack` only for a win. Flat or loss closes the stage with its numbers. |
 | **N5.5** F4 Wigner + conv1 | Fused gather, concat, rotate, radial multiply, `fc_m0` and block GEMMs (GEMM part may stay on the vendor library; the fusion is the memory-bound prologue and epilogue). Same sub-steps as N5.4. | 3 + 3 jobs | As N5.4, plus force parity ≤ 1e-9 eV/Å. |

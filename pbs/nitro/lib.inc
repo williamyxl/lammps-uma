@@ -7,6 +7,11 @@ nitro_die() {
   exit 1
 }
 
+# Test systems (NITRO_SYSTEM=nacl|zif8). Defaults to nacl.
+# shellcheck disable=SC1091
+source "${HERE}/systems.inc"
+nitro_system_init
+
 # Abort unless HEAD is exactly the tagged commit, tracked files are clean, and
 # src/ and pbs/nitro/ have no untracked non-ignored files.
 nitro_check_tree() {
@@ -53,11 +58,10 @@ units           metal
 atom_style      atomic
 boundary        p p p
 newton          off
-read_data       data.nacl
-mass            1 22.989769
-mass            2 35.453
+read_data       ${SYS_DATA}
+${SYS_MASSES}
 pair_style      uma precision double devices 1
-pair_coeff      * * \${uma_art} Na Cl
+pair_coeff      * * \${uma_art} ${SYS_ELEMENTS}
 neighbor        2.0 bin
 neigh_modify    delay 0 every 1 check yes
 thermo          1

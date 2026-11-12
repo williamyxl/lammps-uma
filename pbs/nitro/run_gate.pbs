@@ -10,7 +10,7 @@
 #PBS -o ../out/
 #PBS -e ../out/
 # ---------------------------------------------------------------------------
-# lammps-uma-nitro gate: build (per-commit dir) + export + NaCl 14^3 W=12 FP64
+# lammps-uma-nitro gate: build (per-commit dir) + export + NaCl 14^3 (or ZIF-8 3x3x3) W=12 FP64
 # NVT and NPT, 10 steps, with a force dump at steps 0 and 10.
 # Pass bar: |dPE| < 1e-8 eV against the recorded Wave E / Wave 0 values.
 #
@@ -22,6 +22,8 @@
 #   NITRO_SKIP_BUILD=1     reuse an existing build for this commit
 #   KEEP_ARTIFACT=1        keep an artifact this job exported (default: delete at exit)
 #   NITRO_EXPORT_RANKS=1   export one rank (microbenchmarks); default is W=12
+#   NITRO_SYSTEM=zif8      ZIF-8 3x3x3 instead of NaCl 14^3 (same protocol; see systems.inc).
+#                          With no recorded reference PE the job runs record-only (no bar).
 # ---------------------------------------------------------------------------
 set -uo pipefail
 HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
@@ -36,20 +38,20 @@ export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
 # shellcheck disable=SC1091
 source "${HERE}/env.inc"
 
-N=14
-EXPECT=$((8 * N * N * N))
 W=12
 PPN=12
 NSTEPS=10
 CHUNK=65536
-# Recorded Wave 0 / Wave E values for NaCl 14^3 W=12 FP64 (uma-s-1p2)
-REF_STEP0_PE=-7.4142191907631001e+04
-REF_NVT_PE10=-7.4095578889731943e+04
-REF_NPT_PE10=-7.4098199120459016e+04
+# Reference PEs come from systems.inc (NaCl: recorded Wave 0 / Wave E values).
+REF_STEP0_PE="${SYS_REF_STEP0_PE}"
+REF_NVT_PE10="${SYS_REF_NVT_PE10}"
+REF_NPT_PE10="${SYS_REF_NPT_PE10}"
 TOL=1e-8
+RECORD_ONLY=0
+[[ -n "${REF_STEP0_PE}" && -n "${REF_NVT_PE10}" && -n "${REF_NPT_PE10}" ]] || RECORD_ONLY=1
 
 OUTROOT="${REL}/pbs/out/nitro_gate_${PBS_JOBID:-manual}"
-RUNDIR="${OUTROOT}/n${N}"
+RUNDIR="${OUTROOT}/${SYS_DIR}"
 mkdir -p "${RUNDIR}"
 nitro_install_cleanup_trap
 # NITRO_REF is a read-only input. It is never marked owned, so the exit trap
@@ -83,9 +85,9 @@ fi
 echo "BUILD_OK ${LMP}"
 grep -E 'vesin|XCCL' "${OUTROOT}/cmake.log" 2>/dev/null | head -5 || true
 
-python "${HERE}/make_nacl.py" "${N}" "${RUNDIR}"
-NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/data.nacl")"
-[[ "${NAT}" -eq "${EXPECT}" ]] || nitro_die "cell has ${NAT} atoms; require ${EXPECT}"
+echo "NITRO_SYSTEM=${NITRO_SYSTEM} (${SYS_LABEL}) record_only=${RECORD_ONLY}"
+nitro_make_cell "${RUNDIR}" || nitro_die "cell generation failed for ${NITRO_SYSTEM}"
+NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/${SYS_DATA}")"
 
 if [[ -n "${NITRO_ART:-}" ]]; then
   [[ -f "${ART}/metadata.json" ]] || nitro_die "NITRO_ART has no metadata.json: ${ART}"
@@ -109,7 +111,14 @@ nitro_run_ens nvt && nvt_rc=0 || nvt_rc=$?
 nitro_run_ens npt && npt_rc=0 || npt_rc=$?
 
 pe_ok=0
-if [[ "${nvt_rc}" -eq 0 && "${npt_rc}" -eq 0 ]]; then
+if [[ "${nvt_rc}" -eq 0 && "${npt_rc}" -eq 0 && "${RECORD_ONLY}" -eq 1 ]]; then
+  echo "RECORD_ONLY: no reference PE for ${NITRO_SYSTEM}; record these values in systems.inc (stage H7)"
+  for ens in nvt npt; do
+    for st in 0 ${NSTEPS}; do
+      python "${HERE}/compare.py" pe "${RUNDIR}/log.${ens}" "${st}" || pe_ok=1
+    done
+  done
+elif [[ "${nvt_rc}" -eq 0 && "${npt_rc}" -eq 0 ]]; then
   python "${HERE}/compare.py" bar "${RUNDIR}/log.nvt" 0  "${REF_STEP0_PE}" "${TOL}" || pe_ok=1
   python "${HERE}/compare.py" bar "${RUNDIR}/log.npt" 0  "${REF_STEP0_PE}" "${TOL}" || pe_ok=1
   python "${HERE}/compare.py" bar "${RUNDIR}/log.nvt" 10 "${REF_NVT_PE10}" "${TOL}" || pe_ok=1
@@ -128,19 +137,20 @@ python "${HERE}/compare.py" perf "${RUNDIR}/lmp.nvt.log" 5 > "${OUTROOT}/perf_nv
 python "${HERE}/meta.py" "${OUTROOT}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
   --tag "${NITRO_TAG}" --log "${RUNDIR}/lmp.nvt.log" \
   --artifact-kept "${ART_KEPT}" \
-  --extra "N=${N}" "W=${W}" "nsteps=${NSTEPS}" "mpich=${MPICH}" || nitro_die "meta.py failed"
+  --extra "system=${NITRO_SYSTEM}" "nat=${NAT}" "W=${W}" "nsteps=${NSTEPS}" "mpich=${MPICH}" || nitro_die "meta.py failed"
 
 {
   echo "NITRO_ART=${ART}"
   echo "NITRO_LMP=${LMP}"
   echo "NITRO_NAT=${NAT}"
+  echo "NITRO_SYSTEM=${NITRO_SYSTEM}"
   echo "NITRO_GIT_SHA=$(git -C "${REL}" rev-parse HEAD)"
   echo "NITRO_OUTROOT=${OUTROOT}"
 } > "${OUTROOT}/run.env"
 
 SUM="${OUTROOT}/SUMMARY.txt"
 {
-  echo "gate job=${PBS_JOBID:-none} tag=${NITRO_TAG} sha=${SHA7} nat=${NAT} W=${W} nsteps=${NSTEPS}"
+  echo "gate job=${PBS_JOBID:-none} system=${NITRO_SYSTEM} tag=${NITRO_TAG} sha=${SHA7} nat=${NAT} W=${W} nsteps=${NSTEPS}"
   echo "nvt_rc=${nvt_rc} npt_rc=${npt_rc} pe_ok=${pe_ok}"
   echo "lmp=${LMP}"
   echo "artifact=${ART} artifact_kept=${ART_KEPT}"

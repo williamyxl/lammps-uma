@@ -10,7 +10,7 @@
 #PBS -o ../out/
 #PBS -e ../out/
 # ---------------------------------------------------------------------------
-# ABBA timing. Spec lines are: LABEL TAG [artifact=PATH] [KEY=VAL ...]
+# ABBA timing. NITRO_SYSTEM=nacl (default) or zif8 selects the test cell. Spec lines are: LABEL TAG [artifact=PATH] [KEY=VAL ...]
 # The first arm is BASE. Each later arm B runs as BASE, B, B, BASE.
 # List risky arms last. A failing slot does not stop the later slots.
 #
@@ -47,7 +47,6 @@ export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
 source "${HERE}/env.inc"
 nitro_require_mpich
 
-N=14
 W=12
 PPN=12
 NSTEPS=30
@@ -94,10 +93,10 @@ for ((i = 0; i < NITRO_SLOT_N; i++)); do
     ART="${slot}/artifact"
     kept=no
     [[ "${KEEP_ARTIFACT:-0}" == "1" ]] && kept=yes
-    if [[ ! -f "${slot}/data.nacl" ]]; then
-      python "${HERE}/make_nacl.py" "${N}" "${slot}" || { fail=1; continue; }
+    if [[ ! -f "${slot}/${SYS_DATA}" ]]; then
+      nitro_make_cell "${slot}" || { fail=1; continue; }
     fi
-    NAT="$(awk '/atoms/{print $1; exit}' "${slot}/data.nacl")"
+    NAT="$(awk '/atoms/{print $1; exit}' "${slot}/${SYS_DATA}")"
     nitro_own_artifact "${ART}"
     NITRO_EXPORT_ENG="${SRC_FOR_TAG[${tag}]}/src/ML-UMA/uma-engine"
     nitro_export_artifact 1 || { fail=1; continue; }
@@ -107,10 +106,10 @@ for ((i = 0; i < NITRO_SLOT_N; i++)); do
     fail=1
     continue
   }
-  if [[ ! -f "${slot}/data.nacl" ]]; then
-    python "${HERE}/make_nacl.py" "${N}" "${slot}" || { fail=1; continue; }
+  if [[ ! -f "${slot}/${SYS_DATA}" ]]; then
+    nitro_make_cell "${slot}" || { fail=1; continue; }
   fi
-  NAT="$(awk '/atoms/{print $1; exit}' "${slot}/data.nacl")"
+  NAT="$(awk '/atoms/{print $1; exit}' "${slot}/${SYS_DATA}")"
   nitro_runtime_env
   nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" 0
   if nitro_run_ens nvt; then
@@ -122,7 +121,7 @@ for ((i = 0; i < NITRO_SLOT_N; i++)); do
   python "${HERE}/meta.py" "${slot}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
     --tag "${tag}" --require-base --artifact-kept "${kept}" \
     --log "${slot}/lmp.nvt.log" \
-    --extra "slot=${i}" "label=${label}" "nsteps=${NSTEPS}" "mpich=${MPICH}" \
+    --extra "system=${NITRO_SYSTEM}" "slot=${i}" "label=${label}" "nsteps=${NSTEPS}" "mpich=${MPICH}" \
     || fail=1
 done
 

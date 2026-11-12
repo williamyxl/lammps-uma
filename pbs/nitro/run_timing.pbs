@@ -11,7 +11,7 @@
 #PBS -e ../out/
 # ---------------------------------------------------------------------------
 # E0 noise floor / bitwise repeat: REPS identical NVT runs (NSTEPS steps each) of
-# the NaCl 14^3 W=12 FP64 gate cell in ONE job, reusing the binary and artifact
+# the gate cell (NaCl 14^3, or ZIF-8 3x3x3 via the gate's run.env) W=12 FP64 in ONE job, reusing the binary and artifact
 # produced by run_gate.pbs. Reports MP_PERF medians per run, run-to-run PE
 # differences (bitwise?) and force differences.
 #
@@ -30,6 +30,8 @@ nitro_check_tree
   || nitro_die "set NITRO_REF to a gate output dir containing run.env"
 # shellcheck disable=SC1091
 source "${NITRO_REF}/run.env"
+# run.env carries NITRO_SYSTEM (absent in older gate outputs = nacl).
+nitro_system_init
 [[ "${NITRO_GIT_SHA}" == "$(git -C "${REL}" rev-parse HEAD)" ]] \
   || nitro_die "binary was built from ${NITRO_GIT_SHA}, HEAD differs"
 export NITRO_BUILD
@@ -46,9 +48,9 @@ ART="${NITRO_ART}"
 REPS="${REPS:-3}"
 NSTEPS="${NSTEPS:-30}"
 OUTROOT="${REL}/pbs/out/nitro_e0_${PBS_JOBID:-manual}"
-RUNDIR="${OUTROOT}/n14"
+RUNDIR="${OUTROOT}/${SYS_DIR}"
 mkdir -p "${RUNDIR}"
-cp -f "${NITRO_REF}/n14/data.nacl" "${RUNDIR}/data.nacl"
+cp -f "${NITRO_REF}/${SYS_DIR}/${SYS_DATA}" "${RUNDIR}/${SYS_DATA}"
 
 echo "NITRO_E0 host=$(hostname) job=${PBS_JOBID:-none} reps=${REPS} nsteps=${NSTEPS} queue=${PBS_QUEUE:-unknown}"
 export UMA_MP_NATOMS="${NAT}"
@@ -80,7 +82,7 @@ cat "${OUTROOT}/SUMMARY.txt"
 python "${HERE}/meta.py" "${OUTROOT}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
   --tag "${NITRO_TAG}" --require-base --artifact-kept yes \
   --log "${RUNDIR}/lmp.nvt_t1.log" \
-  --extra "reps=${REPS}" "nsteps=${NSTEPS}" "ref=${NITRO_REF}" "mpich=${MPICH}" \
+  --extra "system=${NITRO_SYSTEM}" "reps=${REPS}" "nsteps=${NSTEPS}" "ref=${NITRO_REF}" "mpich=${MPICH}" \
   || nitro_die "meta.py failed"
 echo "NITRO_E0_DONE fail=${fail} ${OUTROOT}"
 exit "${fail}"
