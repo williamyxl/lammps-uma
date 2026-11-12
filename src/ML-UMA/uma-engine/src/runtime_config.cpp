@@ -10,6 +10,10 @@
 #include <unordered_map>
 #include <vector>
 
+// libc's environment vector. This must stay at global scope: an extern inside
+// namespace uma is a different symbol, and linking lmp then fails.
+extern "C" char **environ;
+
 namespace uma {
 namespace {
 
@@ -65,9 +69,8 @@ void log_nitro_flags_once()
   static std::once_flag once;
   std::call_once(once, [] {
     if (!log_from_this_rank()) return;
-    extern char **environ;
     std::vector<std::string> flags;
-    for (char **e = environ; e != nullptr && *e != nullptr; ++e) {
+    for (char **e = ::environ; e != nullptr && *e != nullptr; ++e) {
       const char *s = *e;
       if (std::strncmp(s, "UMA_NITRO_", 10) != 0) continue;
       const char *eq = std::strchr(s, '=');

@@ -172,6 +172,8 @@ Status: **closed** in the H2 commit. Files: `abba.inc`, `run_abba.pbs`, `compare
 
 Exit: `nitro-base` exists and is the commit that H4/H5 and all arms are built from.
 
+Attempt 1 (2026-11-11): job 9077136 on `debug-scaling`, tag `nitro/base-verify/r2`, failed at link. `extern char **environ` inside `namespace uma` became `uma::(anonymous namespace)::environ`. The fix keeps that declaration at global scope with C linkage. `nitro/base-verify/r2` stays on the failing commit. The retry is a new commit and tag `nitro/base-verify/r3`, still on `debug-scaling`, 1 node. The MPI library CMake found (`87e2045`) matches the earlier successful `7da48ce` build, so it is not part of this failure.
+
 ### H4 — E0: noise floor and replication (`debug`, 3 jobs on different nodes)
 
 1. Use `run_timing.pbs` (REPS = 3 per job) in **3 separate jobs**, submitted so the node sets differ (check `hostnames` in `meta.json`; resubmit a job that lands on a repeated node set or a throttled node).
