@@ -30,7 +30,7 @@ NVT + NPT 10 steps; one branch per activity, immutable tag before each submit.
 |---|---|
 | Path | `/lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro` |
 | Source | `https://github.com/williamyxl/lammps-uma.git`, branch `lmp-uma-release` (single-branch clone; `origin` = GitHub) |
-| Base commit | `a240ba3485` ("fix export MPI ranks"). Verified identical to the HEAD of `lammps-uma-release`. |
+| Base commit | Verified BASE is tag `nitro-base` = `efae85ff72`. That is PR head `a240ba3485` plus the harness, the H1 instrumentation commit `87adda2a47`, H2, and the environ link fix. It is not identical to the PR head. |
 | Working branch | `uma-nitro` (created from `lmp-uma-release`). **Revision 5:** pushed to `origin/uma-nitro` at the end of every stage (H.7); `lmp-uma-release` is never pushed to from this clone. |
 | Clone size | 1.4 GB |
 
@@ -51,7 +51,7 @@ A branch called `uma-nitro` and a branch called `uma-nitro/<id>` cannot coexist 
 |---|---|
 | `uma-nitro` | Integration branch. Carries the harness (PBS templates, scripts, this plan). |
 | `nitro-origin` (tag) | `a240ba3485`, the starting point. Create before any change. |
-| `nitro-base` (annotated tag) | The verified `uma-nitro` head after the harness commit. This is the **BASE arm** and never moves. |
+| `nitro-base` (annotated tag) | `efae85ff72`, the verified BASE arm (job 9077571). Never moves. |
 | `nitro/<id>` (branches) | One per activity, cut from `nitro-base`: `nitro/n1-a`, `nitro/n1-b`, `nitro/n2-a`, `nitro/n2-b`, `nitro/n3-cap`, `nitro/n4-a`, `nitro/n4-b`, `nitro/n5-f1` … `nitro/n5-f7`, `nitro/n5-proto` |
 | `nitro/<id>/r<k>` (annotated tags) | Immutable measurement tag, created before every `qsub`. Never amend a tagged commit. |
 | `nitro/stack/s<k>` | Merge-commit stacks of passing options (no squash, no rebase). |
@@ -86,7 +86,7 @@ Steps 0–1 are done. **Stages H1–H6 (section H) must all be closed, in order,
 | 1 | Harness in `pbs/nitro/` committed on `uma-nitro` (`7da48ce5`); `nitro-origin` tag | no | done (ABBA runner was **missing**, see H2) |
 | H1 | Restore perf/debug instrumentation (nitro tree only) | build only | closed (this commit; compute proof is H3). Allowlist: `UMA_MP_PERF`, `UMA_MEM_PEAK`, `UMA_MP_NATOMS`, `UMA_MN_CKPT`, `UMA_ALLOW_LEGACY_METADATA`, `UMA_NITRO_*`. Audit: `pbs/nitro/ENV_AUDIT.md` |
 | H2 | Harness hardening: ABBA runner, replicate-aware compare, `meta.json` completeness, tree check, artifact auto-delete | no | closed (this commit). Dry-run slot order and `compare.py abba-test` passed on the login node. Compute use starts at H3 |
-| H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug`) | open |
+| H3 | Re-verify BASE gate with working `MP_PERF`; tag `nitro-base` | yes (`debug-scaling`, 1 node) | closed. Job 9077571, tag `nitro/base-verify/r3` = `efae85ff72`. `nitro-base` is that commit. |
 | H4 | E0: noise floor, bitwise repeat, 3 jobs on different nodes; minimum detectable effect | yes (`debug`) | open |
 | H5 | Step-time decomposition: is the ~400 ms all-reduce communication or waiting? | yes (`debug`) | open |
 | H6 | Refresh plan numbers: Amdahl ledger, N-activity expectations | no | open |
@@ -172,7 +172,11 @@ Status: **closed** in the H2 commit. Files: `abba.inc`, `run_abba.pbs`, `compare
 
 Exit: `nitro-base` exists and is the commit that H4/H5 and all arms are built from.
 
-Attempt 1 (2026-11-11): job 9077136 on `debug-scaling`, tag `nitro/base-verify/r2`, failed at link. `extern char **environ` inside `namespace uma` became `uma::(anonymous namespace)::environ`. The fix keeps that declaration at global scope with C linkage. `nitro/base-verify/r2` stays on the failing commit. The retry is a new commit and tag `nitro/base-verify/r3`, still on `debug-scaling`, 1 node. The MPI library CMake found (`87e2045`) matches the earlier successful `7da48ce` build, so it is not part of this failure.
+Attempt 1 (2026-11-11): job 9077136 on `debug-scaling`, tag `nitro/base-verify/r2`, failed at link. `extern char **environ` inside `namespace uma` became `uma::(anonymous namespace)::environ`. The fix keeps that declaration at global scope with C linkage. `nitro/base-verify/r2` stays on the failing commit. The MPI library CMake found (`87e2045`) matches the earlier successful `7da48ce` build, so it is not part of this failure.
+
+Attempt 2 passed. Job 9077571 on `debug-scaling`, 1 node, tag `nitro/base-verify/r3` = `efae85ff72`. NVT and NPT exit 0. Step-0 and step-10 \|ΔPE\| versus the recorded bars are 1.5e-11 to 5.8e-11 eV, inside the 1e-8 gate. Versus job 9072484 the same steps differ by 1.5e-11 to 5.8e-11 eV. That is the band P.1 already records for run-to-run noise, so H1 is not reverted. `MP_PERF rank=0` has 11 lines in each log (steps 0 through 10). `perf_nvt.json` has 6 rows after the 5-step skip; median `ms_total` is 822 ms with `MP_PERF` on. Rank 0 logged `NITRO_FLAGS: (none)`. `fairchem` is 2.21.0. The only null in that job's `meta.json` is `nitro_base_sha`, because this tag is created after the run. `nitro-base` is `efae85ff72`.
+
+Status: **closed**. The 10-minute status poll for 9077571 is stopped.
 
 ### H4 — E0: noise floor and replication (`debug`, 3 jobs on different nodes)
 
