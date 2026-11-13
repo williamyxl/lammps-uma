@@ -90,7 +90,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 8 | **H6** | Refresh plan numbers: Amdahl ledger | no | closed. BASE step 825 ms; compute 659 ms (80%); N1 at most 118 ms |
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
 | 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
-| 11 | **N1** | Device-side graph build: control and tests (N1-a, N1-b) | yes | in progress. N1-a torch builder compiled (`pbs/nitro/n1/`); selftest not yet run. Flag `UMA_NITRO_N1=1` (default off). |
+| 11 | **N1** | Device-side graph build: control and tests (N1-a, N1-b) | yes | in progress. N1-a selftest job 9085554 passed. W=1 energy check has not run. Flag `UMA_NITRO_N1=1` (default off). |
 | 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | not started |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
@@ -429,6 +429,9 @@ decides keep or drop by the H.0 verdict), and its own failure points.
 - **Control:** time the current host `build_neighbor_graph` + H2D copy with device events, then N1-a/N1-b in the same job (ABBA). Record the device-build time as a fraction of the host time. There is no cutoff: N1-a is adopted only if it is correct and a win by the H.0 verdict.
 - **Tests:** edge-set equality vs the current builder; ΔPE/ΔF/Δvirial vs BASE; NPT parity; W ladder.
 - **Expected gain:** at most 118 ms (`ms_vesin`), 14% of the 825 ms step, 1.17×. The host build is measured (H6). The device build is adopted only if it is correct and a win.
+
+**N1-a selftest (job 9085554, node x4300c3s6b0n0, not a verdict).** `pbs/nitro/n1/n1_selftest` against `build_neighbor_graph`. Passed on CPU tensors and on XPU: rocksalt 4³, atoms shifted outside the box, random orthorhombic N=128, tiny cell (multi-image), dense truncation at `max_neighbors=5`, a pair at exactly the cutoff, triclinic N=20, and a deliberate cell-cap overflow (code 1). Wrap of out-of-box positions matches the scalar wrap to 5.3e-15 Å. NaCl-sized 14³ (21,952 atoms, 702,464 edges) matches exactly. One-node timing, synchronized chrono, three reps: host build + H2D copy 112 / 91 / 74 ms; device build 136 / 68 / 60 ms. The first rep is cold. This is one job, so it is not a win or a loss. The candidate set is chosen with torch ops on the tensor device; order and `max_neighbors` truncation use the reference comparator, because a torch distance and the scalar distance differ by an ulp inside an equal shell and that reordered edges (job 9085272).
+
 
 ### N2 [step 17] — Target-sorted edge→node segmented reduction
 - **Nitro idea:** `EdgeCSR` (edges sorted by target node) with `_segreduce_tgt_*` / `fused_m0_segreduce` instead of atomic scatter.
