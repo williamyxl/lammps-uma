@@ -645,70 +645,62 @@ torch::Tensor wrap_torch(const torch::Tensor& pos64,
   return torch::stack(folded, 1).matmul(cell_t);
 }
 
-DeviceNeighborBuild emit_sorted(const torch::Tensor& wrapped,
-                                const torch::Tensor& neighbor,
-                                const torch::Tensor& ox,
-                                const torch::Tensor& oy,
-                                const torch::Tensor& oz,
-                                const torch::Tensor& dist,
-                                const torch::Tensor& keep,
-                                int64_t max_neighbors,
-                                const torch::Tensor& like_pos) {
-  // neighbor/ox/oy/oz/dist/keep are [N, K], center is the row index.
-  // Lexicographic order (distance, neighbor, ox, oy, oz) via a stable sort on
-  // the packed tie-break followed by a stable sort on distance. Invalid slots
-  // carry +inf and sort after every real edge.
+DeviceNeighborBuild emit_with_reference_order(
+    const torch::Tensor& pos_orig,
+    const torch::Tensor& wrapped,
+    const std::array<std::array<double, 3>, 3>& cell,
+    const std::array<bool, 3>& pbc,
+    const NeighborListConfig& config,
+    const torch::Tensor& neighbor,
+    const torch::Tensor& ox,
+    const torch::Tensor& oy,
+    const torch::Tensor& oz,
+    const torch::Tensor& keep) {
+  // The candidate set is chosen on the tensor's device. Order and truncation
+  // then use the reference builder's comparator and its scalar distances, so a
+  // 1 ulp difference in a torch reduction cannot reorder an equal shell.
   const int64_t n = neighbor.size(0);
-  const int64_t width = neighbor.size(1);
-  const auto iopt = neighbor.options();
-  auto dist_use = torch::where(
-      keep, dist, torch::full_like(dist, std::numeric_limits<double>::infinity()));
-  const int64_t bias = kMaxImage + 1;
-  auto packed = ((neighbor.clamp_min(0) * 16 + (ox + bias)) * 16 + (oy + bias)) * 16 +
-                (oz + bias);
-  auto tie = torch::where(
-      keep, packed, torch::full_like(neighbor, std::numeric_limits<int64_t>::max()));
-  auto ord1 = torch::argsort(tie, /*stable=*/true, /*dim=*/-1, /*descending=*/false);
-  auto dist1 = dist_use.gather(1, ord1);
-  auto keep1 = keep.gather(1, ord1);
-  auto ord2 = torch::argsort(dist1, /*stable=*/true, /*dim=*/-1, /*descending=*/false);
-  auto ord = ord1.gather(1, ord2);
-  auto keep2 = keep1.gather(1, ord2);
-
-  const int64_t k = std::min(max_neighbors, width);
   DeviceNeighborBuild out;
-  out.wrapped_pos = wrapped.to(like_pos.scalar_type()).contiguous();
   out.overflow = 0;
-  if (k <= 0 || n == 0) {
-    out.graph.edge_index = torch::empty({2, 0}, iopt);
-    out.graph.cell_offsets = torch::empty({0, 3}, out.wrapped_pos.options());
-    return out;
+  out.wrapped_pos = wrapped;
+  std::vector<std::vector<NeighborCandidate>> per_center(static_cast<size_t>(n));
+  auto nz = keep.nonzero();
+  if (nz.size(0) > 0) {
+    auto rows_d = nz.select(1, 0);
+    auto cols_d = nz.select(1, 1);
+    auto rows = rows_d.to(torch::kCPU);
+    auto nb = neighbor.index({rows_d, cols_d}).to(torch::kCPU);
+    auto oxc = ox.index({rows_d, cols_d}).to(torch::kCPU);
+    auto oyc = oy.index({rows_d, cols_d}).to(torch::kCPU);
+    auto ozc = oz.index({rows_d, cols_d}).to(torch::kCPU);
+    auto positions = positions_from_tensor(pos_orig);
+    wrap_positions(positions, cell, pbc);
+    const int64_t e = rows.size(0);
+    auto rows_a = rows.accessor<int64_t, 1>();
+    auto nb_a = nb.accessor<int64_t, 1>();
+    auto ox_a = oxc.accessor<int64_t, 1>();
+    auto oy_a = oyc.accessor<int64_t, 1>();
+    auto oz_a = ozc.accessor<int64_t, 1>();
+    for (int64_t i = 0; i < e; ++i) {
+      NeighborCandidate c;
+      c.neighbor = nb_a[i];
+      c.ox = static_cast<int>(ox_a[i]);
+      c.oy = static_cast<int>(oy_a[i]);
+      c.oz = static_cast<int>(oz_a[i]);
+      const Vec3 shift = lattice_image_shift(c.ox, c.oy, c.oz, cell);
+      const Vec3 nbr_pos = add(positions[static_cast<size_t>(c.neighbor)], shift);
+      c.distance = norm(sub(nbr_pos, positions[static_cast<size_t>(rows_a[i])]));
+      per_center[static_cast<size_t>(rows_a[i])].push_back(c);
+    }
   }
-  auto keep_k = keep2.narrow(1, 0, k);
-  auto ord_k = ord.narrow(1, 0, k);
-  auto nbr_k = neighbor.gather(1, ord_k);
-  auto ox_k = ox.gather(1, ord_k);
-  auto oy_k = oy.gather(1, ord_k);
-  auto oz_k = oz.gather(1, ord_k);
-  auto nz = keep_k.nonzero();
-  if (nz.size(0) == 0) {
-    out.graph.edge_index = torch::empty({2, 0}, iopt);
-    out.graph.cell_offsets = torch::empty({0, 3}, out.wrapped_pos.options());
-    return out;
-  }
-  auto rows = nz.select(1, 0);
-  auto cols = nz.select(1, 1);
-  auto nbr_e = nbr_k.index({rows, cols});
-  auto ox_e = ox_k.index({rows, cols});
-  auto oy_e = oy_k.index({rows, cols});
-  auto oz_e = oz_k.index({rows, cols});
-  out.graph.edge_index = torch::stack({nbr_e, rows}, 0).contiguous();
-  out.graph.cell_offsets =
-      torch::stack({ox_e, oy_e, oz_e}, 1).to(out.wrapped_pos.scalar_type()).contiguous();
+  out.graph = emit_graph(pos_orig, per_center, config);
+  out.graph.edge_index = out.graph.edge_index.to(wrapped.device());
+  out.graph.cell_offsets = out.graph.cell_offsets.to(wrapped.device(), wrapped.scalar_type());
   return out;
 }
 
 DeviceNeighborBuild build_allpairs_device(
+    const torch::Tensor& pos_orig,
     const torch::Tensor& wrapped,
     const std::array<std::array<double, 3>, 3>& cell,
     const std::array<bool, 3>& pbc,
@@ -769,10 +761,11 @@ DeviceNeighborBuild build_allpairs_device(
   auto oy = oy_i.view({1, 1, nimg}).expand({n, n, nimg}).reshape({n, width});
   auto oz = oz_i.view({1, 1, nimg}).expand({n, n, nimg}).reshape({n, width});
   auto keep = dist.ge(config.distance_tolerance) & dist.le(config.cutoff);
-  return emit_sorted(wrapped, nbr, ox, oy, oz, dist, keep, config.max_neighbors, wrapped);
+  return emit_with_reference_order(pos_orig, wrapped, cell, pbc, config, nbr, ox, oy, oz, keep);
 }
 
 DeviceNeighborBuild build_celllist_device(
+    const torch::Tensor& pos_orig,
     const torch::Tensor& wrapped,
     const std::array<std::array<double, 3>, 3>& cell,
     const std::array<bool, 3>& pbc,
@@ -867,8 +860,8 @@ DeviceNeighborBuild build_celllist_device(
   auto ox = w_d[0].unsqueeze(-1).expand({n, 27, cell_cap}).reshape({n, width});
   auto oy = w_d[1].unsqueeze(-1).expand({n, 27, cell_cap}).reshape({n, width});
   auto oz = w_d[2].unsqueeze(-1).expand({n, 27, cell_cap}).reshape({n, width});
-  return emit_sorted(wrapped, nbr, ox, oy, oz, dist_f, keep_f, config.max_neighbors,
-                     wrapped);
+  return emit_with_reference_order(pos_orig, wrapped, cell, pbc, config, nbr, ox, oy, oz,
+                                   keep_f);
 }
 
 }  // namespace
@@ -906,10 +899,9 @@ DeviceNeighborBuild build_neighbor_graph_device(const torch::Tensor& pos,
       }
     }
   }
-  DeviceNeighborBuild built = celllist
-                                  ? build_celllist_device(wrapped, cell_mat, pbc_flags,
-                                                          config, cell_cap)
-                                  : build_allpairs_device(wrapped, cell_mat, pbc_flags, config);
+  DeviceNeighborBuild built =
+      celllist ? build_celllist_device(pos, wrapped, cell_mat, pbc_flags, config, cell_cap)
+               : build_allpairs_device(pos, wrapped, cell_mat, pbc_flags, config);
   if (built.overflow != 0 && !built.wrapped_pos.defined()) {
     built.wrapped_pos = wrapped;
   }
