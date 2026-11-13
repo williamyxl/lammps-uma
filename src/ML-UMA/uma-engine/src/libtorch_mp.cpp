@@ -446,6 +446,18 @@ void LibtorchMpRuntime::rebuild_neighbors_full(torch::Device build_dev) {
   NeighborListConfig config;
   config.cutoff = metadata_.cutoff;
   config.max_neighbors = metadata_.max_neighbors;
+  if (nitro_n1_requested()) {
+    auto built = build_neighbor_graph_device(pos0_, cell0_, pbc0_, config, nitro_n1_cell_cap());
+    if (built.overflow != 0) {
+      throw std::runtime_error(
+          std::string("uma-engine: N1 device neighbor build failed: ") +
+          nitro_n1_overflow_reason(built.overflow));
+    }
+    edge_index_ = built.graph.edge_index;
+    cell_offsets_ = built.graph.cell_offsets.to(build_dev, compute_dtype_).contiguous();
+    pos0_ = built.wrapped_pos.to(build_dev, compute_dtype_).contiguous();
+    return;
+  }
   auto pos_cpu = pos0_.to(torch::kCPU);
   auto cell_cpu = cell0_.to(torch::kCPU);
   auto pbc_cpu = pbc0_.to(torch::kCPU);

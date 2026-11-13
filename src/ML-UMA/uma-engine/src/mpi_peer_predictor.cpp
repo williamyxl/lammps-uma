@@ -395,6 +395,23 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     NeighborListConfig config;
     config.cutoff = metadata_.cutoff;
     config.max_neighbors = metadata_.max_neighbors;
+    if (nitro_n1_requested()) {
+      auto built = build_neighbor_graph_device(pos, cell, pbc, config, nitro_n1_cell_cap());
+      const int over_local = built.overflow != 0 ? 1 : 0;
+      auto over_t = torch::tensor({static_cast<double>(over_local)},
+                                  torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+      const double any_over =
+          I.slot->all_reduce(rank_, over_t).to(torch::kCPU).item<double>();
+      if (any_over > 0.5) {
+        throw std::runtime_error(
+            std::string("uma-engine: N1 device neighbor build failed on >=1 rank: ") +
+            nitro_n1_overflow_reason(built.overflow != 0 ? built.overflow : 1) +
+            " this rank overflow=" + std::to_string(over_local));
+      }
+      I.edge_index_full = built.graph.edge_index;
+      I.cell_offsets_full = built.graph.cell_offsets.to(dev, dtype).contiguous();
+      pos = built.wrapped_pos.to(dev, dtype).contiguous();
+    } else {
     auto cell_cpu = cell.to(torch::kCPU);
     auto pbc_cpu = pbc.to(torch::kCPU);
     auto pos_cpu = pos.to(torch::kCPU);
@@ -408,6 +425,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     // edge_distance_vec = pos[j] + offset@cell - pos[i] used inconsistent frames
     // whenever an input atom sat outside the box. Publish the same wrapped frame.
     pos = wrap_positions_to_cell(pos_cpu, cell_cpu, pbc_cpu).to(dev, dtype).contiguous();
+    }
   }
 #endif
   if (perf) device_synchronize(dev);

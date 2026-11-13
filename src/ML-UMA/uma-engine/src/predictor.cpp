@@ -302,6 +302,18 @@ void Predictor::rebuild_neighbors() {
   NeighborListConfig config;
   config.cutoff = metadata_.cutoff;
   config.max_neighbors = metadata_.max_neighbors;
+  if (nitro_n1_requested()) {
+    auto built = build_neighbor_graph_device(pos_, cell_, pbc_, config, nitro_n1_cell_cap());
+    if (built.overflow != 0) {
+      throw std::runtime_error(
+          std::string("uma-engine: N1 device neighbor build failed: ") +
+          nitro_n1_overflow_reason(built.overflow));
+    }
+    edge_index_ = built.graph.edge_index;
+    cell_offsets_ = built.graph.cell_offsets.to(device_, compute_dtype_).contiguous();
+    pos_.copy_(built.wrapped_pos.to(compute_dtype_));
+    return;
+  }
   auto graph = build_neighbor_graph(pos_.to(torch::kCPU), cell_.to(torch::kCPU),
                                     pbc_.to(torch::kCPU), config);
   edge_index_ = graph.edge_index.to(device_);

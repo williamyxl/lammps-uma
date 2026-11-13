@@ -45,4 +45,27 @@ NeighborGraph build_neighbor_graph_celllist(const torch::Tensor& pos,
                                             const torch::Tensor& pbc,
                                             const NeighborListConfig& config = {});
 
+/// Device (or CPU-tensor) neighbor graph built from composed torch ops.
+/// Edge order matches emit_graph: center ascending, then (distance, neighbor,
+/// ox, oy, oz). overflow == 0 means the graph is complete.
+///   1 cell occupancy exceeded cell_cap (a closer neighbor may have been dropped)
+///   2 all-pairs candidate width exceeds the packed row limit
+///   3 atom count does not fit the tie-break key (N >= 2^20)
+///   4 an image index is outside ±7
+struct DeviceNeighborBuild {
+  NeighborGraph graph;
+  torch::Tensor wrapped_pos;
+  int64_t overflow = 0;
+};
+
+bool nitro_n1_requested();
+int64_t nitro_n1_cell_cap();
+const char* nitro_n1_overflow_reason(int64_t code);
+
+DeviceNeighborBuild build_neighbor_graph_device(const torch::Tensor& pos,
+                                               const torch::Tensor& cell,
+                                               const torch::Tensor& pbc,
+                                               const NeighborListConfig& config,
+                                               int64_t cell_cap);
+
 }  // namespace uma

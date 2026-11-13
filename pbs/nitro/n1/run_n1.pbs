@@ -1,0 +1,24 @@
+#!/bin/bash -l
+#PBS -N nitro-n1
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 11 (N1-a) selftest. The binary is compiled on the login node.
+set -uo pipefail
+HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REL="$(cd "${HERE}/../../.." && pwd)"
+# shellcheck disable=SC1091
+source "${REL}/pbs/nitro/env.inc"
+BIN="${REL}/pbs/out/n1_build/n1_selftest"
+[[ -x "${BIN}" ]] || { echo "N1_SELFTEST_FAIL missing ${BIN}"; exit 1; }
+echo "N1_JOB host=$(hostname) job=${PBS_JOBID:-none}"
+"${BIN}"
+rc=$?
+echo "N1_JOB_DONE rc=${rc}"
+exit "${rc}"
