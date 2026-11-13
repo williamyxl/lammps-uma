@@ -1,0 +1,129 @@
+#!/bin/bash -l
+#PBS -N nitro-n1w1
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o ../out/
+#PBS -e ../out/
+# ---------------------------------------------------------------------------
+# Step 11 (N1-a) W=1 energy/force check on a DIAG cell.
+# DIAG: NaCl rocksalt 4x4x4 (512 atoms). Not a gate result.
+# Same binary and W=1 artifact. Arm "base" leaves UMA_NITRO_N1 unset.
+# Arm "n1" sets UMA_NITRO_N1=1. Bars are against the same-job base arm.
+#
+# Submit from pbs/nitro:
+#   qsub -v NITRO_TAG=nitro/n1/w1 n1/run_n1_w1.pbs
+# ---------------------------------------------------------------------------
+set -uo pipefail
+HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
+[[ -f "${HERE}/env.inc" ]] || { echo "NITRO_FAIL: qsub from pbs/nitro (or set NITRO_HERE)"; exit 1; }
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+nitro_check_tree
+
+SHA7=$(git -C "${REL}" rev-parse --short=7 HEAD)
+export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+
+W=1
+PPN=1
+NSTEPS=10
+DIAG_N=4
+DIAG_NAT=512
+CHUNK=65536
+
+OUTROOT="${REL}/pbs/out/nitro_n1w1_${PBS_JOBID:-manual}"
+RUNDIR="${OUTROOT}/diag_n${DIAG_N}"
+mkdir -p "${RUNDIR}"
+nitro_install_cleanup_trap
+
+echo "N1W1_DIAG host=$(hostname) job=${PBS_JOBID:-none} sha=${SHA7} cell=NaCl ${DIAG_N}^3 nat=${DIAG_NAT} W=${W}"
+echo "DIAG: this cell is not a gate result"
+python -c "import torch; assert '+xpu' in torch.__version__, torch.__version__; print('TORCH_OK', torch.__version__)"
+
+module load cmake 2>/dev/null || true
+nitro_require_mpich
+export CC="${GCC_PREFIX:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg}/bin/gcc"
+export CXX="${GCC_PREFIX:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg}/bin/g++"
+if [[ "${NITRO_SKIP_BUILD:-0}" == "1" && -x "${LMP}" ]]; then
+  echo "BUILD_SKIPPED reuse ${LMP}"
+else
+  nitro_cmake_build
+fi
+[[ -x "${LMP}" ]] || nitro_die "missing lmp ${LMP}"
+
+python "${HERE}/make_nacl.py" "${DIAG_N}" "${RUNDIR}" || nitro_die "DIAG cell failed"
+NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/data.nacl")"
+[[ "${NAT}" == "${DIAG_NAT}" ]] || nitro_die "DIAG nat=${NAT} want ${DIAG_NAT}"
+export UMA_MP_NATOMS="${NAT}" EDGE_AC_CHUNK="${CHUNK}"
+
+ART="${RUNDIR}/artifact"
+nitro_own_artifact "${ART}"
+nitro_export_artifact 1 || nitro_die "W=1 export failed"
+
+fail=0
+run_arm() {
+  local arm="$1" ens="$2" fix="$3"
+  if [[ "${arm}" == "n1" ]]; then
+    NITRO_SLOT_ENV="UMA_NITRO_N1=1"
+  else
+    NITRO_SLOT_ENV=""
+  fi
+  export NITRO_SLOT_ENV
+  nitro_write_in "${ens}" "${fix}" "${NSTEPS}" "${NSTEPS}"
+  nitro_run_ens "${ens}" || fail=1
+}
+
+NVT_FIX="fix             1 all nvt temp 300.0 300.0 0.1"
+NPT_FIX="fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0"
+run_arm base nvt_base "${NVT_FIX}"
+run_arm base npt_base "${NPT_FIX}"
+run_arm n1 nvt_n1 "${NVT_FIX}"
+run_arm n1 npt_n1 "${NPT_FIX}"
+
+{
+  echo "n1w1 job=${PBS_JOBID:-none} sha=${SHA7} diag=NaCl ${DIAG_N}^3 nat=${NAT} W=${W}"
+  echo "DIAG: not a gate result"
+  for ens in nvt npt; do
+    for st in 0 10; do
+      python "${HERE}/compare.py" bar "${RUNDIR}/log.${ens}_n1" "${st}" \
+        "$(python "${HERE}/compare.py" pe "${RUNDIR}/log.${ens}_base" "${st}")" 1e-8 \
+        || fail=1
+    done
+    python "${HERE}/diff_forces.py" \
+      "${RUNDIR}/forces.${ens}_base.dump" "${RUNDIR}/forces.${ens}_n1.dump" \
+      --tol-max 1e-9 || fail=1
+  done
+  if grep -q "virial refused" "${RUNDIR}/log.npt_base" "${RUNDIR}/log.npt_n1"; then
+    echo "FAIL virial refused"
+    fail=1
+  else
+    echo "OK no virial refused"
+  fi
+  python - <<PY || fail=1
+import pathlib
+p = pathlib.Path("${RUNDIR}/log.npt_n1").read_text().splitlines()
+vols = []
+for ln in p:
+    parts = ln.split()
+    if len(parts) >= 6 and parts[0] in ("0", "10"):
+        try:
+            vols.append(float(parts[5]))
+        except ValueError:
+            pass
+print("npt volumes", vols)
+if len(vols) < 2 or vols[0] == vols[-1]:
+    raise SystemExit("FAIL NPT volume did not move")
+print("OK NPT volume moved")
+PY
+} > "${OUTROOT}/SUMMARY.txt" 2>&1
+cat "${OUTROOT}/SUMMARY.txt"
+
+echo "N1W1_DONE fail=${fail} ${OUTROOT}"
+exit "${fail}"
