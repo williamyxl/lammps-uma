@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 10, 2026-11-12): **steps 1–9 are closed** (through S0). **Step 10 (Z1, the ZIF-8 test system) is open** and blocks step 11. The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 10, 2026-11-12): **steps 1–10 are closed** (through Z1, the ZIF-8 test system). **Step 11 (N1) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,7 +72,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 10 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–9 are closed. Step 10 (Z1) is open; step 11 (N1) is next.
+- Steps 1–10 are closed. Step 11 (N1) is next.
 
 ### R.6 Master sequence (revision 10) — the only numbered order in this plan
 
@@ -89,7 +89,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 7 | **H5** | Step-time decomposition of the ~400 ms all-reduce | yes | closed. ~360 ms local drain, ~20 ms skew, ~12 ms transfer |
 | 8 | **H6** | Refresh plan numbers: Amdahl ledger | no | closed. BASE step 825 ms; compute 659 ms (80%); N1 at most 118 ms |
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
-| 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | **open.** Z1.1 code and Z1.2 syntax check done; Z1.3–Z1.7 not started. (S0 ran first by user waiver; Z1 blocks step 11.) |
+| 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
 | 11 | **N1** | Device-side graph build: control and tests (N1-a, N1-b) | yes | not started |
 | 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | not started |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
@@ -302,7 +302,17 @@ The structure: the P1 4×4×4 CIF in the read-only project `rosen_uma_ZIF` is re
 
 Failure points: (a) the exported artifact is system-specific, so never reuse a NaCl artifact for ZIF-8 (and the reverse); (b) a ZIF-8 reference taken from one node must reproduce on another (Z1.5 checks); (c) ZIF-8 has light H atoms, so 0.001 ps with H is a looser integrator than the rosen runs, which is acceptable for 10–30 steps but not for physics claims; (d) the rattle is not in the rosen data files, so ZIF-8 PEs here are not comparable with the rosen logs.
 
-Status: **open**.
+**Result (2026-11-12).** Full detail in `pbs/out/nitro_z1/Z1_SUMMARY.md`.
+
+- Z1.3 record job 9084279 (`nitro/z1/r1`): NVT and NPT exit 0, NPT volume 132,417 → 132,590 Å^3, no "virial refused", step-0 PE NVT vs NPT equal to 2.4e-10 eV. Reference PEs (eV): step 0 −45916.897506276422; NVT step 10 −46244.412436485371; NPT step 10 −46245.409267788964.
+- Z1.4: references written to `systems.inc`; tag `nitro/z1/r2` (`62d5daa`).
+- Z1.5 verify job 9084359 on a different node: |ΔPE| = 1.164e-10, 5.821e-11, 3.638e-10, 7.276e-11 eV against the 1e-8 bar. Pass.
+- Z1.6 three timing jobs on three nodes (9084446, 9084482, 9084541). Median step 876.1 ms. **MDE 3.11 ms (0.35%)**: between-job range 3.11 ms, 3 × pooled MAD 2.49 ms. PE not bitwise: max |ΔPE| 4.657e-10 eV; max |ΔF| 1.717e-12 eV/Å. The NaCl same-ops tolerance of 1e-10 eV does not transfer; the ZIF-8 same-ops tolerance is **1e-9 eV** (the 1e-8 pass bar and 1e-9 eV/Å force bar are unchanged).
+- ZIF-8 step ledger (ms; median of three job medians): graph 54.2 (6.2%; `ms_vesin` 49.8), forward 262.4 (29.9%), backward 556.4 (63.5%), force all-reduce 1.05, other 2.2. The collective timers (`ms_allreduce` 499.3, `ms_allgather` 3.05) sit inside forward+backward. Their split into drain, wait and transfer needs the `nitro/h5-diag` build and was not run for ZIF-8.
+- Edges: engine edges are padded to 65,536 in every run and the engine throws on overflow, so none overflowed. Real edges from geometry (6 Å, periodic): 437,170 directed in total, about 36.4k per rank (36.0–36.8k), so about 44% of the edge slots are padding (NaCl: under 12%). Max neighbours per atom is 68, far below `max_neighbors` = 300. The per-rank edge count is an estimate, not an in-engine count.
+- Provenance: the timing jobs pair the `r2` binary with the artifact exported by the `r1` record job (`r1` → `r2` changed only `systems.inc` values and one echo string; the `r2` job's own export reproduced the PEs).
+
+Status: **closed.** Step 11 may start.
 
 ### H.7 Rules that apply to every H stage
 
@@ -331,8 +341,8 @@ Status: **open**.
 ### P.1 Correctness bars
 
 Every arm is compared with a BASE run **in the same allocation**. Reference values for absolute sanity
-(NaCl 14³, W=12, FP64, `uma-s-1p2`, seed 0; the ZIF-8 values are recorded in `systems.inc` by stage Z1): step-0 PE −74142.191907631001 eV; step-10 PE NVT
-−74095.578889731943 eV, NPT −74098.199120459016 eV.
+(NaCl 14³, W=12, FP64, `uma-s-1p2`, seed 0; ZIF-8 3×3×3 values are in `systems.inc`, step 10): step-0 PE −74142.191907631001 eV; step-10 PE NVT
+−74095.578889731943 eV, NPT −74098.199120459016 eV. ZIF-8: step-0 PE −45916.897506276422 eV; step-10 PE NVT −46244.412436485371 eV, NPT −46245.409267788964 eV.
 
 | Check | Pass bar | Notes |
 |---|---|---|
@@ -343,7 +353,7 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 | Step-0 \|ΔPE\| vs BASE | ≤ 1e−8 eV | reorder-only changes gave 1.5e−11…5.8e−11 in Waves A–E |
 | Forces | max\|ΔF\| ≤ max(1e−9 eV/Å, 10 × BASE-vs-BASE noise) | E0 max noise 7.35e−14 eV/Å, so 10× noise is below 1e−9 and the bar stays **1e−9 eV/Å** |
 | Virial (NPT) | max\|ΔW\| ≤ 1e−7 eV | E0 was NVT and did not dump the virial; bar unchanged |
-| Bit-identity | \|ΔPE\| ≤ 1e−10 eV | E0 is not bitwise (max \|ΔPE\| 5.821e−11 eV). Arms that claim the same ops use this tolerance |
+| Bit-identity | \|ΔPE\| ≤ 1e−10 eV (NaCl), ≤ 1e−9 eV (ZIF-8) | E0 is not bitwise (NaCl max \|ΔPE\| 5.821e−11 eV; ZIF-8 4.657e−10 eV). Arms that claim the same ops use the tolerance of their system |
 | Independent checks | relative force error to force RMS; finite-difference check on a few atoms; NVE 200-step drift | a noise-scaled bar alone can hide a real bug |
 | Worker ladder | any arm touching the graph, autograd or kernels passes on a small DIAG cell at W=1 first, then W=2 → 4 → 6 → 12, before the W=12 gate counts | DIAG cells are labelled and never used to claim a result |
 | NPT/virial parity | mandatory for N1, N2, N5 | stress path is `dE/dcell` through edge vectors |
@@ -356,6 +366,7 @@ Every arm is compared with a BASE run **in the same allocation**. Reference valu
 - Instrumentation: `MP_PERF` synchronizes, so compare arms with the same instrumentation on, and take one extra pair of runs with it off to confirm.
 - **Replication (revision 5, H.0/H2.2):** the replicate unit is the PBS job; every claim needs ≥ 3 jobs on different nodes. Verdict: the gain has the same sign in all jobs **and** the median per-job gain exceeds `max(3 × pooled within-job MAD, between-job range)`. The per-step interval below is descriptive only.
 - **E0 MDE (H4):** 6.27 ms, 0.76% of the 822.6 ms median `ms_total`. It is the between-job range. 3 × the pooled within-run MAD is 1.57 ms. The MDE is under 5% of the step, so N3 and N4 are not forced onto a five-job stack by that rule.
+- **ZIF-8 MDE (step 10, Z1.6):** 3.11 ms, 0.35% of the 876.1 ms median `ms_total`; it is the between-job range (3 × pooled MAD is 2.49 ms). NaCl and ZIF-8 MDEs are per system and never pooled.
 - **Effect threshold (per-step, descriptive):** the paired step-time difference has a 95% interval excluding 0 **and** the median gain exceeds 3 × the pooled MAD; treat 5% as a priority signal, not a pass/fail line, so small deterministic savings (N3, N4) can still be judged in a stack.
 - Speedup = `median(BASE) / median(arm)`, labelled with cell, W and queue.
 
@@ -432,7 +443,7 @@ decides keep or drop by the H.0 verdict), and its own failure points.
 - **Nitro idea:** `plan_capacities` / `_measured_caps` with `EDGE_MARGIN` (1.30) instead of a worst-case cap.
 - **Do:** export with cap = measured max per-rank shard edges × {1.05, 1.10, 1.30}, rounded up (N3-a/b/c). Nitro's remeasure-and-retry is **not** copied (capacity is baked into the traced model); overflow is a hard error.
 - **Control:** the three margins against the current cap 65 536.
-- **Expected gain:** small by design. Real edges are about 58–60k against the 65,536 cap, so the padded fraction is under about 12% of edge slots. That is cleanup, not a large lever.
+- **Expected gain:** small by design. Real edges are about 58–60k against the 65,536 cap, so the padded fraction is under about 12% of edge slots. That is cleanup, not a large lever for NaCl. For ZIF-8 (step 10) the real edges are about 36k per rank, so about 44% of the edge slots are padding; N3 is a larger candidate there (judged per system, H.0).
 
 ### N4 [step 29] — MOLE merge at export, keyed by composition
 - **Nitro idea:** merge the mixture-of-linear-experts per system (`_composition_key`, `prepare_for_inference`).
