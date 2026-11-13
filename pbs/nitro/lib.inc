@@ -233,12 +233,20 @@ nitro_export_artifact() {
   echo "########## export ranks=${world} nat=${NAT} $(date -Is) ##########"
   mpiexec -n "${world}" --ppn "${world}" gpu_tile_compact.sh \
     bash "${HERE}/export_one_rank.sh"
-  local okn
-  okn=$(find "${ART}/w${world}" -name model_traced.pt | wc -l)
-  [[ "${okn}" -eq "${world}" ]] || {
-    tail -30 "${ART}/exp_r0.log" 2>/dev/null || true
-    nitro_die "export incomplete got=${okn} want=${world}"
-  }
-  cp -f "${ART}/w${world}/r0/metadata.json" "${ART}/metadata.json"
+  # W==1 writes model_traced.pt into ${ART} itself. W>1 writes ${ART}/w${W}/r${R}/.
+  if [[ "${world}" == "1" ]]; then
+    [[ -f "${ART}/model_traced.pt" && -f "${ART}/metadata.json" ]] || {
+      tail -30 "${ART}/exp_r0.log" 2>/dev/null || true
+      nitro_die "export incomplete: missing ${ART}/model_traced.pt"
+    }
+  else
+    local okn
+    okn=$(find "${ART}/w${world}" -name model_traced.pt | wc -l)
+    [[ "${okn}" -eq "${world}" ]] || {
+      tail -30 "${ART}/exp_r0.log" 2>/dev/null || true
+      nitro_die "export incomplete got=${okn} want=${world}"
+    }
+    cp -f "${ART}/w${world}/r0/metadata.json" "${ART}/metadata.json"
+  fi
   echo "EXPORT_OK ${ART}"
 }
