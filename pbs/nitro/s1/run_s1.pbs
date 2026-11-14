@@ -16,6 +16,7 @@ HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REL="$(cd "${HERE}/../../.." && pwd)"
 # shellcheck disable=SC1091
 source "${REL}/pbs/nitro/env.inc"
+export TORCH_XPU_ARCH_LIST="${TORCH_XPU_ARCH_LIST:-pvc}"
 BIN="${REL}/pbs/out/s1_build/s1_test"
 [[ -x "${BIN}" ]] || { echo "S1_FAIL missing ${BIN}"; exit 1; }
 echo "S1_JOB host=$(hostname) job=${PBS_JOBID:-none}"

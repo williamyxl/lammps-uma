@@ -19,13 +19,26 @@ void check_fp64_xpu(const at::Tensor& t, const char* name) {
 at::Tensor touch_xpu(const at::Tensor& x) {
   std::cerr << "S1_TOUCH_FN\n" << std::flush;
   check_fp64_xpu(x, "touch");
+  std::cerr << "S1_AFTER_CHECK\n" << std::flush;
   auto xc = x.contiguous();
+  std::cerr << "S1_AFTER_CONTIG\n" << std::flush;
   auto y = torch::empty(xc.sizes(), xc.options());
   const auto n = static_cast<size_t>(xc.numel());
   auto* xp = xc.data_ptr<double>();
   auto* yp = y.data_ptr<double>();
+  std::cerr << "S1_AFTER_PTR n=" << n << "\n" << std::flush;
+  // A queue created in this binary uses the same SYCL headers as the launch.
+  // The torch stream queue is tried second, so a crash tells us which one.
+  sycl::queue local{sycl::gpu_selector_v};
+  std::cerr << "S1_LOCAL_Q\n" << std::flush;
+  local.parallel_for<class S1TouchLocal>(sycl::range<1>(n), [=](sycl::id<1> i) {
+    yp[i] = xp[i];
+  }).wait();
+  std::cerr << "S1_LOCAL_OK\n" << std::flush;
   sycl::queue& q = c10::xpu::getCurrentXPUStream().queue();
+  std::cerr << "S1_GOT_STREAM\n" << std::flush;
   q.parallel_for<class S1Touch>(sycl::range<1>(n), [=](sycl::id<1> i) { yp[i] = xp[i]; }).wait();
+  std::cerr << "S1_STREAM_OK\n" << std::flush;
   return y;
 }
 
