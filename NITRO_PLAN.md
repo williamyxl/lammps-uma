@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 10, 2026-11-14): **steps 1–11 are closed** (through N1-a). **Step 12 (S1) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 10, 2026-11-14): **steps 1–12 are closed** (through S1). **Step 13 (S2) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,7 +72,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 10 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–11 are closed. Step 12 (S1) is next.
+- Steps 1–12 are closed. Step 13 (S2) is next.
 
 ### R.6 Master sequence (revision 10) — the only numbered order in this plan
 
@@ -91,7 +91,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
 | 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
 | 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9088158, ZIF-8 job 9088195). Not in the stack: no replicated timing verdict yet. |
-| 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | in progress. Torch's own XPU kernels run. The custom SYCL function is entered and then segfaults (job 9088382). Not closed. |
+| 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | closed. Job 9089197, node x4220c7s1b0n0. Forward and analytic gradient match. Finite-difference rel 3.174e-10. Bitwise across 10 repeats. No-grad recompute matches. |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
 | 15 | **S4** | 12-tile test beside the all-reduce | yes | not started |
@@ -631,7 +631,7 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 | S0 (step 9) | Toolchain check: build the PyTorch tutorial `mymuladd` in **FP64** with `SyclExtension` into a scratch dir (`TORCH_XPU_ARCH_LIST=pvc`) and run it | compile on login, run on 1 compute node | Compiles with the `fxpu` torch; result equals `a*b+c` in FP64 (rel. error ≤ 1e-15); no ABI or `libsycl` errors |
 | S1 (step 12) | Engine-style C++ test (no Python): standalone exe built like the engine links the new `.o`; call the op on XPU FP64 tensors, then `torch::autograd::grad` | 1 compute node | Forward equals the torch reference (≤ 1e-15 rel.); gradient equals the analytic formula and a central finite difference (≤ 1e-9); bitwise reproducible across 10 repeats |
 
-**S1 so far (not closed).** Sources are `pbs/nitro/s1/` on `uma-nitro`. The op is FP64 `y = silu(x*w+b)` with a C++ autograd registration. An AOT `spir64_gen` image segfaulted before `main` (job 9088250); the build is JIT, as in step 9. Under `mpiexec -n 1 gpu_tile_compact.sh`, `torch::xpu::is_available()` is true and `torch::ones` on XPU returns 1 (job 9088382, node x4302c5s6b0n0). The dispatcher reaches the custom function (`S1_TOUCH_FN`) and the process then dies with signal 11, before that copy kernel returns. `libsycl.so.9` is the `fxpu` copy. icpx is 2026.1.0.
+**S1 result (closed, job 9089197, node x4220c7s1b0n0, tag `nitro/s1/r11`).** Sources are `pbs/nitro/s1/` on `uma-nitro`. The op is FP64 `y = silu(x*w+b)` with a C++ autograd registration. A g++ link dropped the device image and the first kernel segfaulted (jobs 9088250 through 9088382). Linking the test with `icpx -fsycl` keeps the image. Forward relative error 0. Analytic gradient relative error 0. Central finite-difference relative error 3.174e-10. Ten repeats are bitwise identical. A no-grad forward matches the grad recompute, and that recompute's gradient matches. `libsycl.so.9` is the `fxpu` copy. icpx is 2026.1.0. The model is unchanged.
 | S2 (step 13) | Export round trip: trace the small module with the Python stand-in, save the `.pt`, load it in a C++ process that links the op, run forward+backward | 1 compute node | Loads without "unknown builtin op"; outputs and gradients equal eager torch (≤ 1e-15 / 1e-9) |
 | S3 (step 14) | Link into `uma_engine` and rebuild `lmp`; run the existing NaCl 14³ W=12 NVT+NPT gate with the op linked but **unused** | `debug` job, ABBA vs BASE | Step-0 PE = −74142.191907631001 eV (|ΔE| ≤ 1e-8), identical to BASE; no regression in step time beyond noise; no new static-init or load errors |
 | S4 (step 15) | 12-tile run: `mpiexec -n 12` test that calls the op repeatedly interleaved with an `uma_peer` all-reduce | 1 compute node | No hang; results identical on all ranks; op and collective ordering unchanged |
