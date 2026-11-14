@@ -54,6 +54,10 @@ int main() {
     return 1;
   }
   const torch::Device dev(torch::kXPU, 0);
+  std::cerr << "S1_ONES\n" << std::flush;
+  auto ones = torch::ones({4}, torch::TensorOptions().dtype(torch::kFloat64).device(dev));
+  sync();
+  std::cerr << "S1_ONES_OK " << ones[0].item<double>() << "\n" << std::flush;
   constexpr int64_t n = 65536 + 3;  // not a multiple of the work-group size
   auto idx = torch::arange(n, torch::TensorOptions().dtype(torch::kFloat64).device(dev));
   auto x = torch::sin(idx * 0.01);
@@ -72,7 +76,9 @@ int main() {
   auto b_nc = b.slice(0, 0, n, 2);
   TORCH_CHECK(!x_nc.is_contiguous(), "slice should be non-contiguous");
 
+  std::cerr << "S1_OP\n" << std::flush;
   auto y = silu_affine(x_nc, w_nc, b_nc);
+  std::cerr << "S1_OP_BACK\n" << std::flush;
   sync();
   auto y_ref = torch_silu_affine(x_nc, w_nc, b_nc);
   sync();
