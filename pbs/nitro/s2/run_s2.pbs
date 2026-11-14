@@ -1,0 +1,36 @@
+#!/bin/bash -l
+#PBS -N nitro-s2
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 13 (S2). Trace on the compute node, then load in the C++ process.
+# Submit from pbs/nitro/s2.
+set -uo pipefail
+HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REL="$(cd "${HERE}/../../.." && pwd)"
+# shellcheck disable=SC1091
+source "${REL}/pbs/nitro/env.inc"
+export TORCH_XPU_ARCH_LIST="${TORCH_XPU_ARCH_LIST:-pvc}"
+BIN="${REL}/pbs/out/s2_build/s2_test"
+OUT="${REL}/pbs/out/nitro_s2_${PBS_JOBID:-manual}"
+mkdir -p "${OUT}"
+[[ -x "${BIN}" ]] || { echo "S2_FAIL missing ${BIN}"; exit 1; }
+echo "S2_JOB host=$(hostname) job=${PBS_JOBID:-none}"
+export PYTHONPATH="${HERE}${PYTHONPATH:+:${PYTHONPATH}}"
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh python "${HERE}/trace_s2.py" "${OUT}/traced.pt"
+trc=$?
+echo "S2_TRACE_RC ${trc}"
+if [[ "${trc}" -ne 0 ]]; then
+  echo "S2_JOB_DONE rc=${trc}"
+  exit "${trc}"
+fi
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh "${BIN}" "${OUT}/traced.pt"
+rc=$?
+echo "S2_JOB_DONE rc=${rc}"
+exit "${rc}"

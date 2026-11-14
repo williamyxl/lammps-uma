@@ -2,6 +2,8 @@
 // y = silu(x * w + b), elementwise, FP64, on the current XPU stream.
 // Backward is a SYCL kernel. Autograd is registered in C++.
 
+#include "uma_sycl_schema.h"
+
 #include <torch/torch.h>
 #include <c10/xpu/XPUStream.h>
 #include <sycl/sycl.hpp>
@@ -132,7 +134,7 @@ torch::Tensor silu_affine_autograd(const torch::Tensor& x, const torch::Tensor& 
 
 TORCH_LIBRARY(uma_sycl, m) {
   m.def("touch(Tensor x) -> Tensor");
-  m.def("silu_affine(Tensor x, Tensor w, Tensor b) -> Tensor");
+  m.def(UMA_SYCL_SILU_AFFINE_SCHEMA);
   m.def("silu_affine_backward(Tensor gy, Tensor x, Tensor w, Tensor b) -> (Tensor, Tensor, Tensor)");
 }
 

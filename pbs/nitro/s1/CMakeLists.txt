@@ -13,6 +13,7 @@ set(_inc_flags "")
 foreach(_d ${TORCH_INCLUDE_DIRS})
   list(APPEND _inc_flags -I${_d})
 endforeach()
+list(APPEND _inc_flags -I${CMAKE_CURRENT_SOURCE_DIR})
 
 set(_obj "${CMAKE_CURRENT_BINARY_DIR}/uma_sycl_silu.o")
 string(JOIN " " _inc_str ${_inc_flags})
