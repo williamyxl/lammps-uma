@@ -7,6 +7,7 @@
 #include <sycl/sycl.hpp>
 
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 
 namespace uma {
@@ -73,6 +74,7 @@ N1bCandidates n1b_cell_candidates(const torch::Tensor& pos64, const double cell[
   const int64_t n = pos64.size(0);
   const int64_t ncells = static_cast<int64_t>(nc[0]) * nc[1] * nc[2];
   const int64_t width = 27 * cell_cap;
+  std::cerr << "N1B_CELL n=" << n << " ncells=" << ncells << " cap=" << cell_cap << "\n" << std::flush;
   auto dev = pos64.device();
   auto wrapped = torch::empty({n, 3}, pos64.options());
   auto flat = torch::empty({n}, torch::TensorOptions().dtype(torch::kLong).device(dev));
@@ -109,6 +111,7 @@ N1bCandidates n1b_cell_candidates(const torch::Tensor& pos64, const double cell[
     }).wait();
 
   const int maxc = counts.to(torch::kCPU).max().item<int>();
+  std::cerr << "N1B_BIN maxc=" << maxc << "\n" << std::flush;
   N1bCandidates out;
   out.wrapped = wrapped;
   if (static_cast<int64_t>(maxc) > cell_cap) {
@@ -218,6 +221,7 @@ N1bCandidates n1b_cell_candidates(const torch::Tensor& pos64, const double cell[
   out.oy = oy;
   out.oz = oz;
   out.keep = keep.to(torch::kBool);
+  std::cerr << "N1B_CELL_DONE\n" << std::flush;
   return out;
 }
 
@@ -226,6 +230,7 @@ N1bCandidates n1b_pair_candidates(const torch::Tensor& pos64, const double cell[
                                  const int64_t* images, int64_t nimg) {
   const int64_t n = pos64.size(0);
   const int64_t width = n * nimg;
+  std::cerr << "N1B_PAIRS n=" << n << " nimg=" << nimg << "\n" << std::flush;
   auto dev = pos64.device();
   auto wrapped = torch::empty({n, 3}, pos64.options());
   sycl::queue& q = xpu_queue();
@@ -278,6 +283,7 @@ N1bCandidates n1b_pair_candidates(const torch::Tensor& pos64, const double cell[
   out.oy = oy;
   out.oz = oz;
   out.keep = keep.to(torch::kBool);
+  std::cerr << "N1B_PAIRS_DONE\n" << std::flush;
   return out;
 }
 
