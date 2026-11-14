@@ -78,6 +78,15 @@ int main() {
   auto b_nc = b.slice(0, 0, n, 2);
   TORCH_CHECK(!x_nc.is_contiguous(), "slice should be non-contiguous");
 
+  std::cerr << "S1_TOUCH\n" << std::flush;
+  {
+    static auto touch = c10::Dispatcher::singleton()
+                            .findSchemaOrThrow("uma_sycl::touch", "")
+                            .typed<at::Tensor(const at::Tensor&)>();
+    auto yt = touch.call(x_nc);
+    sync();
+    std::cerr << "S1_TOUCH_OK " << (yt - x_nc).abs().max().item<double>() << "\n" << std::flush;
+  }
   std::cerr << "S1_OP\n" << std::flush;
   auto y = silu_affine(x_nc, w_nc, b_nc);
   std::cerr << "S1_OP_BACK\n" << std::flush;

@@ -14,6 +14,18 @@ void check_fp64_xpu(const at::Tensor& t, const char* name) {
   TORCH_CHECK(t.numel() > 0, name, ": empty tensor");
 }
 
+at::Tensor touch_xpu(const at::Tensor& x) {
+  check_fp64_xpu(x, "touch");
+  auto xc = x.contiguous();
+  auto y = torch::empty(xc.sizes(), xc.options());
+  const auto n = static_cast<size_t>(xc.numel());
+  auto* xp = xc.data_ptr<double>();
+  auto* yp = y.data_ptr<double>();
+  sycl::queue& q = c10::xpu::getCurrentXPUStream().queue();
+  q.parallel_for<class S1Touch>(sycl::range<1>(n), [=](sycl::id<1> i) { yp[i] = xp[i]; }).wait();
+  return y;
+}
+
 at::Tensor silu_affine_xpu(const at::Tensor& x, const at::Tensor& w, const at::Tensor& b) {
   check_fp64_xpu(x, "x");
   check_fp64_xpu(w, "w");
@@ -111,11 +123,13 @@ torch::Tensor silu_affine_autograd(const torch::Tensor& x, const torch::Tensor& 
 }  // namespace
 
 TORCH_LIBRARY(uma_sycl, m) {
+  m.def("touch(Tensor x) -> Tensor");
   m.def("silu_affine(Tensor x, Tensor w, Tensor b) -> Tensor");
   m.def("silu_affine_backward(Tensor gy, Tensor x, Tensor w, Tensor b) -> (Tensor, Tensor, Tensor)");
 }
 
 TORCH_LIBRARY_IMPL(uma_sycl, XPU, m) {
+  m.impl("touch", &touch_xpu);
   m.impl("silu_affine", &silu_affine_xpu);
   m.impl("silu_affine_backward", &silu_affine_backward_xpu);
 }
