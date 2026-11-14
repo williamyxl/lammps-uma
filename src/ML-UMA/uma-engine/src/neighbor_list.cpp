@@ -1,4 +1,5 @@
 #include "uma/neighbor_list.h"
+#include "uma/n1b_graph.h"
 #include "uma/runtime_config.h"
 
 #include <algorithm>
@@ -566,6 +567,11 @@ bool nitro_n1_requested() {
   return v != nullptr && v[0] == '1';
 }
 
+bool nitro_n1b_requested() {
+  const char* v = runtime_get("UMA_NITRO_N1B");
+  return v != nullptr && v[0] == '1';
+}
+
 int64_t nitro_n1_cell_cap() {
   const char* v = runtime_get("UMA_NITRO_N1_CELL_CAP");
   if (v == nullptr || v[0] == '\0') {
@@ -886,6 +892,86 @@ DeviceNeighborBuild build_neighbor_graph_device(const torch::Tensor& pos,
   }
   const auto cell_mat = cell_from_tensor(cell);
   const auto pbc_flags = pbc_from_tensor(pbc);
+#ifdef UMA_N1B_SYCL
+  if (nitro_n1b_requested() && pos.device().is_xpu()) {
+    auto pos64 = pos.to(torch::kFloat64).contiguous();
+    double cell_c[3][3];
+    int pbc_i[3];
+    for (int r = 0; r < 3; ++r) {
+      pbc_i[r] = pbc_flags[r] ? 1 : 0;
+      for (int c = 0; c < 3; ++c) cell_c[r][c] = cell_mat[r][c];
+    }
+    bool celllist = is_orthorhombic(cell_mat);
+    int nc[3] = {1, 1, 1};
+    double len[3] = {0, 0, 0};
+    if (celllist) {
+      for (int d = 0; d < 3; ++d) {
+        len[d] = std::abs(cell_mat[d][d]);
+        if (pbc_flags[d] && static_cast<int>(std::floor(len[d] / config.cutoff)) < 3) {
+          celllist = false;
+          break;
+        }
+      }
+    }
+    N1bCandidates cand;
+    if (celllist) {
+      for (int d = 0; d < 3; ++d) {
+        len[d] = std::abs(cell_mat[d][d]);
+        nc[d] = pbc_flags[d] ? static_cast<int>(std::floor(len[d] / config.cutoff)) : 1;
+      }
+      cand = n1b_cell_candidates(pos64, cell_c, pbc_i, config.cutoff, config.distance_tolerance,
+                                cell_cap, nc, len);
+    } else {
+      const auto rep = image_repeats(cell_mat, pbc_flags, config.cutoff);
+      bool image_bad = false;
+      for (int d = 0; d < 3; ++d) {
+        if (rep[d] > static_cast<int>(kMaxImage)) image_bad = true;
+      }
+      if (image_bad) {
+        DeviceNeighborBuild bad;
+        bad.overflow = 4;
+        bad.wrapped_pos = pos64.to(pos.device(), pos.scalar_type()).contiguous();
+        return bad;
+      }
+      std::vector<int64_t> images;
+      for (int ix = -rep[0]; ix <= rep[0]; ++ix) {
+        for (int iy = -rep[1]; iy <= rep[1]; ++iy) {
+          for (int iz = -rep[2]; iz <= rep[2]; ++iz) {
+            if (!pbc_flags[0] && ix != 0) continue;
+            if (!pbc_flags[1] && iy != 0) continue;
+            if (!pbc_flags[2] && iz != 0) continue;
+            images.push_back(ix);
+            images.push_back(iy);
+            images.push_back(iz);
+          }
+        }
+      }
+      const int64_t nimg = static_cast<int64_t>(images.size() / 3);
+      const int64_t width = n * nimg;
+      if (width > kMaxRow || width <= 0) {
+        DeviceNeighborBuild bad;
+        bad.overflow = 2;
+        bad.wrapped_pos = pos64.to(pos.device(), pos.scalar_type()).contiguous();
+        return bad;
+      }
+      cand = n1b_pair_candidates(pos64, cell_c, pbc_i, config.cutoff, config.distance_tolerance,
+                                images.data(), nimg);
+    }
+    if (cand.overflow != 0) {
+      DeviceNeighborBuild bad;
+      bad.overflow = cand.overflow;
+      bad.wrapped_pos = cand.wrapped.defined() ? cand.wrapped : pos64;
+      bad.wrapped_pos = bad.wrapped_pos.to(pos.device(), pos.scalar_type()).contiguous();
+      return bad;
+    }
+    auto built = emit_with_reference_order(pos, cand.wrapped, cell_mat, pbc_flags, config,
+                                          cand.neighbor, cand.ox, cand.oy, cand.oz, cand.keep);
+    if (built.wrapped_pos.defined()) {
+      built.wrapped_pos = built.wrapped_pos.to(pos.device(), pos.scalar_type()).contiguous();
+    }
+    return built;
+  }
+#endif
   auto wrapped = wrap_torch(pos.to(torch::kFloat64).contiguous(), cell_mat, pbc_flags);
 
   bool celllist = is_orthorhombic(cell_mat);

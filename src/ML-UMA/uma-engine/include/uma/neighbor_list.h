@@ -59,6 +59,7 @@ struct DeviceNeighborBuild {
 };
 
 bool nitro_n1_requested();
+bool nitro_n1b_requested();
 int64_t nitro_n1_cell_cap();
 const char* nitro_n1_overflow_reason(int64_t code);
 

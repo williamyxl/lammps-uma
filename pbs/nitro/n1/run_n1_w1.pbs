@@ -76,7 +76,9 @@ nitro_export_artifact "${W}" || nitro_die "W=${W} export failed"
 fail=0
 run_arm() {
   local arm="$1" ens="$2" fix="$3"
-  if [[ "${arm}" == "n1" ]]; then
+  if [[ "${arm}" == "n1" && "${UMA_NITRO_N1B:-}" == "1" ]]; then
+    NITRO_SLOT_ENV="UMA_NITRO_N1B=1"
+  elif [[ "${arm}" == "n1" ]]; then
     NITRO_SLOT_ENV="UMA_NITRO_N1=1"
   else
     NITRO_SLOT_ENV=""

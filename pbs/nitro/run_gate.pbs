@@ -105,7 +105,11 @@ nitro_runtime_env
 
 # qsub -v UMA_NITRO_N1=1 is visible here, but nitro_run_ens only forwards
 # NITRO_SLOT_ENV into the LAMMPS process.
-if [[ "${UMA_NITRO_N1:-}" == "1" ]]; then
+if [[ "${UMA_NITRO_N1B:-}" == "1" ]]; then
+  NITRO_SLOT_ENV="UMA_NITRO_N1B=1"
+  export NITRO_SLOT_ENV
+  echo "N1B_ARM on"
+elif [[ "${UMA_NITRO_N1:-}" == "1" ]]; then
   NITRO_SLOT_ENV="UMA_NITRO_N1=1"
   export NITRO_SLOT_ENV
   echo "N1_ARM on"

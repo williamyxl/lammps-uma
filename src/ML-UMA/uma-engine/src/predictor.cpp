@@ -302,7 +302,7 @@ void Predictor::rebuild_neighbors() {
   NeighborListConfig config;
   config.cutoff = metadata_.cutoff;
   config.max_neighbors = metadata_.max_neighbors;
-  if (nitro_n1_requested()) {
+  if (nitro_n1_requested() || nitro_n1b_requested()) {
     auto built = build_neighbor_graph_device(pos_, cell_, pbc_, config, nitro_n1_cell_cap());
     if (built.overflow != 0) {
       throw std::runtime_error(

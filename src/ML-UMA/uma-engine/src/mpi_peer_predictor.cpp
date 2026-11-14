@@ -395,7 +395,7 @@ Prediction MpiPeerPredictor::predict_host_body(int n, const double* pos_xyz,
     NeighborListConfig config;
     config.cutoff = metadata_.cutoff;
     config.max_neighbors = metadata_.max_neighbors;
-    if (nitro_n1_requested()) {
+    if (nitro_n1_requested() || nitro_n1b_requested()) {
       auto built = build_neighbor_graph_device(pos, cell, pbc, config, nitro_n1_cell_cap());
       const int over_local = built.overflow != 0 ? 1 : 0;
       auto over_t = torch::tensor({static_cast<double>(over_local)},
