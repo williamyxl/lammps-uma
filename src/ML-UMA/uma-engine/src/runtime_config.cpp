@@ -14,6 +14,10 @@
 // namespace uma is a different symbol, and linking lmp then fails.
 extern "C" char **environ;
 
+#ifdef UMA_SYCL_OPS_LINKED
+extern "C" void uma_sycl_ops_linked_anchor();
+#endif
+
 namespace uma {
 namespace {
 
@@ -69,7 +73,6 @@ void log_nitro_flags_once()
   static std::once_flag once;
   std::call_once(once, [] {
 #ifdef UMA_SYCL_OPS_LINKED
-    extern "C" void uma_sycl_ops_linked_anchor();
     uma_sycl_ops_linked_anchor();
 #endif
     if (!log_from_this_rank()) return;
