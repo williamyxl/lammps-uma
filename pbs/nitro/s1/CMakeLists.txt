@@ -18,9 +18,9 @@ set(_obj "${CMAKE_CURRENT_BINARY_DIR}/uma_sycl_silu.o")
 string(JOIN " " _inc_str ${_inc_flags})
 add_custom_command(
   OUTPUT ${_obj}
-  # JIT, same route as the step 9 toolchain test. An AOT spir64_gen image
-  # segfaulted at process start on the compute node (job 9088250).
-  COMMAND bash -c "${UMA_ICPX} -fsycl -O2 -std=c++17 -fPIC -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1 ${_inc_str} -c ${CMAKE_CURRENT_SOURCE_DIR}/uma_sycl_silu.sycl.cpp -o ${_obj}"
+  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/compile_sycl.sh
+          ${_inc_flags}
+          -c ${CMAKE_CURRENT_SOURCE_DIR}/uma_sycl_silu.sycl.cpp -o ${_obj}
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/uma_sycl_silu.sycl.cpp
   COMMENT "icpx AOT PVC uma_sycl_silu"
   VERBATIM)
@@ -28,6 +28,9 @@ add_custom_command(
 add_custom_target(s1_obj DEPENDS ${_obj})
 add_executable(s1_test s1_test.cpp)
 add_dependencies(s1_test s1_obj)
+# g++ drops the device image inside the icpx object. Link with icpx -fsycl so
+# the kernel binary is actually in the executable.
+set(CMAKE_CXX_LINK_EXECUTABLE "${UMA_ICPX} -fsycl <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
 target_link_libraries(s1_test PRIVATE ${_obj} ${TORCH_LIBRARIES})
 target_compile_options(s1_test PRIVATE -O2)
 if(DEFINED UMA_ICPX_LIBDIR)

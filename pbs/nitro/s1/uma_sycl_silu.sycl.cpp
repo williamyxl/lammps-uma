@@ -27,14 +27,6 @@ at::Tensor touch_xpu(const at::Tensor& x) {
   auto* xp = xc.data_ptr<double>();
   auto* yp = y.data_ptr<double>();
   std::cerr << "S1_AFTER_PTR n=" << n << "\n" << std::flush;
-  // A queue created in this binary uses the same SYCL headers as the launch.
-  // The torch stream queue is tried second, so a crash tells us which one.
-  sycl::queue local{sycl::gpu_selector_v};
-  std::cerr << "S1_LOCAL_Q\n" << std::flush;
-  local.parallel_for<class S1TouchLocal>(sycl::range<1>(n), [=](sycl::id<1> i) {
-    yp[i] = xp[i];
-  }).wait();
-  std::cerr << "S1_LOCAL_OK\n" << std::flush;
   sycl::queue& q = c10::xpu::getCurrentXPUStream().queue();
   std::cerr << "S1_GOT_STREAM\n" << std::flush;
   q.parallel_for<class S1Touch>(sycl::range<1>(n), [=](sycl::id<1> i) { yp[i] = xp[i]; }).wait();
