@@ -45,7 +45,11 @@ void expect(bool ok, const std::string& msg) {
 
 int main() {
   std::cerr << "S1_ENTER\n" << std::flush;
-  if (!torch::xpu::is_available() || torch::xpu::device_count() < 1) {
+  const bool avail = torch::xpu::is_available();
+  std::cerr << "S1_AVAIL " << avail << "\n" << std::flush;
+  const auto ndev = torch::xpu::device_count();
+  std::cerr << "S1_COUNT " << ndev << "\n" << std::flush;
+  if (!avail || ndev < 1) {
     std::cerr << "S1_FAIL no XPU\n";
     return 1;
   }

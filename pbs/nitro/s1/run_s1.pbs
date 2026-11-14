@@ -22,7 +22,14 @@ echo "S1_JOB host=$(hostname) job=${PBS_JOBID:-none}"
 icpx --version | head -2 || true
 echo "--- ldd sycl ---"
 ldd "${BIN}" | grep -E 'sycl|ur_loader' || true
-"${BIN}"
+# Bind one tile the same way the engine jobs do. A bare process segfaulted
+# inside torch::xpu::is_available (job 9088273).
+if command -v gpu_tile_compact.sh >/dev/null 2>&1; then
+  gpu_tile_compact.sh "${BIN}"
+else
+  echo "S1_NO_TILE_HELPER"
+  "${BIN}"
+fi
 rc=$?
 python - <<PY
 import json, pathlib
