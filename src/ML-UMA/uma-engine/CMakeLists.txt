@@ -180,27 +180,30 @@ if(UMA_ENGINE_USE_XPU)
     target_compile_definitions(uma_engine PRIVATE UMA_SYCL_OPS_LINKED)
     message(STATUS "uma-engine: uma_sycl_silu.o linked (unused by the model)")
 
-    # Step 16 (N1-b). Same icpx link as the silu object. neighbor_list.cpp
-    # calls it only when UMA_NITRO_N1B=1.
+    # Step 16 (N1-b). A g++ link of the .o drops the device image once oneCCL
+    # has created its own context (W=1 worked, W=2 segfaulted in the first
+    # kernel). Link a shared library with icpx -fsycl so the image stays.
     set(_n1b_src "${CMAKE_CURRENT_SOURCE_DIR}/src/n1b_graph.sycl.cpp")
-    set(_n1b_obj "${CMAKE_CURRENT_BINARY_DIR}/n1b_graph.o")
+    set(_n1b_so "${CMAKE_CURRENT_BINARY_DIR}/libuma_n1b.so")
     set(_n1b_incs -I${CMAKE_CURRENT_SOURCE_DIR}/include)
     foreach(_d ${TORCH_INCLUDE_DIRS})
       list(APPEND _n1b_incs -I${_d})
     endforeach()
     add_custom_command(
-      OUTPUT ${_n1b_obj}
-      COMMAND ${_silu_dir}/compile_sycl.sh ${_n1b_incs}
-              -c ${_n1b_src} -o ${_n1b_obj}
+      OUTPUT ${_n1b_so}
+      COMMAND ${UMA_ICPX} -fsycl -fPIC -shared -O2 -std=c++17
+              -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1
+              ${_n1b_incs}
+              ${_n1b_src} -o ${_n1b_so}
       DEPENDS ${_n1b_src} ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/n1b_graph.h
-              ${_silu_dir}/compile_sycl.sh
-      COMMENT "Compiling n1b_graph.sycl.cpp with icpx"
+      COMMENT "icpx -fsycl -shared libuma_n1b.so"
       VERBATIM)
-    add_custom_target(uma_n1b_obj DEPENDS ${_n1b_obj})
-    add_dependencies(uma_engine uma_n1b_obj)
-    target_link_libraries(uma_engine PUBLIC ${_n1b_obj})
+    add_custom_target(uma_n1b_so DEPENDS ${_n1b_so})
+    add_dependencies(uma_engine uma_n1b_so)
+    target_link_libraries(uma_engine PUBLIC ${_n1b_so})
+    target_link_options(uma_engine PUBLIC "-Wl,-rpath,${CMAKE_CURRENT_BINARY_DIR}")
     target_compile_definitions(uma_engine PRIVATE UMA_N1B_SYCL)
-    message(STATUS "uma-engine: n1b_graph.o linked")
+    message(STATUS "uma-engine: libuma_n1b.so linked")
   endif()
 endif()
 if(UMA_ENGINE_USE_CUDA)
