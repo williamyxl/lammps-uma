@@ -1,0 +1,31 @@
+#!/bin/bash -l
+#PBS -N nitro-s4
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 15 (S4). The binary is compiled on the login node.
+# Submit from pbs/nitro/s4:
+#   qsub -q debug-scaling run_s4.pbs
+set -uo pipefail
+HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REL="$(cd "${HERE}/../../.." && pwd)"
+# shellcheck disable=SC1091
+source "${REL}/pbs/nitro/env.inc"
+export PATH="${MPICH}/bin:${PATH}"
+export TORCH_XPU_ARCH_LIST="${TORCH_XPU_ARCH_LIST:-pvc}"
+BIN="${REL}/pbs/out/s4_build/s4_test"
+[[ -x "${BIN}" ]] || { echo "S4_FAIL missing ${BIN}"; exit 1; }
+echo "S4_JOB host=$(hostname) job=${PBS_JOBID:-none}"
+icpx --version | head -2 || true
+echo "--- ldd sycl ccl ---"
+ldd "${BIN}" | grep -E 'sycl|ur_loader|ccl|mpi' || true
+mpiexec -n 12 --ppn 12 gpu_tile_compact.sh "${BIN}"
+rc=$?
+echo "S4_JOB_DONE rc=${rc}"
+exit "${rc}"
