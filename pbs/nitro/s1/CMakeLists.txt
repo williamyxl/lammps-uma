@@ -18,7 +18,9 @@ set(_obj "${CMAKE_CURRENT_BINARY_DIR}/uma_sycl_silu.o")
 string(JOIN " " _inc_str ${_inc_flags})
 add_custom_command(
   OUTPUT ${_obj}
-  COMMAND bash -c "${UMA_ICPX} -fsycl -O2 -std=c++17 -fPIC -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1 -fsycl-targets=spir64_gen -Xsycl-target-backend=spir64_gen '-device pvc' ${_inc_str} -c ${CMAKE_CURRENT_SOURCE_DIR}/uma_sycl_silu.sycl.cpp -o ${_obj}"
+  # JIT, same route as the step 9 toolchain test. An AOT spir64_gen image
+  # segfaulted at process start on the compute node (job 9088250).
+  COMMAND bash -c "${UMA_ICPX} -fsycl -O2 -std=c++17 -fPIC -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1 ${_inc_str} -c ${CMAKE_CURRENT_SOURCE_DIR}/uma_sycl_silu.sycl.cpp -o ${_obj}"
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/uma_sycl_silu.sycl.cpp
   COMMENT "icpx AOT PVC uma_sycl_silu"
   VERBATIM)
