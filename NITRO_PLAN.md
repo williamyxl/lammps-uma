@@ -1,4 +1,4 @@
-# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 11)
+# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 12)
 
 Scope: **only activities whose idea comes from UMA Nitro**
 (`fairchem/.../uma_nitro/_inference.py`). Nothing else is planned here.
@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 11, 2026-11-14): **steps 1–13 are closed** (through S2). **Step 14 (S3) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 12, 2026-11-14): **steps 1–14 are closed** (through S3). **Step 15 (S4) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,9 +72,9 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 10 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–13 are closed. Step 14 (S3) is next.
+- Steps 1–14 are closed. Step 15 (S4) is next.
 
-### R.6 Master sequence (revision 11) — the only numbered order in this plan
+### R.6 Master sequence (revision 12) — the only numbered order in this plan
 
 **Read this table first.** The **Step** column is the one and only order of work. Every other label (H1, Z1, S0, N1, N5.4, F2, E0) is just the *name* of what a step does. A name never says when something happens. Steps run strictly in number order, and a step opens only when every lower step is closed (or its wait is explicitly waived by the user, which is recorded in the status cell).
 
@@ -93,7 +93,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9088158, ZIF-8 job 9088195). Not in the stack: no replicated timing verdict yet. |
 | 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | closed. Job 9089197, node x4220c7s1b0n0. Forward and analytic gradient match. Finite-difference rel 3.174e-10. Bitwise across 10 repeats. No-grad recompute matches. |
 | 13 | **S2** | Export round trip of the custom op | yes | closed. Job 9089228, node x4406c3s3b0n0, tag `nitro/s2/r1`. Graph records `uma_sycl::silu_affine`. C++ load has no unknown op. Forward rel 0 and grad rel 0 at N=128 and N=1000. |
-| 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
+| 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | closed. Gate 9089314, node x4220c4s6b0n0. All four \|ΔPE\| ≤ 4.4e-11 eV. Op loaded, unused. ABBA 9089375, node x4617c7s0b0n0: S3 medians 842.9 and 843.9 ms vs BASE 842.0 and 842.7 ms (about 1 ms, inside the 6.27 ms MDE). |
 | 15 | **S4** | 12-tile test beside the all-reduce | yes | not started |
 | 16 | **N1-b** | Same graph builder as step 11, as custom SYCL kernels. Same name as before; the user placed it here on 2026-11-12, after S4 and before S5 | yes | not started |
 | 17 | **S5** | Cost measurement (report only) | yes | not started |
@@ -636,6 +636,8 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 
 **S2 result (closed, job 9089228, node x4406c3s3b0n0, tag `nitro/s2/r1`).** Sources are `pbs/nitro/s2/` on `uma-nitro`. The Python stand-in reads the schema from `uma_sycl_schema.h` and traces `SiluAffine` on XPU at N=128. The graph contains `uma_sycl::silu_affine`. A separate C++ process, linked with `icpx -fsycl` against the same object as S1, loads `traced.pt` (`S2_LOAD_OK`). Forward relative error is 0 and gradient relative error is 0 for x, w, and b, at the traced length 128 and at a second length 1000. The model is unchanged.
 | S3 (step 14) | Link into `uma_engine` and rebuild `lmp`; run the existing NaCl 14³ W=12 NVT+NPT gate with the op linked but **unused** | `debug` job, ABBA vs BASE | Step-0 PE = −74142.191907631001 eV (|ΔE| ≤ 1e-8), identical to BASE; no regression in step time beyond noise; no new static-init or load errors |
+
+**S3 result (closed, gate 9089314, node x4220c4s6b0n0, tag `nitro/s3/r1`).** `uma_sycl_silu.o` is compiled with `compile_sycl.sh` and linked into `uma_engine` the same way as `xccl_peer.o`. The stock model does not call the op. Each of the 12 ranks printed `UMA_SYCL_OPS_LINKED` and the run continued. NVT and NPT 10-step |ΔPE| are 1.5e-11, 2.9e-11, 4.4e-11, and 1.5e-11 eV. Same-node ABBA job 9089375 on x4617c7s0b0n0, 30-step NVT, order BASE S3 S3 BASE: medians 842.014, 842.871, 843.882, 842.737 ms. The S3 slots sit about 1 ms above BASE, inside the NaCl MDE of 6.27 ms. One node, so this is not a replicated timing verdict. The model is unchanged.
 | S4 (step 15) | 12-tile run: `mpiexec -n 12` test that calls the op repeatedly interleaved with an `uma_peer` all-reduce | 1 compute node | No hang; results identical on all ranks; op and collective ordering unchanged |
 | S5 (step 17) | Cost measurement: launch overhead per call, FP64 bandwidth vs `torch` elementwise on the same tensors at the real chunk shapes | 1 compute node | Report only; this is the baseline for the N5 micro stages |
 
