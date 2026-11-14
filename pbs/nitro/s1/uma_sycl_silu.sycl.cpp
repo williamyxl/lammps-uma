@@ -6,6 +6,8 @@
 #include <c10/xpu/XPUStream.h>
 #include <sycl/sycl.hpp>
 
+#include <iostream>
+
 namespace {
 
 void check_fp64_xpu(const at::Tensor& t, const char* name) {
@@ -15,6 +17,7 @@ void check_fp64_xpu(const at::Tensor& t, const char* name) {
 }
 
 at::Tensor touch_xpu(const at::Tensor& x) {
+  std::cerr << "S1_TOUCH_FN\n" << std::flush;
   check_fp64_xpu(x, "touch");
   auto xc = x.contiguous();
   auto y = torch::empty(xc.sizes(), xc.options());
