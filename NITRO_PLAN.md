@@ -90,7 +90,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 8 | **H6** | Refresh plan numbers: Amdahl ledger | no | closed. BASE step 825 ms; compute 659 ms (80%); N1 at most 118 ms |
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
 | 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
-| 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | in progress. Selftest passed. DIAG NaCl 4³ passed at W=1 (job 9087586) and W=2 (job 9087641). Next rung is W=4. Not a gate result. |
+| 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | in progress. DIAG NaCl 4³ passed at W=1 (9087586), W=2 (9087641), and W=4 (9087698). Next rung is W=6. Not a gate result. |
 | 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | not started |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
@@ -436,6 +436,8 @@ decides keep or drop by the H.0 verdict), and its own failure points.
 **W=1 DIAG (job 9087586, tag `nitro/n1/r2`, node x4613c0s2b0n0, not a gate result).** NaCl 4³, 512 atoms, FP64, one tile. Same binary and same W=1 artifact. The base arm logged `NITRO_FLAGS: (none)`. The n1 arm logged `NITRO_FLAGS: UMA_NITRO_N1=1`. Against the same-job base arm: NVT |ΔPE| 2.3e-13 eV at step 0 and 6.8e-13 eV at step 10; NPT |ΔPE| 0 at step 0 and 9.1e-13 eV at step 10 (bar 1e-8). Max |ΔF| 6.0e-15 eV/Å (bar 1e-9). NPT volume 11482 → 11492 Å³. No "virial refused". First submit 9087543 failed the harness check because a W=1 export writes `model_traced.pt` into the artifact root, not `w1/r0`; the export itself had succeeded. That check now accepts the W=1 layout. W=12 export is unchanged.
 
 **W=2 DIAG (job 9087641, tag `nitro/n1/r3`, node x4502c2s7b0n0, not a gate result).** Same cell and bars. Base arm `NITRO_FLAGS: (none)`, n1 arm `UMA_NITRO_N1=1`. NVT |ΔPE| 2.3e-13 eV at step 0 and 0 at step 10. NPT |ΔPE| 4.5e-13 eV at step 0 and 0 at step 10. Max |ΔF| 2.4e-14 eV/Å. NPT volume moved. No "virial refused".
+
+**W=4 DIAG (job 9087698, tag `nitro/n1/r4`, node x4211c0s3b0n0, not a gate result).** Same cell and bars. Base arm had no nitro flags. The n1 arm logged `UMA_NITRO_N1=1`. NVT |ΔPE| 2.3e-13 eV at step 0 and 0 at step 10. NPT |ΔPE| 4.5e-13 eV at step 0 and 0 at step 10. Max |ΔF| 1.9e-14 eV/Å. NPT volume moved. No "virial refused".
 
 
 ### N2 [step 18] — Target-sorted edge→node segmented reduction
