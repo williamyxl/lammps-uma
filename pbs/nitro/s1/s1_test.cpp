@@ -12,9 +12,11 @@ namespace {
 void sync() { torch::xpu::synchronize(0); }
 
 at::Tensor silu_affine(const at::Tensor& x, const at::Tensor& w, const at::Tensor& b) {
+  std::cerr << "S1_FIND\n" << std::flush;
   static auto op = c10::Dispatcher::singleton()
                        .findSchemaOrThrow("uma_sycl::silu_affine", "")
                        .typed<at::Tensor(const at::Tensor&, const at::Tensor&, const at::Tensor&)>();
+  std::cerr << "S1_CALL_OP\n" << std::flush;
   return op.call(x, w, b);
 }
 

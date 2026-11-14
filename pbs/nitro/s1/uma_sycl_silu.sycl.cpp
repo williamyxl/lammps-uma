@@ -29,25 +29,18 @@ at::Tensor silu_affine_xpu(const at::Tensor& x, const at::Tensor& w, const at::T
   auto* bp = bc.data_ptr<double>();
   auto* yp = y.data_ptr<double>();
   sycl::queue& q = c10::xpu::getCurrentXPUStream().queue();
-  constexpr size_t kWg = 256;
-  const size_t global = ((n + kWg - 1) / kWg) * kWg;
-  q.parallel_for<class SiluAffineFwd>(
-      sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(kWg)),
-      [=](sycl::nd_item<1> it) {
-        const size_t i = it.get_global_id(0);
-        if (i >= n) return;
+  // Same launch form as the step 9 toolchain kernel. nd_range was not required
+  // for this elementwise op and is easier to get wrong on a partial last group.
+  q.parallel_for<class SiluAffineFwd>(sycl::range<1>(n), [=](sycl::id<1> i) {
         const double z = xp[i] * wp[i] + bp[i];
-        double s;
         if (z >= 0.0) {
           const double e = sycl::exp(-z);
-          s = 1.0 / (1.0 + e);
-          yp[i] = z * s;
+          yp[i] = z / (1.0 + e);
         } else {
           const double e = sycl::exp(z);
-          s = e / (1.0 + e);
-          yp[i] = z * s;
+          yp[i] = z * e / (1.0 + e);
         }
-      });
+      }).wait();
   return y;
 }
 
@@ -75,13 +68,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> silu_affine_backward_xpu(
   auto* gwp = gw.data_ptr<double>();
   auto* gbp = gb.data_ptr<double>();
   sycl::queue& q = c10::xpu::getCurrentXPUStream().queue();
-  constexpr size_t kWg = 256;
-  const size_t global = ((n + kWg - 1) / kWg) * kWg;
-  q.parallel_for<class SiluAffineBwd>(
-      sycl::nd_range<1>(sycl::range<1>(global), sycl::range<1>(kWg)),
-      [=](sycl::nd_item<1> it) {
-        const size_t i = it.get_global_id(0);
-        if (i >= n) return;
+  q.parallel_for<class SiluAffineBwd>(sycl::range<1>(n), [=](sycl::id<1> i) {
         const double z = xp[i] * wp[i] + bp[i];
         double sig;
         if (z >= 0.0) {
@@ -97,7 +84,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> silu_affine_backward_xpu(
         gxp[i] = g * wp[i];
         gwp[i] = g * xp[i];
         gbp[i] = g;
-      });
+      }).wait();
   return {gx, gw, gb};
 }
 
