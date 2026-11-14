@@ -23,13 +23,9 @@ icpx --version | head -2 || true
 echo "--- ldd sycl ---"
 ldd "${BIN}" | grep -E 'sycl|ur_loader' || true
 # Bind one tile the same way the engine jobs do. A bare process segfaulted
-# inside torch::xpu::is_available (job 9088273).
-if command -v gpu_tile_compact.sh >/dev/null 2>&1; then
-  gpu_tile_compact.sh "${BIN}"
-else
-  echo "S1_NO_TILE_HELPER"
-  "${BIN}"
-fi
+# inside torch::xpu::is_available (job 9088273). The helper prints usage and
+# exits unless it is under mpiexec (job 9088298).
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh "${BIN}"
 rc=$?
 python - <<PY
 import json, pathlib
