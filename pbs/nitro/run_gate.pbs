@@ -103,6 +103,14 @@ fi
 export UMA_MP_NATOMS="${NAT}"
 nitro_runtime_env
 
+# qsub -v UMA_NITRO_N1=1 is visible here, but nitro_run_ens only forwards
+# NITRO_SLOT_ENV into the LAMMPS process.
+if [[ "${UMA_NITRO_N1:-}" == "1" ]]; then
+  NITRO_SLOT_ENV="UMA_NITRO_N1=1"
+  export NITRO_SLOT_ENV
+  echo "N1_ARM on"
+fi
+
 nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" "${NSTEPS}"
 nitro_write_in npt "fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0" "${NSTEPS}" "${NSTEPS}"
 
