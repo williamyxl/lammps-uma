@@ -132,6 +132,15 @@ torch::Tensor silu_affine_autograd(const torch::Tensor& x, const torch::Tensor& 
 
 }  // namespace
 
+// Host-only. The constructor proves this object was loaded. The anchor is a
+// real reference so the linker keeps the object when nothing calls the op.
+struct UmaSyclLinked {
+  UmaSyclLinked() { std::cerr << "UMA_SYCL_OPS_LINKED\n" << std::flush; }
+};
+static UmaSyclLinked uma_sycl_linked;
+
+extern "C" void uma_sycl_ops_linked_anchor() {}
+
 TORCH_LIBRARY(uma_sycl, m) {
   m.def("touch(Tensor x) -> Tensor");
   m.def(UMA_SYCL_SILU_AFFINE_SCHEMA);

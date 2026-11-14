@@ -154,6 +154,31 @@ if(UMA_ENGINE_USE_XPU)
       target_link_libraries(uma_engine PUBLIC ${ONECCL_ROOT}/lib/libur_loader.so)
     endif()
     message(STATUS "uma-engine: XCCL enabled (icpx object); icpx libs ${UMA_ICPX_LIBDIR}")
+
+    # Step 14 (S3). Same icpx object pattern as xccl_peer.o. The op is linked
+    # and its static registration runs; the stock model does not call it.
+    # compile_sycl.sh is the flag source that passed step 12.
+    set(_silu_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../pbs/nitro/s1")
+    set(_silu_src "${_silu_dir}/uma_sycl_silu.sycl.cpp")
+    set(_silu_obj "${CMAKE_CURRENT_BINARY_DIR}/uma_sycl_silu.o")
+    set(_silu_incs -I${_silu_dir})
+    foreach(_d ${TORCH_INCLUDE_DIRS})
+      list(APPEND _silu_incs -I${_d})
+    endforeach()
+    add_custom_command(
+      OUTPUT ${_silu_obj}
+      COMMAND ${_silu_dir}/compile_sycl.sh ${_silu_incs}
+              -c ${_silu_src} -o ${_silu_obj}
+      DEPENDS ${_silu_src}
+              ${_silu_dir}/uma_sycl_schema.h
+              ${_silu_dir}/compile_sycl.sh
+      COMMENT "Compiling uma_sycl_silu.sycl.cpp with icpx"
+      VERBATIM)
+    add_custom_target(uma_sycl_obj DEPENDS ${_silu_obj})
+    add_dependencies(uma_engine uma_sycl_obj)
+    target_link_libraries(uma_engine PUBLIC ${_silu_obj})
+    target_compile_definitions(uma_engine PRIVATE UMA_SYCL_OPS_LINKED)
+    message(STATUS "uma-engine: uma_sycl_silu.o linked (unused by the model)")
   endif()
 endif()
 if(UMA_ENGINE_USE_CUDA)
