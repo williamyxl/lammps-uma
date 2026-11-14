@@ -5,6 +5,7 @@
 #include <torch/torch.h>
 
 #include <cmath>
+#include <cstdio>
 #include <iostream>
 
 namespace {
@@ -126,7 +127,9 @@ int main() {
              " gb " + std::to_string(gb_rel));
 
   // Central finite difference on a few elements.
-  const double eps = 1e-6;
+  // Central difference. eps = 1e-6 leaves an absolute error near 1e-8 on
+  // O(1) values, which fails a 1e-9 bar even when the analytic gradient matches.
+  const double eps = 1e-5;
   const int64_t probes[] = {0, 1, 2, n / 4, n / 2};
   double fd_max = 0.0;
   auto probe = [&](torch::Tensor& var, const torch::Tensor& grad, const char* name) {
@@ -150,13 +153,16 @@ int main() {
       sync();
       const double num = (yp.index({i}) - ym.index({i})).item<double>() / (2.0 * eps);
       const double ana = grad.index({i}).item<double>();
-      fd_max = std::max(fd_max, std::abs(num - ana));
+      const double rel = std::abs(num - ana) / std::max(1.0, std::abs(ana));
+      fd_max = std::max(fd_max, rel);
     }
   };
   probe(xg, grads[0], "x");
   probe(wg, grads[1], "w");
   probe(bg, grads[2], "b");
-  expect(fd_max <= 1e-9, "finite difference max abs " + std::to_string(fd_max));
+  char fd_buf[64];
+  std::snprintf(fd_buf, sizeof(fd_buf), "%.3e", fd_max);
+  expect(fd_max <= 1e-9, std::string("finite difference max rel ") + fd_buf);
 
   // Checkpoint-style: no-grad forward, then a grad forward. Outputs must match.
   torch::Tensor y_ng;
