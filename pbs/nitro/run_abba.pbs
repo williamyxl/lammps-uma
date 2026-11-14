@@ -1,6 +1,6 @@
 #!/bin/bash -l
 #PBS -N nitro-abba
-#PBS -q debug
+#PBS -q debug-scaling
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
 #PBS -l select=1

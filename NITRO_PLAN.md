@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 10, 2026-11-12): **steps 1–10 are closed** (through Z1, the ZIF-8 test system). **Step 11 (N1) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 10, 2026-11-14): **steps 1–11 are closed** (through N1-a). **Step 12 (S1) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,7 +72,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 10 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–10 are closed. Step 11 (N1) is next.
+- Steps 1–11 are closed. Step 12 (S1) is next.
 
 ### R.6 Master sequence (revision 10) — the only numbered order in this plan
 
@@ -90,7 +90,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 8 | **H6** | Refresh plan numbers: Amdahl ledger | no | closed. BASE step 825 ms; compute 659 ms (80%); N1 at most 118 ms |
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
 | 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
-| 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | in progress. DIAG NaCl 4³ passed W=1 through W=12 (9087792). Next is the NaCl 14³ gate with `UMA_NITRO_N1=1`. |
+| 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9088158, ZIF-8 job 9088195). Not in the stack: no replicated timing verdict yet. |
 | 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | not started |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
@@ -441,7 +441,9 @@ decides keep or drop by the H.0 verdict), and its own failure points.
 
 **W=6 DIAG (job 9087772, tag `nitro/n1/r5`, node x4613c6s3b0n0, not a gate result).** Same cell and bars. Base arm had no nitro flags. The n1 arm logged `UMA_NITRO_N1=1`. NVT |ΔPE| 2.3e-13 eV at step 0 and 4.5e-13 eV at step 10. NPT |ΔPE| 2.3e-13 eV at both step 0 and step 10. Max |ΔF| 1.9e-14 eV/Å. NPT volume moved. No "virial refused".
 
-**W=12 DIAG (job 9087792, tag `nitro/n1/r6`, node x4303c2s6b0n0, not a gate result).** Same cell and bars. Base arm had no nitro flags. The n1 arm logged `UMA_NITRO_N1=1`. NVT |ΔPE| 2.3e-13 eV at step 0 and 0 at step 10. NPT |ΔPE| 0 at step 0 and 2.3e-13 eV at step 10. Max |ΔF| 2.0e-14 eV/Å. NPT volume moved. No "virial refused". The diagnostic ladder is complete. The NaCl 14³ and ZIF-8 gates are the remaining step 11 checks.
+**W=12 DIAG (job 9087792, tag `nitro/n1/r6`, node x4303c2s6b0n0, not a gate result).** Same cell and bars. Base arm had no nitro flags. The n1 arm logged `UMA_NITRO_N1=1`. NVT |ΔPE| 2.3e-13 eV at step 0 and 0 at step 10. NPT |ΔPE| 0 at step 0 and 2.3e-13 eV at step 10. Max |ΔF| 2.0e-14 eV/Å. NPT volume moved. No "virial refused". The diagnostic ladder is complete.
+
+**Gates with `UMA_NITRO_N1=1` (tag `nitro/n1/r7`, queue `debug-scaling`).** Both logs show `NITRO_FLAGS: UMA_NITRO_N1=1`. Compared with the recorded BASE references, bar 1e-8 eV. NaCl 14³, job 9088158, node x4112c7s1b0n0: |ΔPE| 5.8e-11, 1.5e-11, 1.5e-11, 1.5e-11 eV. ZIF-8 3×3×3, job 9088195, node x4216c6s3b0n0: |ΔPE| 8.7e-11, 2.9e-11, 5.2e-10, 2.7e-10 eV. NVT and NPT exit 0. N1-a is correct on both gate systems. It is not in the stack: the only timing numbers are the one-node builder selftest, which is not a replicated verdict.
 
 
 ### N2 [step 18] — Target-sorted edge→node segmented reduction
