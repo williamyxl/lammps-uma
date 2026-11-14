@@ -91,7 +91,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
 | 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
 | 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9088158, ZIF-8 job 9088195). Not in the stack: no replicated timing verdict yet. |
-| 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | not started |
+| 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | in progress. Torch's own XPU kernels run. The custom SYCL function is entered and then segfaults (job 9088382). Not closed. |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
 | 15 | **S4** | 12-tile test beside the all-reduce | yes | not started |
@@ -630,6 +630,8 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 |---|---|---|---|
 | S0 (step 9) | Toolchain check: build the PyTorch tutorial `mymuladd` in **FP64** with `SyclExtension` into a scratch dir (`TORCH_XPU_ARCH_LIST=pvc`) and run it | compile on login, run on 1 compute node | Compiles with the `fxpu` torch; result equals `a*b+c` in FP64 (rel. error ≤ 1e-15); no ABI or `libsycl` errors |
 | S1 (step 12) | Engine-style C++ test (no Python): standalone exe built like the engine links the new `.o`; call the op on XPU FP64 tensors, then `torch::autograd::grad` | 1 compute node | Forward equals the torch reference (≤ 1e-15 rel.); gradient equals the analytic formula and a central finite difference (≤ 1e-9); bitwise reproducible across 10 repeats |
+
+**S1 so far (not closed).** Sources are `pbs/nitro/s1/` on `uma-nitro`. The op is FP64 `y = silu(x*w+b)` with a C++ autograd registration. An AOT `spir64_gen` image segfaulted before `main` (job 9088250); the build is JIT, as in step 9. Under `mpiexec -n 1 gpu_tile_compact.sh`, `torch::xpu::is_available()` is true and `torch::ones` on XPU returns 1 (job 9088382, node x4302c5s6b0n0). The dispatcher reaches the custom function (`S1_TOUCH_FN`) and the process then dies with signal 11, before that copy kernel returns. `libsycl.so.9` is the `fxpu` copy. icpx is 2026.1.0.
 | S2 (step 13) | Export round trip: trace the small module with the Python stand-in, save the `.pt`, load it in a C++ process that links the op, run forward+backward | 1 compute node | Loads without "unknown builtin op"; outputs and gradients equal eager torch (≤ 1e-15 / 1e-9) |
 | S3 (step 14) | Link into `uma_engine` and rebuild `lmp`; run the existing NaCl 14³ W=12 NVT+NPT gate with the op linked but **unused** | `debug` job, ABBA vs BASE | Step-0 PE = −74142.191907631001 eV (|ΔE| ≤ 1e-8), identical to BASE; no regression in step time beyond noise; no new static-init or load errors |
 | S4 (step 15) | 12-tile run: `mpiexec -n 12` test that calls the op repeatedly interleaved with an `uma_peer` all-reduce | 1 compute node | No hang; results identical on all ranks; op and collective ordering unchanged |
