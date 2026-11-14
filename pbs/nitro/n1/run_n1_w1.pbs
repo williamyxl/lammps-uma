@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -N nitro-n1w1
+#PBS -N nitro-n1diag
 #PBS -q debug-scaling
 #PBS -A MatSciAI
 #PBS -l filesystems=flare
@@ -10,13 +10,15 @@
 #PBS -o ../out/
 #PBS -e ../out/
 # ---------------------------------------------------------------------------
-# Step 11 (N1-a) W=1 energy/force check on a DIAG cell.
+# Step 11 (N1-a) worker-ladder energy/force check on a DIAG cell.
 # DIAG: NaCl rocksalt 4x4x4 (512 atoms). Not a gate result.
-# Same binary and W=1 artifact. Arm "base" leaves UMA_NITRO_N1 unset.
-# Arm "n1" sets UMA_NITRO_N1=1. Bars are against the same-job base arm.
+# NITRO_W selects the rung (1, then 2, 4, 6, 12). Default is 1.
+# Arm "base" leaves UMA_NITRO_N1 unset. Arm "n1" sets UMA_NITRO_N1=1.
+# Bars are against the same-job base arm.
 #
 # Submit from pbs/nitro:
-#   qsub -v NITRO_TAG=nitro/n1/w1 n1/run_n1_w1.pbs
+#   qsub -v NITRO_TAG=nitro/n1/r2 n1/run_n1_w1.pbs
+#   qsub -v NITRO_TAG=nitro/n1/r3,NITRO_W=2 n1/run_n1_w1.pbs
 # ---------------------------------------------------------------------------
 set -uo pipefail
 HERE="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}}"
@@ -31,14 +33,18 @@ export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
 # shellcheck disable=SC1091
 source "${HERE}/env.inc"
 
-W=1
-PPN=1
+W="${NITRO_W:-1}"
+PPN="${W}"
 NSTEPS=10
 DIAG_N=4
 DIAG_NAT=512
 CHUNK=65536
+case "${W}" in
+  1|2|4|6|12) ;;
+  *) nitro_die "NITRO_W=${W} is not a ladder rung (1 2 4 6 12)" ;;
+esac
 
-OUTROOT="${REL}/pbs/out/nitro_n1w1_${PBS_JOBID:-manual}"
+OUTROOT="${REL}/pbs/out/nitro_n1diag_w${W}_${PBS_JOBID:-manual}"
 RUNDIR="${OUTROOT}/diag_n${DIAG_N}"
 mkdir -p "${RUNDIR}"
 nitro_install_cleanup_trap
@@ -65,7 +71,7 @@ export UMA_MP_NATOMS="${NAT}" EDGE_AC_CHUNK="${CHUNK}"
 
 ART="${RUNDIR}/artifact"
 nitro_own_artifact "${ART}"
-nitro_export_artifact 1 || nitro_die "W=1 export failed"
+nitro_export_artifact "${W}" || nitro_die "W=${W} export failed"
 
 fail=0
 run_arm() {

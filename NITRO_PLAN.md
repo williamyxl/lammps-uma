@@ -90,7 +90,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 8 | **H6** | Refresh plan numbers: Amdahl ledger | no | closed. BASE step 825 ms; compute 659 ms (80%); N1 at most 118 ms |
 | 9 | **S0** | SYCL toolchain check: FP64 `mymuladd` (§4) | yes | closed. Job 9083937, tag `nitro/s0/r2`; rel. error 1.537e-16 |
 | 10 | **Z1** | ZIF-8 3×3×3 as a second test system: BASE reference PEs, verify gate, noise floor, ledger | yes | closed. Record job 9084279, verify job 9084359 (all four \|ΔPE\| ≤ 3.6e-10 eV), 3 timing jobs; MDE 3.11 ms (0.35% of 876 ms); tags `nitro/z1/r1`, `nitro/z1/r2` |
-| 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | in progress. Selftest job 9085554 passed. W=1 energy check has not run. Flag `UMA_NITRO_N1=1` (default off). |
+| 11 | **N1-a** | Device-side graph build with torch ops: selftest, W=1 energy check, then the W ladder and both-system gates | yes | in progress. Selftest job 9085554 passed. W=1 DIAG passed (job 9087586, NaCl 4³, not a gate result). Next rung is W=2. Flag `UMA_NITRO_N1=1` (default off). |
 | 12 | **S1** | Engine-style C++ test of a custom op (§4.3) | yes | not started |
 | 13 | **S2** | Export round trip of the custom op | yes | not started |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | not started |
@@ -432,6 +432,8 @@ decides keep or drop by the H.0 verdict), and its own failure points.
 - **Expected gain:** at most 118 ms (`ms_vesin`), 14% of the 825 ms step, 1.17×. The host build is measured (H6). The device build is adopted only if it is correct and a win.
 
 **N1-a selftest (job 9085554, node x4300c3s6b0n0, not a verdict).** `pbs/nitro/n1/n1_selftest` against `build_neighbor_graph`. Passed on CPU tensors and on XPU: rocksalt 4³, atoms shifted outside the box, random orthorhombic N=128, tiny cell (multi-image), dense truncation at `max_neighbors=5`, a pair at exactly the cutoff, triclinic N=20, and a deliberate cell-cap overflow (code 1). Wrap of out-of-box positions matches the scalar wrap to 5.3e-15 Å. NaCl-sized 14³ (21,952 atoms, 702,464 edges) matches exactly. One-node timing, synchronized chrono, three reps: host build + H2D copy 112 / 91 / 74 ms; device build 136 / 68 / 60 ms. The first rep is cold. This is one job, so it is not a win or a loss. The candidate set is chosen with torch ops on the tensor device; order and `max_neighbors` truncation use the reference comparator, because a torch distance and the scalar distance differ by an ulp inside an equal shell and that reordered edges (job 9085272).
+
+**W=1 DIAG (job 9087586, tag `nitro/n1/r2`, node x4613c0s2b0n0, not a gate result).** NaCl 4³, 512 atoms, FP64, one tile. Same binary and same W=1 artifact. The base arm logged `NITRO_FLAGS: (none)`. The n1 arm logged `NITRO_FLAGS: UMA_NITRO_N1=1`. Against the same-job base arm: NVT |ΔPE| 2.3e-13 eV at step 0 and 6.8e-13 eV at step 10; NPT |ΔPE| 0 at step 0 and 9.1e-13 eV at step 10 (bar 1e-8). Max |ΔF| 6.0e-15 eV/Å (bar 1e-9). NPT volume 11482 → 11492 Å³. No "virial refused". First submit 9087543 failed the harness check because a W=1 export writes `model_traced.pt` into the artifact root, not `w1/r0`; the export itself had succeeded. That check now accepts the W=1 layout. W=12 export is unchanged.
 
 
 ### N2 [step 18] — Target-sorted edge→node segmented reduction
