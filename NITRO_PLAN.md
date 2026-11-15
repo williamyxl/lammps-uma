@@ -1,4 +1,4 @@
-# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 13)
+# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 14)
 
 Scope: **only activities whose idea comes from UMA Nitro**
 (`fairchem/.../uma_nitro/_inference.py`). Nothing else is planned here.
@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 13, 2026-11-14): **steps 1–15 are closed** (through S4). **Step 16 (N1-b) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 14, 2026-11-14): **steps 1–16 are closed** (through N1-b). **Step 17 (S5) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,9 +72,9 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 30 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–15 are closed. Step 16 (N1-b) is next.
+- Steps 1–16 are closed. Step 17 (S5) is next.
 
-### R.6 Master sequence (revision 13) — the only numbered order in this plan
+### R.6 Master sequence (revision 14) — the only numbered order in this plan
 
 **Read this table first.** The **Step** column is the one and only order of work. Every other label (H1, Z1, S0, N1, N5.4, F2, E0) is just the *name* of what a step does. A name never says when something happens. Steps run strictly in number order, and a step opens only when every lower step is closed (or its wait is explicitly waived by the user, which is recorded in the status cell).
 
@@ -95,7 +95,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 13 | **S2** | Export round trip of the custom op | yes | closed. Job 9089228, node x4406c3s3b0n0, tag `nitro/s2/r1`. Graph records `uma_sycl::silu_affine`. C++ load has no unknown op. Forward rel 0 and grad rel 0 at N=128 and N=1000. |
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | closed. Gate 9089314, node x4220c4s6b0n0. All four \|ΔPE\| ≤ 4.4e-11 eV. Op loaded, unused. ABBA 9089375, node x4617c7s0b0n0: S3 medians 842.9 and 843.9 ms vs BASE 842.0 and 842.7 ms (about 1 ms, inside the 6.27 ms MDE). |
 | 15 | **S4** | 12-tile test beside the all-reduce | yes | closed. Job 9089420, node x4300c2s2b0n0, tag `nitro/s4/r1`. 12 ranks, no hang. Op rel 5.68e-16. All-reduce matches the MPI sum of the op output, rel 4.01e-16. A second op call matches the first. |
-| 16 | **N1-b** | Same graph builder as step 11, as custom SYCL kernels. Same name as before; the user placed it here on 2026-11-12, after S4 and before S5 | yes | not started |
+| 16 | **N1-b** | Same graph builder as step 11, as custom SYCL kernels. Same name as before; the user placed it here on 2026-11-12, after S4 and before S5 | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9090358, ZIF-8 job 9090428). Not in the stack: the builder selftest is one job. |
 | 17 | **S5** | Cost measurement (report only) | yes | not started |
 | 18 | **N2** | Target-sorted edge→node reduction (N2-a torch ops, then N2-b SYCL) | yes | not started |
 | 19 | **N5.0** | N5 entry check | no | not started |
@@ -444,6 +444,8 @@ decides keep or drop by the H.0 verdict), and its own failure points.
 **W=12 DIAG (job 9087792, tag `nitro/n1/r6`, node x4303c2s6b0n0, not a gate result).** Same cell and bars. Base arm had no nitro flags. The n1 arm logged `UMA_NITRO_N1=1`. NVT |ΔPE| 2.3e-13 eV at step 0 and 0 at step 10. NPT |ΔPE| 0 at step 0 and 2.3e-13 eV at step 10. Max |ΔF| 2.0e-14 eV/Å. NPT volume moved. No "virial refused". The diagnostic ladder is complete.
 
 **Gates with `UMA_NITRO_N1=1` (tag `nitro/n1/r7`, queue `debug-scaling`).** Both logs show `NITRO_FLAGS: UMA_NITRO_N1=1`. Compared with the recorded BASE references, bar 1e-8 eV. NaCl 14³, job 9088158, node x4112c7s1b0n0: |ΔPE| 5.8e-11, 1.5e-11, 1.5e-11, 1.5e-11 eV. ZIF-8 3×3×3, job 9088195, node x4216c6s3b0n0: |ΔPE| 8.7e-11, 2.9e-11, 5.2e-10, 2.7e-10 eV. NVT and NPT exit 0. N1-a is correct on both gate systems. It is not in the stack: the only timing numbers are the one-node builder selftest, which is not a replicated verdict.
+
+**N1-b (step 16, closed, tag `nitro/n1b/r5`).** The candidate pairs are FP64 SYCL kernels in `libuma_n1b.so`, linked with `icpx -fsycl`. Order and `max_neighbors` truncation stay on the reference comparator. Flag `UMA_NITRO_N1B=1`. Selftest job 9089511, node x4220c3s5b0n0: every case matches the host builder, including NaCl-sized 14³ (702,464 edges) and wrap error 0. Warm device builds were about 67 ms against a host build plus copy of 75–90 ms. One job, not a timing verdict. DIAG ladder is NaCl 4³, same-job host builder, bars 1e-8 eV and 1e-9 eV/Å. W=1 job 9089555, node x4502c7s6b0n0: |ΔPE| ≤ 2.3e-13 eV, max|ΔF| ≤ 4.4e-15 eV/Å. The first W=2 job (9089601) segfaulted in the first kernel after oneCCL had started; W=1 never starts oneCCL. The kernels then moved into `libuma_n1b.so`. W=2 job 9089691, node x4220c3s1b0n0: |ΔPE| ≤ 4.5e-13, max|ΔF| ≤ 5.5e-15. W=4 job 9089735, same node: |ΔPE| ≤ 4.5e-13, max|ΔF| ≤ 1.5e-14. W=6 job 9089748, node x4009c0s6b0n0: |ΔPE| ≤ 4.5e-13, max|ΔF| ≤ 4.9e-15. W=12 job 9090284, node x4008c7s2b0n0: |ΔPE| ≤ 2.3e-13, max|ΔF| ≤ 4.8e-15. NPT volume moved on every rung. No "virial refused". Gates, bar 1e-8 eV, `N1B_ARM on`. NaCl 14³ job 9090358, node x4220c1s3b0n0: |ΔPE| 1.5e-11, 4.4e-11, 7.3e-11, 2.9e-11 eV. ZIF-8 3×3×3 job 9090428, node x4110c5s5b0n0: |ΔPE| 8.7e-11, 3.0e-10, 4.9e-10, 2.8e-10 eV. NVT and NPT exit 0. N1-b is correct. It is not in the stack. The model is unchanged.
 
 
 ### N2 [step 18] — Target-sorted edge→node segmented reduction
