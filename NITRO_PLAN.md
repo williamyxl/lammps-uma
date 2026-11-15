@@ -71,7 +71,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - No torch/XPU compute on login nodes. Compiling is fine.
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
-- Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 10 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
+- Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 30 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
 - Steps 1–15 are closed. Step 16 (N1-b) is next.
 
 ### R.6 Master sequence (revision 13) — the only numbered order in this plan
