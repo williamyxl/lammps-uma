@@ -1,4 +1,4 @@
-# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 14)
+# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 15)
 
 Scope: **only activities whose idea comes from UMA Nitro**
 (`fairchem/.../uma_nitro/_inference.py`). Nothing else is planned here.
@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 14, 2026-11-14): **steps 1–16 are closed** (through N1-b). **Step 17 (S5) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 15, 2026-11-15): **steps 1–17 are closed** (through S5). **Step 18 (N2) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,9 +72,9 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 30 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–16 are closed. Step 17 (S5) is next.
+- Steps 1–17 are closed. Step 18 (N2) is next.
 
-### R.6 Master sequence (revision 14) — the only numbered order in this plan
+### R.6 Master sequence (revision 15) — the only numbered order in this plan
 
 **Read this table first.** The **Step** column is the one and only order of work. Every other label (H1, Z1, S0, N1, N5.4, F2, E0) is just the *name* of what a step does. A name never says when something happens. Steps run strictly in number order, and a step opens only when every lower step is closed (or its wait is explicitly waived by the user, which is recorded in the status cell).
 
@@ -96,7 +96,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 14 | **S3** | Link the op into `uma_engine`, run the gate with it unused | yes | closed. Gate 9089314, node x4220c4s6b0n0. All four \|ΔPE\| ≤ 4.4e-11 eV. Op loaded, unused. ABBA 9089375, node x4617c7s0b0n0: S3 medians 842.9 and 843.9 ms vs BASE 842.0 and 842.7 ms (about 1 ms, inside the 6.27 ms MDE). |
 | 15 | **S4** | 12-tile test beside the all-reduce | yes | closed. Job 9089420, node x4300c2s2b0n0, tag `nitro/s4/r1`. 12 ranks, no hang. Op rel 5.68e-16. All-reduce matches the MPI sum of the op output, rel 4.01e-16. A second op call matches the first. |
 | 16 | **N1-b** | Same graph builder as step 11, as custom SYCL kernels. Same name as before; the user placed it here on 2026-11-12, after S4 and before S5 | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9090358, ZIF-8 job 9090428). Not in the stack: the builder selftest is one job. |
-| 17 | **S5** | Cost measurement (report only) | yes | not started |
+| 17 | **S5** | Cost measurement (report only) | yes | closed. Job 9091979, node x4112c1s1b0n0, tag `nitro/s5/r1`. One tile. Launch (N=1) 0.025 ms. At 65536×128, the op is 0.271 ms (991 GB/s) and torch elementwise is 0.473 ms (567 GB/s). Report only. |
 | 18 | **N2** | Target-sorted edge→node reduction (N2-a torch ops, then N2-b SYCL) | yes | not started |
 | 19 | **N5.0** | N5 entry check | no | not started |
 | 20 | **N5.1** | Op-level profile of the 659 ms compute row | yes | not started |
@@ -644,6 +644,17 @@ Each stage must pass before the next. Compile/syntax work can run on the login n
 
 **S4 result (closed, job 9089420, node x4300c2s2b0n0, tag `nitro/s4/r1`).** Sources are `pbs/nitro/s4/` on `uma-nitro`. Twelve ranks, `mpiexec -n 12 --ppn 12 gpu_tile_compact.sh`. Each of 8 rounds calls `silu_affine`, then `XcclPeer::all_reduce_sum` of that output, then the op again on the same inputs, then an all-reduce of the rank id. The op matches the host formula, max relative error 5.68e-16. The device all-reduce matches an MPI sum of the completed op output, max relative error 4.01e-16, on every rank. The second op call matches the first. The rank-id sum is 78. `S4_FAILS 0`, exit 0. oneCCL printed affinity-mask warnings under `ZE_AFFINITY_MASK` and still returned the MPI sum. The model is unchanged.
 | S5 (step 17) | Cost measurement: launch overhead per call, FP64 bandwidth vs `torch` elementwise on the same tensors at the real chunk shapes | 1 compute node | Report only; this is the baseline for the N5 micro stages |
+
+**S5 result (closed, job 9091979, node x4112c1s1b0n0, tag `nitro/s5/r1`).** Sources are `pbs/nitro/s5/` on `uma-nitro`. One tile. The op is FP64 `silu_affine`, which waits before it returns, so each time includes that wait. Three warmup calls are discarded. The byte count is 4 tensors (x, w, b read, y written). Torch is `silu(x*w+b)`, several elementwise kernels, scored with the same byte count. Lengths are the stock chunk: 65536 edges, times `edge_channels` 128, and times the 9×9 Wigner block.
+
+| Shape | N | SYCL median | Torch median | SYCL | Torch |
+|---|---:|---:|---:|---:|---:|
+| launch | 1 | 0.0251 ms | 0.0308 ms | — | — |
+| edges | 65536 | 0.0271 ms | 0.0307 ms | 77 GB/s | 68 GB/s |
+| edges × 128 | 8388608 | 0.271 ms | 0.473 ms | 991 GB/s | 567 GB/s |
+| edges × 9×9 | 5308416 | 0.131 ms | 0.228 ms | 1297 GB/s | 746 GB/s |
+
+Relative error versus torch is about 2e-16. The 65536-edge row is still launch-bound (0.027 ms versus 0.025 ms at N=1). The model is unchanged.
 
 **S0 result (2026-11-12).** Job 9083937 on `debug-scaling`, node x4009c2s7b0n0, tag `nitro/s0/r2`. Torch 2.13.0+xpu, icpx 2026.1.0. FP64 `y = a*b+c` on 2^20 elements: abs 1.776e-15, rel 1.537e-16, `S0_PASS`, exit 0. The `.so` loaded `libsycl.so.9` from the `hen-xpu` env (no load error). Code is on `nitro/n5-proto`, not on `uma-nitro`.
 
