@@ -1,0 +1,26 @@
+#!/bin/bash -l
+#PBS -N nitro-n2
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 18 (N2). The binary is compiled on the login node.
+# Submit from pbs/nitro/n2.
+set -uo pipefail
+HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REL="$(cd "${HERE}/../../.." && pwd)"
+# shellcheck disable=SC1091
+source "${REL}/pbs/nitro/env.inc"
+export PATH="${MPICH}/bin:${PATH}"
+BIN="${REL}/pbs/out/n2_build/n2_bench"
+[[ -x "${BIN}" ]] || { echo "N2_FAIL missing ${BIN}"; exit 1; }
+echo "N2_JOB host=$(hostname) job=${PBS_JOBID:-none}"
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh "${BIN}"
+rc=$?
+echo "N2_JOB_DONE rc=${rc}"
+exit "${rc}"
