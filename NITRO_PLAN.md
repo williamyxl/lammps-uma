@@ -1,4 +1,4 @@
-# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 15)
+# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 16)
 
 Scope: **only activities whose idea comes from UMA Nitro**
 (`fairchem/.../uma_nitro/_inference.py`). Nothing else is planned here.
@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 15, 2026-11-15): **steps 1–17 are closed** (through S5). **Step 18 (N2) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 16, 2026-11-15): **steps 1–18 are closed** (through N2). **Step 19 (N5.0) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,9 +72,9 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 30 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–17 are closed. Step 18 (N2) is next.
+- Steps 1–18 are closed. Step 19 (N5.0) is next.
 
-### R.6 Master sequence (revision 15) — the only numbered order in this plan
+### R.6 Master sequence (revision 16) — the only numbered order in this plan
 
 **Read this table first.** The **Step** column is the one and only order of work. Every other label (H1, Z1, S0, N1, N5.4, F2, E0) is just the *name* of what a step does. A name never says when something happens. Steps run strictly in number order, and a step opens only when every lower step is closed (or its wait is explicitly waived by the user, which is recorded in the status cell).
 
@@ -97,7 +97,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 15 | **S4** | 12-tile test beside the all-reduce | yes | closed. Job 9089420, node x4300c2s2b0n0, tag `nitro/s4/r1`. 12 ranks, no hang. Op rel 5.68e-16. All-reduce matches the MPI sum of the op output, rel 4.01e-16. A second op call matches the first. |
 | 16 | **N1-b** | Same graph builder as step 11, as custom SYCL kernels. Same name as before; the user placed it here on 2026-11-12, after S4 and before S5 | yes | closed. Correct on the DIAG ladder and on both gates (NaCl job 9090358, ZIF-8 job 9090428). Not in the stack: the builder selftest is one job. |
 | 17 | **S5** | Cost measurement (report only) | yes | closed. Job 9091979, node x4112c1s1b0n0, tag `nitro/s5/r1`. One tile. Launch (N=1) 0.025 ms. At 65536×128, the op is 0.271 ms (991 GB/s) and torch elementwise is 0.473 ms (567 GB/s). Report only. |
-| 18 | **N2** | Target-sorted edge→node reduction (N2-a torch ops, then N2-b SYCL) | yes | not started |
+| 18 | **N2** | Target-sorted edge→node reduction (N2-a torch ops, then N2-b SYCL) | yes | closed. Job 9092436, node x4220c4s4b0n0. Correct. N2-b is faster than `index_add_` on this one node, forward and forward+backward. Not adopted: one node is not a replicated verdict, and the `index_add_` share of the step is still unmeasured. |
 | 19 | **N5.0** | N5 entry check | no | not started |
 | 20 | **N5.1** | Op-level profile of the 659 ms compute row | yes | not started |
 | 21 | **N5.2** | Fixtures and reference harness | yes | not started |
@@ -456,6 +456,16 @@ decides keep or drop by the H.0 verdict), and its own failure points.
   - N2-b: SYCL kernel, one work-group per segment, with custom backward.
 - **Control:** microbenchmark vs the current `index_add_` on the real chunk shapes, forward and forward+backward. Record the ratio; N2-b follows N2-a whenever the SYCL gate (S0–S4) has passed. Either is adopted only if correct and a win.
 - **Expected gain:** only the `index_add_` share of the 659 ms compute row. Unmeasured.
+
+**N2 result (closed, job 9092436, node x4220c4s4b0n0, tag `nitro/n2/r1`).** Sources are `pbs/nitro/n2/`. Not wired into the model. One tile, padded chunk of 65,536 edges, equal segment lengths. Features are the message scatter `9×256` and the edge-degree scatter `9×128`. NaCl uses 1,830 nodes per rank; ZIF-8 uses 621. Median milliseconds, 8 reps after 2 warmup calls. `abs_seg_vs_sycl` is 0. `index_add_` differs from the SYCL sum by at most 5.7e-14.
+
+| Shape | index fwd | index both | N2-a fwd | N2-a both | N2-b fwd | N2-b both |
+|---|---:|---:|---:|---:|---:|---:|
+| NaCl message | 2.440 | 3.858 | 1.527 | 3.737 | 1.719 | 2.962 |
+| NaCl degree | 1.190 | 1.901 | 0.893 | 1.959 | 0.964 | 1.567 |
+| ZIF-8 message | 2.407 | 3.778 | 1.585 | 3.688 | 1.658 | 2.840 |
+
+N2-a is faster in the forward and flat or slower once the backward is included. N2-b is faster in both columns on this node (forward+backward ratios 1.30, 1.21, and 1.33). One node, so neither is adopted. The model is unchanged.
 
 ### N3 [step 29] — Measured edge capacity with margin
 - **Nitro idea:** `plan_capacities` / `_measured_caps` with `EDGE_MARGIN` (1.30) instead of a worst-case cap.
