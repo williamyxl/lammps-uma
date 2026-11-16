@@ -156,10 +156,13 @@ def main():
     vec, dist = edge_geometry(pos, cell, ei, co)
     atomic_numbers = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=dev)
     batch = torch.zeros(len(atoms), dtype=torch.long, device=dev)
+    dataset = getattr(data, "dataset", None)
+    if not isinstance(dataset, list) or len(dataset) == 0:
+        dataset = ["omat"]
     csd = backbone.csd_embedding(
         charge=data.charge.to(dev),
         spin=data.spin.to(dev),
-        dataset=data.dataset.to(dev) if torch.is_tensor(getattr(data, "dataset", None)) else None,
+        dataset=dataset,
     )
     backbone.set_MOLE_coefficients(atomic_numbers, batch, csd)
     backbone.set_MOLE_sizes(int(csd.shape[0]), batch, ei)
