@@ -7,6 +7,7 @@ other field must match. That is the manifest-hash check for step 22 (N5.3).
 import hashlib
 import json
 import sys
+import zipfile
 from pathlib import Path
 
 
@@ -14,12 +15,17 @@ def load(path):
     return json.loads(Path(path).read_text())
 
 
-def sha_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1 << 20), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def sha_bytes(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def zip_payloads(path):
+    """Member name -> sha256 of the uncompressed bytes. Zip timestamps are ignored."""
+    out = {}
+    with zipfile.ZipFile(path) as zf:
+        for info in zf.infolist():
+            out[info.filename] = sha_bytes(zf.read(info.filename))
+    return out
 
 
 def main():
@@ -60,10 +66,14 @@ def main():
             print(f"N53_GRAPH_MISSING {name}", flush=True)
             ok = False
             continue
-        hn, hr = sha_file(pn), sha_file(pr)
-        same = int(hn == hr)
-        print(f"N53_GRAPH {name} equal={same} new={hn} ref={hr}", flush=True)
-        if not same:
+        payloads_n, payloads_r = zip_payloads(pn), zip_payloads(pr)
+        names = sorted(set(payloads_n) | set(payloads_r))
+        differ = [n for n in names if payloads_n.get(n) != payloads_r.get(n)]
+        print(
+            f"N53_GRAPH {name} equal={int(not differ)} members={len(names)} differ={differ}",
+            flush=True,
+        )
+        if differ:
             ok = False
     if ok:
         print("N53_MANIFEST_EQUAL", flush=True)
