@@ -185,18 +185,24 @@ def check_system(name, pack):
     y1 = stock(pack)
     y2 = stock(pack)
     yf = fused_stock(pack)
-    bitwise = torch.equal(y1, y2) and torch.equal(y1, yf)
+    # index_add_ is atomic, so stock versus stock is not bitwise. The no-op
+    # arm is accepted when it stays inside that repeat difference.
+    y_self = (y1 - y2).abs().max().item()
+    y_fused = (y1 - yf).abs().max().item()
     g1, gx1, gv1 = forward_grad(pack)
     g2, gx2, gv2 = forward_grad(pack)
     gf, gxf, gvf = forward_grad(pack)
-    grad_abs = max(
+    g_self = max(
         (g1 - g2).abs().max().item(),
         (gx1 - gx2).abs().max().item(),
         (gv1 - gv2).abs().max().item(),
+    )
+    g_fused = max(
         (g1 - gf).abs().max().item(),
         (gx1 - gxf).abs().max().item(),
         (gv1 - gvf).abs().max().item(),
     )
+    match = y_fused <= y_self and g_fused <= g_self
     med_s, mad_s = time_ms(lambda: stock(pack))
     med_f, mad_f = time_ms(lambda: fused_stock(pack))
     ratio = med_f / med_s
@@ -205,8 +211,9 @@ def check_system(name, pack):
     gbps = (traffic_bytes(pack, y1) / 1e9) / (med_s / 1e3)
     print(
         f"N52_ROW {name} edges={pack['edge_index'].shape[1]} real={pack['n_real']} "
-        f"pad={pack['n_pad']} n_local={pack['n_local']} bitwise={int(bitwise)} "
-        f"grad_abs={grad_abs:.3e} stock_ms={med_s:.4f} mad={mad_s:.4f} "
+        f"pad={pack['n_pad']} n_local={pack['n_local']} y_self={y_self:.3e} "
+        f"y_fused={y_fused:.3e} g_self={g_self:.3e} g_fused={g_fused:.3e} "
+        f"stock_ms={med_s:.4f} mad={mad_s:.4f} "
         f"fused_ms={med_f:.4f} mad={mad_f:.4f} ratio={ratio:.6f} band={band:.6f} "
         f"GBs={gbps:.2f}",
         flush=True,
@@ -228,7 +235,7 @@ def check_system(name, pack):
         FIX / f"{name}.pt",
     )
     print(f"N52_SAVED {FIX / (name + '.pt')}", flush=True)
-    return bitwise and grad_abs == 0.0 and ratio_ok
+    return match and ratio_ok
 
 
 def main():
