@@ -1,0 +1,27 @@
+#!/bin/bash -l
+#PBS -N nitro-n51
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 20 (N5.1). Standalone profile, not LAMMPS. Submit from pbs/nitro/n5.
+set -uo pipefail
+HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REL="$(cd "${HERE}/../../.." && pwd)"
+# shellcheck disable=SC1091
+source "${REL}/pbs/nitro/env.inc"
+export PATH="${MPICH}/bin:${PATH}"
+export PYTHONPATH="${REL}/src/ML-UMA/uma-engine/python${PYTHONPATH:+:${PYTHONPATH}}"
+export UMA_EXPORT_CELL_LIST=1
+export N5_PROFILE="${REL}/pbs/out/nitro_n5/N5_PROFILE.md"
+mkdir -p "${REL}/pbs/out/nitro_n5"
+echo "N51_JOB host=$(hostname) job=${PBS_JOBID:-none}"
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh python "${HERE}/profile_n51.py"
+rc=$?
+echo "N51_JOB_DONE rc=${rc}"
+exit "${rc}"
