@@ -1,4 +1,4 @@
-# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 17)
+# Nitro-inspired activities — LibTorch UMA LAMMPS (authoritative plan, revision 18)
 
 Scope: **only activities whose idea comes from UMA Nitro**
 (`fairchem/.../uma_nitro/_inference.py`). Nothing else is planned here.
@@ -6,7 +6,7 @@ This file is **self-contained**: the shared test protocol (correctness bars, tim
 threshold, results template) is in section P below. The earlier full plan
 (`uma_lammps_perf_test_plan.md` in the workdir root) is reference only.
 
-Status (revision 17, 2026-11-15): **steps 1–19 are closed** (through N5.0). **Step 20 (N5.1) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
+Status (revision 18, 2026-11-15): **steps 1–20 are closed** (through N5.1). **Step 21 (N5.2) is next.** The one numbered order is the master table in R.6; all other labels are names, not order. The dedicated N5 step plan is §5. **There is no speedup target**: the objective is to try every option and report the best correct configuration (see H.0, "Objective and decision policy"). `nitro-base` is `efae85ff72` (job 9077571). The BASE step is 825 ms. The ledger is in H6.
 
 Fixed conditions: FP64 only; stock UMA model unchanged; gate systems = NaCl 14³ (21,952 atoms) and ZIF-8 3×3×3 (7,452 atoms; Z1), W=12,
 NVT + NPT 10 steps, identical protocol for both; one branch per activity, immutable tag before each submit.
@@ -72,9 +72,9 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 - Syntax-check subagent (`grok-4.7-high`, type `shell`) after every code edit and before every `qsub`.
 - Disk: each W=12 N=14 artifact is about 27 GB. **Artifacts exported by a job are deleted at job exit unless `KEEP_ARTIFACT=1`** (H2.6). On 2026-11-12, `lfs quota` reports user xiaoliyan using 7.9T on `/lus/flare/projects/MatSciAI`. The quota fields came back unlimited, so the older 27.57T-of-40T project figure was not remeasured.
 - Queues for H3 onward: submit on `debug-scaling`. If the queue refuses the job, poll every 30 minutes and submit there again. Do not use any other queue. While a job is in the queue or running, poll its status every 10 minutes.
-- Steps 1–19 are closed. Step 20 (N5.1) is next.
+- Steps 1–20 are closed. Step 21 (N5.2) is next.
 
-### R.6 Master sequence (revision 17) — the only numbered order in this plan
+### R.6 Master sequence (revision 18) — the only numbered order in this plan
 
 **Read this table first.** The **Step** column is the one and only order of work. Every other label (H1, Z1, S0, N1, N5.4, F2, E0) is just the *name* of what a step does. A name never says when something happens. Steps run strictly in number order, and a step opens only when every lower step is closed (or its wait is explicitly waived by the user, which is recorded in the status cell).
 
@@ -99,7 +99,7 @@ The rest of the protocol (flag-gated arms with BASE as default, per-arm build di
 | 17 | **S5** | Cost measurement (report only) | yes | closed. Job 9091979, node x4112c1s1b0n0, tag `nitro/s5/r1`. One tile. Launch (N=1) 0.025 ms. At 65536×128, the op is 0.271 ms (991 GB/s) and torch elementwise is 0.473 ms (567 GB/s). Report only. |
 | 18 | **N2** | Target-sorted edge→node reduction (N2-a torch ops, then N2-b SYCL) | yes | closed. Job 9092436, node x4220c4s4b0n0. Correct. N2-b is faster than `index_add_` on this one node, forward and forward+backward. Not adopted: one node is not a replicated verdict, and the `index_add_` share of the step is still unmeasured. |
 | 19 | **N5.0** | N5 entry check | no | closed. Checklist: S0–S4 closed (steps 9, 12–15), S5 reported (step 17), N1-a and N1-b recorded (steps 11 and 16, correct, not stacked), N2 recorded (step 18, correct, not adopted), H1–H6 closed (steps 3–8). |
-| 20 | **N5.1** | Op-level profile of the 659 ms compute row | yes | not started |
+| 20 | **N5.1** | Op-level profile of the 659 ms compute row | yes | closed. Job 9093833, node x4010c1s1b0n0, tag `nitro/n5/r3`. Eager four-layer checkpoint total 935 ms versus the 659 ms traced compute row. Order: conv2, conv1, gather, radial, gate, scatter, wigner. GEMM-side floor 636 ms. |
 | 21 | **N5.2** | Fixtures and reference harness | yes | not started |
 | 22 | **N5.3** | Shared infrastructure for fused ops (exporter flags, op header, load check) | build + 1 node | not started |
 | 23 | **N5.4** (F2) | Fused gate | yes | not started |
@@ -732,7 +732,7 @@ Facts that shape the plan:
 | Stage | Work | Compute | Exit criteria |
 |---|---|---|---|
 | **N5.0** (step 19) Entry gate | Checklist only: S0–S4 closed, S5 reported, N1 and N2 decisions recorded, H1–H6 closed. | no | closed 2026-11-15. S0 step 9, S1 step 12, S2 step 13, S3 step 14, S4 step 15, S5 step 17, N1-a step 11, N1-b step 16, N2 step 18, H1–H6 steps 3–8. |
-| **N5.1** (step 20) Op-level profile (diagnostic) | Standalone script (not LAMMPS) on one tile: real chunk shapes dumped from one rank of the 14³ W=12 run, stock eager `forward_chunk` in FP64, XPU profiler, three passes per layer. Output the per-op device time, then group into the table in 5.1. Calibrate against the 659 ms row (4 layers, one chunk per rank): the sum should land within ±15%; if not, find the gap before continuing. Confirm the shapes and that weights do not require grad. | 1 node, 1 tile, `debug-scaling` | `pbs/out/nitro_n5/N5_PROFILE.md` with: shares in ms, the measured GEMM floor, and the blocks ordered by share (priority only). Nothing is filtered out. |
+| **N5.1** (step 20) Op-level profile (diagnostic) | Standalone script (not LAMMPS) on one tile: real chunk shapes dumped from one rank of the 14³ W=12 run, stock eager `forward_chunk` in FP64, XPU profiler, three passes per layer. Output the per-op device time, then group into the table in 5.1. Calibrate against the 659 ms row (4 layers, one chunk per rank): the sum should land within ±15%; if not, find the gap before continuing. Confirm the shapes and that weights do not require grad. | 1 node, 1 tile, `debug-scaling` | closed. Job 9093833, `pbs/out/nitro_n5/N5_PROFILE.md`. Rank-0 chunk 58560 real edges, pad 6976, `x_edge` [65536, 288], Wigner [65536, 9, 9]. Weights required grad at load (145/145) and were turned off for the timed backward. Eager checkpoint total 935 ms vs 659 ms traced; the gap is eager dispatch, not missing ops. Order: conv2, conv1, gather, radial, gate, scatter, wigner. GEMM-side floor 636 ms. |
 | **N5.2** (step 21) Fixtures and reference harness | Save one rank's chunk inputs (for NaCl and for ZIF-8) (`x_full`, `edge_index`, `wigner`, `wigner_inv_envelope`, `x_edge`) and reference outputs and gradients from stock eager FP64, in scratch (not committed). Write `pbs/nitro/n5_bench.py`: runs a block unfused vs fused, reports error, max abs gradient error, time (median, MAD, 30 repeats), traffic estimate, GB/s. | 1 node | Harness reproduces the stock result bitwise against itself; a no-op "fused = stock" arm shows ratio 1.00 ± MDE. |
 | **N5.3** (step 22) Infra | Shared header for op schemas; build rule linking the N5 `.o` files into `uma_engine` (as `xccl_peer.o`, from S3); exporter flags with a Python stand-in for every op (`torch.library`) and an eager fallback; manifest and engine load check; measure export time and per-arm job time for the budget. | build, then 1 node ABBA | Export with an empty flag set produces an artifact whose traced graph equals BASE (manifest hash equal); BASE gate unchanged (step-0 PE −74142.191907631001, ABBA vs BASE within MDE); job-time budget recorded (how many arms fit in 01:00:00). |
 | **N5.4** (step 23) F2 Gate | Fused sigmoid + expand + SiLU-scalar + multiply + concat. Micro: fwd, backward scaffold, then hand-written backward. In-model arms `L0` (layer 0 only) and `ALL`. | micro: 3 jobs; model: 3 jobs | Correctness bars met; tuning round done; micro verdict recorded. If the micro is a win, `L0` and `ALL` pass step-0 PE and NVT parity and their ABBA verdicts are recorded. Branch merged to `nitro/n5-stack` only for a win. Flat or loss closes the stage with its numbers. |
