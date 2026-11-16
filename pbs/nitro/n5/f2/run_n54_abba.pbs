@@ -43,22 +43,25 @@ OUTROOT="${REL}/pbs/out/nitro_n54_abba_${PBS_JOBID:-manual}"
 RUNDIR="${OUTROOT}/cell"
 mkdir -p "${RUNDIR}"
 nitro_install_cleanup_trap
-ART="${OUTROOT}/artifact"
-ART_KEPT=yes
-nitro_own_artifact "${ART}"
-# Keep this export for the later nodes.
 KEEP_ARTIFACT=1
 
 echo "N54_ABBA_JOB host=$(hostname) job=${PBS_JOBID:-none} layers=${UMA_NITRO_FUSED_LAYERS}"
 module load cmake 2>/dev/null || true
 nitro_require_mpich
-nitro_make_cell "${RUNDIR}" || { echo "N54_FAIL cell"; exit 1; }
-NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/${SYS_DATA}")"
-export EDGE_AC_CHUNK="${CHUNK}"
-t0=$(date +%s)
-nitro_export_artifact 12
-t1=$(date +%s)
-echo "N54_EXPORT_S seconds=$((t1 - t0)) art=${ART}"
+if [[ -n "${N54_ART:-}" && -f "${N54_ART}/metadata.json" ]]; then
+  ART="${N54_ART}"
+  echo "N54_EXPORT_REUSED ${ART}"
+else
+  ART="${OUTROOT}/artifact"
+  nitro_own_artifact "${ART}"
+  nitro_make_cell "${RUNDIR}" || { echo "N54_FAIL cell"; exit 1; }
+  NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/${SYS_DATA}")"
+  export EDGE_AC_CHUNK="${CHUNK}"
+  t0=$(date +%s)
+  nitro_export_artifact 12
+  t1=$(date +%s)
+  echo "N54_EXPORT_S seconds=$((t1 - t0)) art=${ART}"
+fi
 
 SPEC="${OUTROOT}/abba.spec"
 cat > "${SPEC}" <<EOF
