@@ -203,6 +203,26 @@ if(UMA_ENGINE_USE_XPU)
     target_compile_definitions(uma_engine PRIVATE UMA_N5_OPS_LINKED)
     message(STATUS "uma-engine: uma_n5_ops.o linked")
 
+    # Step 23 (N5.4). The gate kernel is a shared library, same reason as
+    # libuma_n1b.so: a g++ link of the .o drops the device image once oneCCL
+    # has its own context.
+    set(_f2_src "${CMAKE_CURRENT_SOURCE_DIR}/src/f2_engine.sycl.cpp")
+    set(_f2_so "${CMAKE_CURRENT_BINARY_DIR}/libuma_f2.so")
+    add_custom_command(
+      OUTPUT ${_f2_so}
+      COMMAND ${UMA_ICPX} -fsycl -fPIC -shared -O2 -std=c++17
+              -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1
+              ${_n5_incs}
+              ${_f2_src} -o ${_f2_so}
+      DEPENDS ${_f2_src} ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/n5_ops.h
+      COMMENT "icpx -fsycl -shared libuma_f2.so"
+      VERBATIM)
+    add_custom_target(uma_f2_so DEPENDS ${_f2_so})
+    add_dependencies(uma_engine uma_f2_so)
+    target_link_libraries(uma_engine PUBLIC ${_f2_so})
+    target_compile_definitions(uma_engine PRIVATE UMA_F2_LINKED)
+    message(STATUS "uma-engine: libuma_f2.so linked")
+
     # Step 16 (N1-b). A g++ link of the .o drops the device image once oneCCL
     # has created its own context (W=1 worked, W=2 segfaulted in the first
     # kernel). Link a shared library with icpx -fsycl so the image stays.

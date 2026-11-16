@@ -851,6 +851,26 @@ def _nitro_fused_request():
     return ops, layers
 
 
+def _install_f2(backbone, layers):
+    """Replace GateActivation on the selected blocks with uma_n5::f2."""
+    chosen = None if layers == "all" else {
+        int(part) for part in layers.split(",") if part.strip()
+    }
+    n = 0
+    for i, block in enumerate(backbone.blocks):
+        if chosen is not None and i not in chosen:
+            continue
+        act = block.edge_wise.act
+        expand = act.expand_index
+
+        def forward(gating_scalars, input_tensors, _expand=expand):
+            return torch.ops.uma_n5.f2(gating_scalars, input_tensors, _expand)
+
+        act.forward = forward
+        n += 1
+    print(f"N54_F2_PATCH layers={n} of {len(backbone.blocks)}", flush=True)
+
+
 def main() -> int:
     ckpt_s = os.environ.get("UMA_CHECKPOINT") or os.environ.get("UMA_CKPT") or ""
     if ckpt_s in ("", "0", "1"):
@@ -1010,6 +1030,8 @@ def main() -> int:
     else:
         wrapper = make_traced_export_wrapper(model, task).eval().to(trace_dev)
     backbone = wrapper.inner.backbone
+    if "f2" in fused_ops:
+        _install_f2(backbone, fused_layers)
 
     # INTRA-block edge-chunk AC: per-block checkpointing (uma_ckpt) bounds
     # CROSS-block memory, but a single block's SO2 conv over ALL edges still
@@ -1509,14 +1531,16 @@ def main() -> int:
         n_block = allgraphs.count("uma_ckpt::block")
         n_chunk = allgraphs.count("uma_ckpt::chunk")
         n_edeg = allgraphs.count("uma_ckpt::edge_degree")
+        n_f2 = allgraphs.count("uma_n5::f2")
         report["graph_check"] = {
             "all_gather_nodes": n_gather, "block": n_block,
             "chunk": n_chunk, "edge_degree": n_edeg,
+            "uma_n5_f2": n_f2,
             "expected_gather_per_block": world > 1,
             "top_frozen_opaque": bool(top_opaque),
         }
         print(f"[graph-check] all_gather_nodes={n_gather} block={n_block} "
-              f"chunk={n_chunk} edge_degree={n_edeg} (num_layers="
+              f"chunk={n_chunk} edge_degree={n_edeg} uma_n5_f2={n_f2} (num_layers="
               f"{int(backbone.num_layers)})"
               f"{' [top frozen: block/edge_degree counts N/A]' if top_opaque else ''}",
               flush=True)
@@ -1559,6 +1583,10 @@ def main() -> int:
     if "gp_structure_ok" in gc and gc.get("gp_structure_ok") is not True:
         print("EXPORT FAIL: GP graph-structure check did not PASS "
               f"(gp_structure_ok={gc.get('gp_structure_ok')})", flush=True)
+        fail = True
+    if "f2" in fused_ops and gc.get("uma_n5_f2", 0) < 1:
+        print("EXPORT FAIL: UMA_NITRO_FUSED includes f2 but the traced graph "
+              "has no uma_n5::f2", flush=True)
         fail = True
     if "single_tile_no_gather_ok" in gc and gc.get("single_tile_no_gather_ok") is not True:
         print("EXPORT FAIL: single-tile artifact unexpectedly contains all_gather "

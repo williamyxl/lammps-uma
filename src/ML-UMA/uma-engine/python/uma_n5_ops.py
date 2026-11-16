@@ -27,6 +27,19 @@ def schemas() -> dict[str, str]:
     return found
 
 
+def _f2_eager(g, x, expand):
+    """Stock GateActivation math. Tracing records uma_n5::f2; C++ runs it."""
+    import torch
+
+    channels = x.shape[-1]
+    lmax = g.shape[-1] // channels
+    gs = torch.sigmoid(g).view(g.shape[0], lmax, channels)
+    gs = torch.index_select(gs, 1, expand)
+    scalar = torch.nn.functional.silu(x[:, :1, :])
+    vec = x[:, 1:, :] * gs
+    return torch.cat((scalar, vec), dim=1)
+
+
 def register() -> Library:
     global _LIB
     if _LIB is not None:
@@ -34,6 +47,9 @@ def register() -> Library:
     lib = Library("uma_n5", "DEF")
     for name, schema in schemas().items():
         lib.define(schema)
+        if name == "f2":
+            impl(lib, name, "CompositeExplicitAutograd")(_f2_eager)
+            continue
 
         def _eager(x, _name=name):
             return x
