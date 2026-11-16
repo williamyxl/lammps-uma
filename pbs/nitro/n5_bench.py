@@ -3,8 +3,10 @@
 
 Saves NaCl and ZIF-8 fixtures under pbs/out (not committed), then runs the
 stock eager chunk against itself and against a no-op fused arm that calls the
-same function. The no-op arm must match bitwise and time within the relative
-noise of the NaCl step.
+same function. index_add_ is atomic, so stock is not bitwise against itself
+(N5.d). The no-op arm passes when its difference stays within the larger of
+the 1e-12 relative bar and twice stock's own repeat, and the interleaved
+timing ratio stays within that system's relative MDE.
 """
 from __future__ import annotations
 
@@ -28,8 +30,8 @@ FIX = Path(os.environ.get(
     "N5_FIXTURES",
     HERE.parents[1] / "pbs" / "out" / "nitro_n5" / "fixtures",
 ))
-# NaCl step MDE is 6.27 ms / 825 ms.
-REL_MDE = 6.27 / 825.0
+# Step MDEs, as a fraction of the step median. NaCl 6.27/825, ZIF-8 3.11/876.1.
+REL_MDE = {"nacl": 6.27 / 825.0, "zif8": 3.11 / 876.1}
 
 
 def sync():
@@ -40,19 +42,33 @@ def mad(xs, med):
     return statistics.median([abs(x - med) for x in xs])
 
 
-def time_ms(fn, reps=30):
+def time_pair(fn_a, fn_b, reps=30):
     for _ in range(2):
-        fn()
+        fn_a()
+        fn_b()
     sync()
-    samples = []
-    for _ in range(reps):
-        sync()
-        t0 = time.perf_counter()
-        fn()
-        sync()
-        samples.append((time.perf_counter() - t0) * 1e3)
-    med = statistics.median(samples)
-    return med, mad(samples, med)
+    left, right = [], []
+    for i in range(reps):
+        order = ((fn_a, left), (fn_b, right))
+        if i % 2:
+            order = ((fn_b, right), (fn_a, left))
+        for fn, bucket in order:
+            sync()
+            t0 = time.perf_counter()
+            fn()
+            sync()
+            bucket.append((time.perf_counter() - t0) * 1e3)
+    med_a = statistics.median(left)
+    med_b = statistics.median(right)
+    return med_a, mad(left, med_a), med_b, mad(right, med_b)
+
+
+def max_abs(a, b):
+    return (a - b).abs().max().item()
+
+
+def rel_of(diff, ref):
+    return diff / max(ref.abs().max().item(), 1e-30)
 
 
 def zif8_atoms():
@@ -164,6 +180,10 @@ def fused_stock(pack):
     return stock(pack)
 
 
+def fused_grad(pack):
+    return forward_grad(pack)
+
+
 def forward_grad(pack):
     x = pack["x_full"].detach().requires_grad_(True)
     v = pack["vec"].detach().requires_grad_(True)
@@ -181,38 +201,66 @@ def traffic_bytes(pack, y):
     return (2 * e * feat + y.numel() + e * 9 * 9 * 2) * 8
 
 
+def repeat_floor(draw, n=8):
+    """Max abs and relative difference over n draws of (left, right, ref)."""
+    abs_max = 0.0
+    rel_max = 0.0
+    for _ in range(n):
+        left, right, ref = draw()
+        diff = max_abs(left, right)
+        abs_max = max(abs_max, diff)
+        rel_max = max(rel_max, rel_of(diff, ref))
+    return abs_max, rel_max
+
+
+def within_repeat(abs_fused, rel_fused, abs_self, rel_self):
+    # 1e-12 is the N5 block bar. Twice the stock repeat covers one atomic
+    # sample landing slightly above another of the same sum.
+    return rel_fused <= max(1e-12, rel_self) or abs_fused <= 2.0 * abs_self
+
+
+def grad_pair(pack, other):
+    left = forward_grad(pack)
+    right = other()
+    diff = max(max_abs(left[i], right[i]) for i in range(3))
+    ref = torch.cat([left[i].reshape(-1) for i in range(3)])
+    return diff, rel_of(diff, ref), left
+
+
 def check_system(name, pack):
-    y1 = stock(pack)
-    y2 = stock(pack)
-    yf = fused_stock(pack)
-    # index_add_ is atomic, so stock versus stock is not bitwise. The no-op
-    # arm is accepted when it stays inside that repeat difference.
-    y_self = (y1 - y2).abs().max().item()
-    y_fused = (y1 - yf).abs().max().item()
-    g1, gx1, gv1 = forward_grad(pack)
-    g2, gx2, gv2 = forward_grad(pack)
-    gf, gxf, gvf = forward_grad(pack)
-    g_self = max(
-        (g1 - g2).abs().max().item(),
-        (gx1 - gx2).abs().max().item(),
-        (gv1 - gv2).abs().max().item(),
+    def y_self_draw():
+        left = stock(pack)
+        return left, stock(pack), left
+
+    def y_fused_draw():
+        left = stock(pack)
+        return left, fused_stock(pack), left
+
+    y_self, y_self_rel = repeat_floor(y_self_draw)
+    y_fused, y_fused_rel = repeat_floor(y_fused_draw)
+    g_self, g_self_rel, saved = 0.0, 0.0, None
+    for _ in range(8):
+        diff, rel, saved = grad_pair(pack, lambda: forward_grad(pack))
+        g_self, g_self_rel = max(g_self, diff), max(g_self_rel, rel)
+    g_fused, g_fused_rel = 0.0, 0.0
+    for _ in range(8):
+        diff, rel, _ = grad_pair(pack, lambda: fused_grad(pack))
+        g_fused, g_fused_rel = max(g_fused, diff), max(g_fused_rel, rel)
+    match = within_repeat(y_fused, y_fused_rel, y_self, y_self_rel) and within_repeat(
+        g_fused, g_fused_rel, g_self, g_self_rel
     )
-    g_fused = max(
-        (g1 - gf).abs().max().item(),
-        (gx1 - gxf).abs().max().item(),
-        (gv1 - gvf).abs().max().item(),
-    )
-    match = y_fused <= y_self and g_fused <= g_self
-    med_s, mad_s = time_ms(lambda: stock(pack))
-    med_f, mad_f = time_ms(lambda: fused_stock(pack))
+    med_s, mad_s, med_f, mad_f = time_pair(lambda: stock(pack), lambda: fused_stock(pack))
     ratio = med_f / med_s
-    band = max(REL_MDE, 3.0 * mad_s / med_s, 3.0 * mad_f / med_f)
+    rel = REL_MDE[name]
+    band = max(rel, 3.0 * mad_s / med_s, 3.0 * mad_f / med_f)
     ratio_ok = abs(ratio - 1.0) <= band
-    gbps = (traffic_bytes(pack, y1) / 1e9) / (med_s / 1e3)
+    y_save = stock(pack)
+    gbps = (traffic_bytes(pack, y_save) / 1e9) / (med_s / 1e3)
     print(
         f"N52_ROW {name} edges={pack['edge_index'].shape[1]} real={pack['n_real']} "
         f"pad={pack['n_pad']} n_local={pack['n_local']} y_self={y_self:.3e} "
-        f"y_fused={y_fused:.3e} g_self={g_self:.3e} g_fused={g_fused:.3e} "
+        f"y_fused={y_fused:.3e} y_rel={y_fused_rel:.3e} g_self={g_self:.3e} "
+        f"g_fused={g_fused:.3e} g_rel={g_fused_rel:.3e} "
         f"stock_ms={med_s:.4f} mad={mad_s:.4f} "
         f"fused_ms={med_f:.4f} mad={mad_f:.4f} ratio={ratio:.6f} band={band:.6f} "
         f"GBs={gbps:.2f}",
@@ -225,9 +273,9 @@ def check_system(name, pack):
             "edge_index": pack["edge_index"].detach().cpu(),
             "vec": pack["vec"].detach().cpu(),
             "dist": pack["dist"].detach().cpu(),
-            "y": y1.detach().cpu(),
-            "grad_x": gx1.detach().cpu(),
-            "grad_vec": gv1.detach().cpu(),
+            "y": y_save.detach().cpu(),
+            "grad_x": saved[1].detach().cpu(),
+            "grad_vec": saved[2].detach().cpu(),
             "n_local": pack["n_local"],
             "n_real": pack["n_real"],
             "n_pad": pack["n_pad"],
