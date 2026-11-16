@@ -68,6 +68,11 @@ def main():
             continue
         payloads_n, payloads_r = zip_payloads(pn), zip_payloads(pr)
         names = sorted(set(payloads_n) | set(payloads_r))
+        # serialization_id is unique per save. debug_pkl is unused debug info.
+        # The graph is the remaining members.
+        def graph_member(name):
+            return not name.endswith("/.data/serialization_id") and not name.endswith(".debug_pkl")
+        names = [n for n in names if graph_member(n)]
         differ = [n for n in names if payloads_n.get(n) != payloads_r.get(n)]
         print(
             f"N53_GRAPH {name} equal={int(not differ)} members={len(names)} differ={differ}",
