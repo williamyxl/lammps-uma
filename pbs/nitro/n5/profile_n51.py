@@ -155,6 +155,20 @@ def main():
     co = co.to(dev)
     vec, dist = edge_geometry(pos, cell, ei, co)
     atomic_numbers = torch.tensor(atoms.get_atomic_numbers(), dtype=torch.long, device=dev)
+    batch = torch.zeros(len(atoms), dtype=torch.long, device=dev)
+    csd = backbone.csd_embedding(
+        charge=data.charge.to(dev),
+        spin=data.spin.to(dev),
+        dataset=data.dataset.to(dev) if torch.is_tensor(getattr(data, "dataset", None)) else None,
+    )
+    backbone.set_MOLE_coefficients(atomic_numbers, batch, csd)
+    backbone.set_MOLE_sizes(int(csd.shape[0]), batch, ei)
+    print(
+        "N51_MOLE",
+        tuple(backbone.global_mole_tensors.expert_mixing_coefficients.shape),
+        backbone.global_mole_tensors.mole_sizes,
+        flush=True,
+    )
     x_full = torch.randn(
         (len(atoms), (int(backbone.lmax) + 1) ** 2, int(backbone.sphere_channels)),
         dtype=torch.float64, device=dev,
