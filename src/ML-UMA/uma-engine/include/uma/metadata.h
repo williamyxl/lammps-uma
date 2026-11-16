@@ -50,6 +50,11 @@ struct ArtifactMetadata {
   /// H4/H-11: DD halo depth k the artifact was exported with (exporter "dd_k").
   /// For the shipped per-layer halo, dd_k == num_layers. 0 => absent / not DD.
   int dd_k = 0;
+  /// Step 22 (N5.3). Comma list of fused ops this artifact was exported with.
+  /// Empty means the stock graph. A name that is not linked is refused at load.
+  std::string nitro_fused;
+  /// "all" or a comma list of layer indices. Empty when nitro_fused is empty.
+  std::string nitro_fused_layers;
 };
 
 ArtifactMetadata load_artifact_metadata(const std::string& metadata_path);

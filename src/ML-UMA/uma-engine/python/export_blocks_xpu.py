@@ -826,6 +826,31 @@ def make_ckpt_forward(backbone, submodules, edge_ac_chunk=None):
     return forward
 
 
+def _nitro_fused_request():
+    """UMA_NITRO_FUSED / UMA_NITRO_FUSED_LAYERS. Empty leaves the export untouched."""
+    raw = os.environ.get("UMA_NITRO_FUSED", "").strip()
+    layers = os.environ.get("UMA_NITRO_FUSED_LAYERS", "").strip()
+    if not raw:
+        if layers:
+            raise SystemExit("UMA_NITRO_FUSED_LAYERS requires UMA_NITRO_FUSED")
+        return [], ""
+    ops = [part.strip() for part in raw.split(",") if part.strip()]
+    allowed = {"f1", "f2", "f3", "f4", "f5"}
+    bad = [name for name in ops if name not in allowed]
+    if bad:
+        raise SystemExit(f"unknown UMA_NITRO_FUSED op: {bad}")
+    if not layers:
+        layers = "all"
+    elif layers != "all":
+        for part in layers.split(","):
+            if not part.strip().isdigit():
+                raise SystemExit(
+                    f"UMA_NITRO_FUSED_LAYERS wants all or a layer list, got {layers}")
+    import uma_n5_ops
+    uma_n5_ops.register()
+    return ops, layers
+
+
 def main() -> int:
     ckpt_s = os.environ.get("UMA_CHECKPOINT") or os.environ.get("UMA_CKPT") or ""
     if ckpt_s in ("", "0", "1"):
@@ -856,7 +881,9 @@ def main() -> int:
     # (edges are sharded + collectives injected), so skip it for W>1.
     if gp:
         do_reconstruct = False
+    fused_ops, fused_layers = _nitro_fused_request()
     print(f"EXPORT_WORLD={world} EXPORT_RANK={rank} gp={gp} -> {out}", flush=True)
+    print(f"N53_EXPORT fused={','.join(fused_ops)} layers={fused_layers}", flush=True)
 
     # Wigner-chunk fix (correct FP64 backward at large edge counts).
     os.environ.setdefault("FXPU_WIGNER_PREP_CHUNK", "65536")
@@ -1411,6 +1438,11 @@ def main() -> int:
                 "uma_ckpt.chunk loop; edges sharded by node partition "
                 "(tensor_split(arange(N), W)[R] centers); C++ handles the force "
                 "all_reduce. Artifacts in OUT/w{W}/r{R}/.")
+        if fused_ops:
+            meta_d["nitro_fused"] = ",".join(fused_ops)
+            meta_d["nitro_fused_layers"] = fused_layers
+            meta_d["export_notes"].append(
+                "N5 fused ops " + ",".join(fused_ops) + " layers " + fused_layers)
         (out / "metadata.json").write_text(
             json.dumps(meta_d, indent=2, default=str))
 

@@ -1,0 +1,220 @@
+#!/bin/bash -l
+#PBS -N nitro-n53
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# ---------------------------------------------------------------------------
+# Step 22 (N5.3). Empty UMA_NITRO_FUSED export, manifest versus the stock
+# artifact, NaCl 14^3 gate, a refused unknown op, then ABBA versus nitro-base.
+# Submit from this directory:
+#   cd pbs/nitro/n5 && qsub -q debug-scaling -v NITRO_TAG=nitro/n5/r7 run_n53.pbs
+# ---------------------------------------------------------------------------
+set -uo pipefail
+HERE_N5="${NITRO_HERE:-${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}}"
+HERE="$(cd "${HERE_N5}/.." && pwd)"
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+nitro_check_tree
+
+# Empty flag set. A qsub -v must not leak into the export.
+export UMA_NITRO_FUSED=
+export UMA_NITRO_FUSED_LAYERS=
+
+SHA7=$(git -C "${REL}" rev-parse --short=7 HEAD)
+export NITRO_BUILD="${REL}/build-nitro/${SHA7}"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+
+W=12
+PPN=12
+NSTEPS=10
+CHUNK=65536
+REF_STEP0_PE="${SYS_REF_STEP0_PE}"
+REF_NVT_PE10="${SYS_REF_NVT_PE10}"
+REF_NPT_PE10="${SYS_REF_NPT_PE10}"
+TOL=1e-8
+REF_ART="${REL}/pbs/out/nitro_gate_9089314.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov/n14/artifact"
+
+OUTROOT="${REL}/pbs/out/nitro_n53_${PBS_JOBID:-manual}"
+RUNDIR="${OUTROOT}/n14"
+mkdir -p "${RUNDIR}"
+nitro_install_cleanup_trap
+ART="${RUNDIR}/artifact"
+ART_KEPT=no
+[[ "${KEEP_ARTIFACT:-0}" == "1" ]] && ART_KEPT=yes
+
+echo "N53_JOB host=$(hostname) job=${PBS_JOBID:-none} sha=${SHA7}"
+python -c "import torch; assert '+xpu' in torch.__version__, torch.__version__; print('TORCH_OK', torch.__version__)"
+
+module load cmake 2>/dev/null || true
+nitro_require_mpich
+export CC="${GCC_PREFIX:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg}/bin/gcc"
+export CXX="${GCC_PREFIX:-/opt/aurora/26.181.0/spack/unified/1.1.1/install/linux-x86_64/gcc-13.4.0-22p27zg}/bin/g++"
+
+t_build0=$(date +%s)
+nitro_cmake_build
+t_build1=$(date +%s)
+[[ -x "${LMP}" ]] || nitro_die "missing lmp ${LMP}"
+echo "BUILD_OK ${LMP} seconds=$((t_build1 - t_build0))"
+
+nitro_make_cell "${RUNDIR}" || nitro_die "cell generation failed"
+NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/${SYS_DATA}")"
+rm -rf "${ART}"
+nitro_own_artifact "${ART}"
+export EDGE_AC_CHUNK="${CHUNK}"
+t_exp0=$(date +%s)
+nitro_export_artifact "$(nitro_export_world)"
+t_exp1=$(date +%s)
+echo "N53_EXPORT_S seconds=$((t_exp1 - t_exp0))"
+
+python3 "${HERE_N5}/n53_manifest.py" "${ART}" "${REF_ART}" || nitro_die "manifest differs from the stock artifact"
+
+export UMA_MP_NATOMS="${NAT}"
+nitro_runtime_env
+NITRO_SLOT_ENV=
+export NITRO_SLOT_ENV
+
+nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" "${NSTEPS}"
+nitro_write_in npt "fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0" "${NSTEPS}" "${NSTEPS}"
+
+t_nvt0=$(date +%s)
+nitro_run_ens nvt && nvt_rc=0 || nvt_rc=$?
+t_nvt1=$(date +%s)
+nitro_run_ens npt && npt_rc=0 || npt_rc=$?
+echo "N53_NVT_S seconds=$((t_nvt1 - t_nvt0))"
+
+pe_ok=0
+python "${HERE}/compare.py" bar "${RUNDIR}/log.nvt" 0  "${REF_STEP0_PE}" "${TOL}" || pe_ok=1
+python "${HERE}/compare.py" bar "${RUNDIR}/log.npt" 0  "${REF_STEP0_PE}" "${TOL}" || pe_ok=1
+python "${HERE}/compare.py" bar "${RUNDIR}/log.nvt" 10 "${REF_NVT_PE10}" "${TOL}" || pe_ok=1
+python "${HERE}/compare.py" bar "${RUNDIR}/log.npt" 10 "${REF_NPT_PE10}" "${TOL}" || pe_ok=1
+grep -q "N53_LINKED f1,f2,f3,f4,f5" "${RUNDIR}/lmp.nvt.log" || pe_ok=1
+grep -q "N53_FUSED requested=$" "${RUNDIR}/lmp.nvt.log" || pe_ok=1
+if [[ "${nvt_rc}" -ne 0 || "${npt_rc}" -ne 0 || "${pe_ok}" -ne 0 ]]; then
+  echo "N53_GATE_FAIL nvt=${nvt_rc} npt=${npt_rc} pe=${pe_ok}"
+  exit 1
+fi
+echo "N53_GATE_OK"
+
+# Unknown op name must be refused before the model runs. Restore the manifest.
+cp -f "${ART}/metadata.json" "${ART}/metadata.json.n53bak"
+python3 - <<PY
+import json
+from pathlib import Path
+p = Path("${ART}/metadata.json")
+j = json.loads(p.read_text())
+j["nitro_fused"] = "not_an_op"
+p.write_text(json.dumps(j, indent=2) + "\n")
+PY
+nitro_write_in refuse "fix             1 all nvt temp 300.0 300.0 0.1" 0 0
+nitro_run_ens refuse && ref_rc=0 || ref_rc=$?
+cp -f "${ART}/metadata.json.n53bak" "${ART}/metadata.json"
+rm -f "${ART}/metadata.json.n53bak"
+if [[ "${ref_rc}" -eq 0 ]] || ! grep -q "N53_REFUSE op=not_an_op is not linked" "${RUNDIR}/lmp.refuse.log"; then
+  echo "N53_REFUSE_FAIL rc=${ref_rc}"
+  exit 1
+fi
+echo "N53_REFUSE_OK"
+
+# Reuse this binary in ABBA instead of building the tag again.
+dest="${REL}/pbs/bin/${SHA7}"
+mkdir -p "${dest}"
+cp -f "${LMP}" "${dest}/lmp"
+sha256sum "${dest}/lmp" | awk '{print $1}' > "${dest}/lmp.sha256"
+
+arm_s=$(( (t_exp1 - t_exp0) + (t_nvt1 - t_nvt0) ))
+if [[ "${arm_s}" -lt 1 ]]; then arm_s=1; fi
+echo "N53_BUDGET export_s=$((t_exp1 - t_exp0)) nvt10_s=$((t_nvt1 - t_nvt0)) arm_s=${arm_s} arms_in_1h=$((3600 / arm_s))"
+
+# shellcheck disable=SC1091
+source "${HERE}/abba.inc"
+SPEC="${OUTROOT}/abba.spec"
+cat > "${SPEC}" <<EOF
+BASE nitro-base artifact=${ART}
+N53 ${NITRO_TAG} artifact=${ART}
+EOF
+export NITRO_SPEC="${SPEC}"
+export NITRO_EXPORT_RANKS=0
+# ABBA's own loop uses NSTEPS=30. Run it in this job by calling the same
+# functions, with the artifact already exported.
+NITRO_ABBA_OUT="${OUTROOT}/abba"
+mkdir -p "${NITRO_ABBA_OUT}"
+# Re-enter the ABBA body by pointing OUTROOT at the abba dir for its writes,
+# then restore. The functions read OUTROOT only for the skeleton; the slot
+# loop below is inlined from run_abba.pbs with NSTEPS=30.
+OUTROOT_GATE="${OUTROOT}"
+OUTROOT="${NITRO_ABBA_OUT}"
+nitro_abba_expand "${NITRO_SPEC}"
+declare -A LMP_FOR_TAG
+fail=0
+hostname > "${OUTROOT}/hostnames.txt"
+NSTEPS=30
+for ((i = 0; i < NITRO_SLOT_N; i++)); do
+  label="${NITRO_SLOT_LABEL[i]}"
+  tag="${NITRO_SLOT_TAG[i]}"
+  name=$(printf '%02d_%s' "${i}" "${label}")
+  slot="${OUTROOT}/slots/${name}"
+  mkdir -p "${slot}"
+  printf '%s\n' "${label}" > "${slot}/label"
+  if [[ -z "${LMP_FOR_TAG[${tag}]:-}" ]]; then
+    nitro_ensure_lmp "${tag}"
+    LMP_FOR_TAG[${tag}]="${LMP}"
+  fi
+  LMP="${LMP_FOR_TAG[${tag}]}"
+  NITRO_SLOT_ENV="${NITRO_SLOT_ENVSTR[i]}"
+  RUNDIR="${slot}"
+  ART="${NITRO_SLOT_ART[i]}"
+  if [[ ! -f "${slot}/${SYS_DATA}" ]]; then
+    nitro_make_cell "${slot}" || { fail=1; continue; }
+  fi
+  NAT="$(awk '/atoms/{print $1; exit}' "${slot}/${SYS_DATA}")"
+  nitro_runtime_env
+  t0=$(date +%s)
+  nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" 0
+  if nitro_run_ens nvt; then
+    python "${HERE}/compare.py" perf "${slot}/lmp.nvt.log" 5 > "${slot}/perf.json" || fail=1
+  else
+    fail=1
+    echo '{"n_rows": 0}' > "${slot}/perf.json"
+  fi
+  t1=$(date +%s)
+  echo "N53_ABBA_SLOT ${name} seconds=$((t1 - t0))"
+  python "${HERE}/meta.py" "${slot}" "${REL}" --lmp "${LMP}" --artifact "${ART}" \
+    --tag "${tag}" --require-base --artifact-kept yes \
+    --log "${slot}/lmp.nvt.log" \
+    --extra "system=${NITRO_SYSTEM}" "slot=${i}" "label=${label}" "nsteps=${NSTEPS}" \
+    || fail=1
+done
+echo "N53_ABBA_DONE fail=${fail}"
+python3 - <<PY || fail=1
+import json, statistics
+from pathlib import Path
+root = Path("${OUTROOT}") / "slots"
+base, arm = [], []
+for slot in sorted(p for p in root.iterdir() if p.is_dir()):
+    perf = json.loads((slot / "perf.json").read_text())
+    med = perf.get("ms_total", {}).get("median")
+    label = (slot / "label").read_text().strip()
+    print(f"N53_ABBA_MED {slot.name} {med}", flush=True)
+    if med is None:
+        raise SystemExit("missing ms_total")
+    (base if label == "BASE" else arm).append(med)
+b = statistics.median(base)
+a = statistics.median(arm)
+delta = a - b
+print(f"N53_ABBA base_ms={b:.4f} arm_ms={a:.4f} delta_ms={delta:.4f} mde_ms=6.27", flush=True)
+if abs(delta) > 6.27:
+    raise SystemExit("outside MDE")
+PY
+if [[ "${fail}" -ne 0 ]]; then
+  exit 1
+fi
+echo "N53_JOB_DONE ${OUTROOT_GATE}"
+exit 0

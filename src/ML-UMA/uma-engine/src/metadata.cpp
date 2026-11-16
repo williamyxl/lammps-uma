@@ -1,8 +1,11 @@
 #include "uma/metadata.h"
 #include "uma/runtime_config.h"
 
+#include <ATen/core/dispatch/Dispatcher.h>
+
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -164,6 +167,34 @@ ArtifactMetadata load_artifact_metadata(const std::string& metadata_path) {
           std::to_string(world) + ", rank=" + std::to_string(rank) + ")");
     }
   }
+
+  // Step 22 (N5.3). Absent or empty means the stock graph. A listed op must
+  // have its schema linked into this binary.
+  meta.nitro_fused = opt_string(j, "nitro_fused");
+  meta.nitro_fused_layers = opt_string(j, "nitro_fused_layers");
+  if (!meta.nitro_fused.empty()) {
+    std::string cur;
+    auto check_one = [&](const std::string& tok) {
+      if (tok.empty()) return;
+      const std::string qual = "uma_n5::" + tok;
+      try {
+        (void)c10::Dispatcher::singleton().findSchemaOrThrow(qual.c_str(), "");
+      } catch (const std::exception&) {
+        throw std::runtime_error("N53_REFUSE op=" + tok + " is not linked (" +
+                                 metadata_path + ")");
+      }
+    };
+    for (char c : meta.nitro_fused) {
+      if (c == ',') {
+        check_one(cur);
+        cur.clear();
+      } else if (c != ' ') {
+        cur.push_back(c);
+      }
+    }
+    check_one(cur);
+  }
+  std::cerr << "N53_FUSED requested=" << meta.nitro_fused << "\n" << std::flush;
 
   return meta;
 }

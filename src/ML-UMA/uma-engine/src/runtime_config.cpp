@@ -17,6 +17,9 @@ extern "C" char **environ;
 #ifdef UMA_SYCL_OPS_LINKED
 extern "C" void uma_sycl_ops_linked_anchor();
 #endif
+#ifdef UMA_N5_OPS_LINKED
+extern "C" void uma_n5_ops_linked_anchor();
+#endif
 
 namespace uma {
 namespace {
@@ -74,6 +77,9 @@ void log_nitro_flags_once()
   std::call_once(once, [] {
 #ifdef UMA_SYCL_OPS_LINKED
     uma_sycl_ops_linked_anchor();
+#endif
+#ifdef UMA_N5_OPS_LINKED
+    uma_n5_ops_linked_anchor();
 #endif
     if (!log_from_this_rank()) return;
     std::vector<std::string> flags;

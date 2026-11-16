@@ -180,6 +180,29 @@ if(UMA_ENGINE_USE_XPU)
     target_compile_definitions(uma_engine PRIVATE UMA_SYCL_OPS_LINKED)
     message(STATUS "uma-engine: uma_sycl_silu.o linked (unused by the model)")
 
+    # Step 22 (N5.3). Same icpx object pattern as uma_sycl_silu.o. The schemas
+    # are linked; an empty UMA_NITRO_FUSED does not call them.
+    set(_n5_src "${CMAKE_CURRENT_SOURCE_DIR}/src/n5_ops.sycl.cpp")
+    set(_n5_obj "${CMAKE_CURRENT_BINARY_DIR}/uma_n5_ops.o")
+    set(_n5_incs -I${CMAKE_CURRENT_SOURCE_DIR}/include)
+    foreach(_d ${TORCH_INCLUDE_DIRS})
+      list(APPEND _n5_incs -I${_d})
+    endforeach()
+    add_custom_command(
+      OUTPUT ${_n5_obj}
+      COMMAND ${_silu_dir}/compile_sycl.sh ${_n5_incs}
+              -c ${_n5_src} -o ${_n5_obj}
+      DEPENDS ${_n5_src}
+              ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/n5_ops.h
+              ${_silu_dir}/compile_sycl.sh
+      COMMENT "Compiling n5_ops.sycl.cpp with icpx"
+      VERBATIM)
+    add_custom_target(uma_n5_obj DEPENDS ${_n5_obj})
+    add_dependencies(uma_engine uma_n5_obj)
+    target_link_libraries(uma_engine PUBLIC ${_n5_obj})
+    target_compile_definitions(uma_engine PRIVATE UMA_N5_OPS_LINKED)
+    message(STATUS "uma-engine: uma_n5_ops.o linked")
+
     # Step 16 (N1-b). A g++ link of the .o drops the device image once oneCCL
     # has created its own context (W=1 worked, W=2 segfaulted in the first
     # kernel). Link a shared library with icpx -fsycl so the image stays.
