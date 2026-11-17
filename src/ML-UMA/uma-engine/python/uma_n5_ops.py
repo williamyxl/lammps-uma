@@ -27,6 +27,18 @@ def schemas() -> dict[str, str]:
     return found
 
 
+def _f5_eager(x, wigner_inv, edge, n_nodes, node_offset):
+    """Stock inverse rotation and scatter. Tracing records uma_n5::f5."""
+    import torch
+
+    rotated = torch.bmm(wigner_inv, x)
+    y = torch.zeros(
+        int(n_nodes), wigner_inv.shape[1], x.shape[2], dtype=x.dtype, device=x.device,
+    )
+    y.index_add_(0, edge[1] - int(node_offset), rotated)
+    return y
+
+
 def _f4_eager(x, edge, wigner):
     """Stock gather + rotate. Tracing records uma_n5::f4; C++ runs it."""
     import torch
@@ -59,6 +71,9 @@ def register() -> Library:
             continue
         if name == "f4":
             impl(lib, name, "CompositeExplicitAutograd")(_f4_eager)
+            continue
+        if name == "f5":
+            impl(lib, name, "CompositeExplicitAutograd")(_f5_eager)
             continue
 
         def _eager(x, _name=name):

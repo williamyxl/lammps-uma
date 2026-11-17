@@ -241,6 +241,24 @@ if(UMA_ENGINE_USE_XPU)
     target_compile_definitions(uma_engine PRIVATE UMA_F4_LINKED)
     message(STATUS "uma-engine: libuma_f4.so linked")
 
+    # Step 25 (N5.6). Work-group 64 scatter, same shared-library link.
+    set(_f5_src "${CMAKE_CURRENT_SOURCE_DIR}/src/f5_engine.sycl.cpp")
+    set(_f5_so "${CMAKE_CURRENT_BINARY_DIR}/libuma_f5.so")
+    add_custom_command(
+      OUTPUT ${_f5_so}
+      COMMAND ${UMA_ICPX} -fsycl -fPIC -shared -O2 -std=c++17
+              -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1
+              ${_n5_incs}
+              ${_f5_src} -o ${_f5_so}
+      DEPENDS ${_f5_src} ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/n5_ops.h
+      COMMENT "icpx -fsycl -shared libuma_f5.so"
+      VERBATIM)
+    add_custom_target(uma_f5_so DEPENDS ${_f5_so})
+    add_dependencies(uma_engine uma_f5_so)
+    target_link_libraries(uma_engine PUBLIC ${_f5_so})
+    target_compile_definitions(uma_engine PRIVATE UMA_F5_LINKED)
+    message(STATUS "uma-engine: libuma_f5.so linked")
+
     # Step 16 (N1-b). A g++ link of the .o drops the device image once oneCCL
     # has created its own context (W=1 worked, W=2 segfaulted in the first
     # kernel). Link a shared library with icpx -fsycl so the image stays.
