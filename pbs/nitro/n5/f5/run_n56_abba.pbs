@@ -1,0 +1,125 @@
+#!/bin/bash -l
+#PBS -N nitro-n56ab
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 25 (N5.6). One-node ABBA of the fused scatter against nitro-base.
+# The fused binary is tag nitro/n5-f5/r2. Submit from pbs/nitro/n5/f5.
+set -uo pipefail
+HERE_F5="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+HERE="$(cd "${HERE_F5}/../.." && pwd)"
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+# shellcheck disable=SC1091
+source "${HERE}/abba.inc"
+
+export UMA_NITRO_FUSED=f5
+export UMA_NITRO_FUSED_LAYERS="${N56_LAYERS:-all}"
+W=12
+PPN=12
+NSTEPS=30
+CHUNK=65536
+SHA7=$(git -C "${REL}" rev-parse --short=7 nitro/n5-f5/r2)
+LMP_SRC="${REL}/build-nitro/${SHA7}/lmp"
+[[ -x "${LMP_SRC}" ]] || { echo "N56_FAIL missing ${LMP_SRC}"; exit 1; }
+dest="${REL}/pbs/bin/${SHA7}"
+mkdir -p "${dest}"
+cp -f "${LMP_SRC}" "${dest}/lmp"
+sha256sum "${dest}/lmp" | awk '{print $1}' > "${dest}/lmp.sha256"
+
+STOCK="${REL}/pbs/out/nitro_gate_9089314.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov/n14/artifact"
+[[ -f "${STOCK}/metadata.json" ]] || { echo "N56_FAIL missing stock artifact"; exit 1; }
+
+OUTROOT="${REL}/pbs/out/nitro_n56_abba_${PBS_JOBID:-manual}"
+RUNDIR="${OUTROOT}/cell"
+mkdir -p "${RUNDIR}"
+nitro_install_cleanup_trap
+KEEP_ARTIFACT=1
+
+echo "N56_ABBA_JOB host=$(hostname) job=${PBS_JOBID:-none} layers=${UMA_NITRO_FUSED_LAYERS}"
+module load cmake 2>/dev/null || true
+nitro_require_mpich
+if [[ -n "${N56_ART:-}" && -f "${N56_ART}/metadata.json" ]]; then
+  ART="${N56_ART}"
+  echo "N56_EXPORT_REUSED ${ART}"
+else
+  ART="${OUTROOT}/artifact"
+  nitro_own_artifact "${ART}"
+  nitro_make_cell "${RUNDIR}" || { echo "N56_FAIL cell"; exit 1; }
+  NAT="$(awk '/atoms/{print $1; exit}' "${RUNDIR}/${SYS_DATA}")"
+  export EDGE_AC_CHUNK="${CHUNK}"
+  t0=$(date +%s)
+  nitro_export_artifact 12
+  t1=$(date +%s)
+  echo "N56_EXPORT_S seconds=$((t1 - t0)) art=${ART}"
+fi
+
+SPEC="${OUTROOT}/abba.spec"
+cat > "${SPEC}" <<EOF
+BASE nitro-base artifact=${STOCK}
+F5 nitro/n5-f5/r2 artifact=${ART}
+EOF
+nitro_abba_expand "${SPEC}"
+declare -A LMP_FOR_TAG
+fail=0
+hostname > "${OUTROOT}/hostnames.txt"
+for ((i = 0; i < NITRO_SLOT_N; i++)); do
+  label="${NITRO_SLOT_LABEL[i]}"
+  tag="${NITRO_SLOT_TAG[i]}"
+  name=$(printf '%02d_%s' "${i}" "${label}")
+  slot="${OUTROOT}/slots/${name}"
+  mkdir -p "${slot}"
+  printf '%s\n' "${label}" > "${slot}/label"
+  if [[ -z "${LMP_FOR_TAG[${tag}]:-}" ]]; then
+    nitro_ensure_lmp "${tag}"
+    LMP_FOR_TAG[${tag}]="${LMP}"
+  fi
+  LMP="${LMP_FOR_TAG[${tag}]}"
+  NITRO_SLOT_ENV=
+  RUNDIR="${slot}"
+  ART="${NITRO_SLOT_ART[i]}"
+  if [[ ! -f "${slot}/${SYS_DATA}" ]]; then
+    nitro_make_cell "${slot}" || { fail=1; continue; }
+  fi
+  NAT="$(awk '/atoms/{print $1; exit}' "${slot}/${SYS_DATA}")"
+  nitro_runtime_env
+  s0=$(date +%s)
+  nitro_write_in nvt "fix             1 all nvt temp 300.0 300.0 0.1" "${NSTEPS}" 0
+  if nitro_run_ens nvt; then
+    python "${HERE}/compare.py" perf "${slot}/lmp.nvt.log" 5 > "${slot}/perf.json" || fail=1
+  else
+    fail=1
+    echo '{"n_rows": 0}' > "${slot}/perf.json"
+  fi
+  s1=$(date +%s)
+  echo "N56_ABBA_SLOT ${name} seconds=$((s1 - s0))"
+done
+python3 - <<PY || fail=1
+import json, statistics
+from pathlib import Path
+root = Path("${OUTROOT}") / "slots"
+base, arm = [], []
+for slot in sorted(p for p in root.iterdir() if p.is_dir()):
+    perf = json.loads((slot / "perf.json").read_text())
+    med = perf.get("ms_total", {}).get("median")
+    label = (slot / "label").read_text().strip()
+    print(f"N56_ABBA_MED {slot.name} {med}", flush=True)
+    if med is None:
+        raise SystemExit("missing ms_total")
+    (base if label == "BASE" else arm).append(med)
+b = statistics.median(base)
+a = statistics.median(arm)
+delta = b - a
+print(f"N56_ABBA layers=${UMA_NITRO_FUSED_LAYERS} base_ms={b:.4f} arm_ms={a:.4f} gain_ms={delta:.4f}", flush=True)
+PY
+echo "N56_ABBA_DONE fail=${fail} ${OUTROOT}"
+exit "${fail}"
