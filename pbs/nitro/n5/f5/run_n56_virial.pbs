@@ -1,0 +1,160 @@
+#!/bin/bash -l
+#PBS -N nitro-n56vir
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 25 (N5.6). NPT 10-step pair virial of the fused scatter versus nitro-base.
+# Pair-only pressure (compute pressure NULL pair), converted to energy units.
+# The fused binary is tag nitro/n5-f5/r2. Submit from pbs/nitro/n5/f5.
+set -uo pipefail
+HERE_F5="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+HERE="$(cd "${HERE_F5}/../.." && pwd)"
+REL="$(cd "${HERE}/../.." && pwd)"
+# shellcheck disable=SC1091
+source "${HERE}/lib.inc"
+# shellcheck disable=SC1091
+source "${HERE}/env.inc"
+# shellcheck disable=SC1091
+source "${HERE}/abba.inc"
+
+W=12
+PPN=12
+NSTEPS=10
+SHA7=$(git -C "${REL}" rev-parse --short=7 nitro/n5-f5/r2)
+LMP_SRC="${REL}/build-nitro/${SHA7}/lmp"
+[[ -x "${LMP_SRC}" ]] || { echo "N56_FAIL missing ${LMP_SRC}"; exit 1; }
+dest="${REL}/pbs/bin/${SHA7}"
+mkdir -p "${dest}"
+cp -f "${LMP_SRC}" "${dest}/lmp"
+sha256sum "${dest}/lmp" | awk '{print $1}' > "${dest}/lmp.sha256"
+
+STOCK="${REL}/pbs/out/nitro_gate_9089314.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov/n14/artifact"
+FUSED="${N56_ART:-${REL}/pbs/out/nitro_n56_abba_9098017.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov/artifact}"
+[[ -f "${STOCK}/metadata.json" ]] || { echo "N56_FAIL missing stock artifact"; exit 1; }
+[[ -f "${FUSED}/metadata.json" ]] || { echo "N56_FAIL missing fused artifact"; exit 1; }
+
+OUTROOT="${REL}/pbs/out/nitro_n56_virial_${PBS_JOBID:-manual}"
+mkdir -p "${OUTROOT}"
+nitro_install_cleanup_trap
+KEEP_ARTIFACT=1
+
+echo "N56_VIRIAL_JOB host=$(hostname) job=${PBS_JOBID:-none} fused=${FUSED}"
+module load cmake 2>/dev/null || true
+nitro_require_mpich
+hostname > "${OUTROOT}/hostnames.txt"
+
+write_npt() {
+  cat > "${RUNDIR}/in.npt" <<EOF
+units           metal
+atom_style      atomic
+boundary        p p p
+newton          off
+read_data       ${SYS_DATA}
+${SYS_MASSES}
+pair_style      uma precision double devices 1
+pair_coeff      * * \${uma_art} ${SYS_ELEMENTS}
+neighbor        2.0 bin
+neigh_modify    delay 0 every 1 check yes
+compute         pv all pressure NULL pair
+variable        wxx equal -c_pv[1]*vol/nktv2p
+variable        wyy equal -c_pv[2]*vol/nktv2p
+variable        wzz equal -c_pv[3]*vol/nktv2p
+variable        wxy equal -c_pv[4]*vol/nktv2p
+variable        wxz equal -c_pv[5]*vol/nktv2p
+variable        wyz equal -c_pv[6]*vol/nktv2p
+thermo          1
+thermo_style    custom step temp pe etotal press vol
+thermo_modify   norm no format float %.16e
+velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
+fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0
+fix             wdump all print 1 "\${step} \${pe} \${wxx} \${wyy} \${wzz} \${wxy} \${wxz} \${wyz}" file virial.dat screen no title "# step pe wxx wyy wzz wxy wxz wyz"
+timestep        0.001
+run             ${NSTEPS}
+EOF
+}
+
+fail=0
+declare -A LMP_FOR_TAG
+for arm in BASE F5; do
+  name="00_${arm}"
+  [[ "${arm}" == F5 ]] && name="01_F5"
+  slot="${OUTROOT}/slots/${name}"
+  mkdir -p "${slot}"
+  printf '%s\n' "${arm}" > "${slot}/label"
+  tag=nitro-base
+  art="${STOCK}"
+  if [[ "${arm}" == F5 ]]; then
+    tag=nitro/n5-f5/r2
+    art="${FUSED}"
+  fi
+  if [[ -z "${LMP_FOR_TAG[${tag}]:-}" ]]; then
+    nitro_ensure_lmp "${tag}"
+    LMP_FOR_TAG[${tag}]="${LMP}"
+  fi
+  LMP="${LMP_FOR_TAG[${tag}]}"
+  NITRO_SLOT_ENV=
+  RUNDIR="${slot}"
+  ART="${art}"
+  nitro_make_cell "${slot}" || { fail=1; continue; }
+  NAT="$(awk '/atoms/{print $1; exit}' "${slot}/${SYS_DATA}")"
+  nitro_runtime_env
+  write_npt
+  if ! nitro_run_ens npt; then
+    fail=1
+  fi
+done
+
+python3 - <<PY || fail=1
+from pathlib import Path
+root = Path("${OUTROOT}") / "slots"
+bar = 1e-7
+pe_bar = 1e-8
+
+def load(slot):
+    path = slot / "virial.dat"
+    rows = []
+    for line in path.read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = [float(x) for x in line.split()]
+        if len(parts) < 8:
+            raise SystemExit(f"bad virial row in {path}: {line}")
+        rows.append(parts[:8])
+    if len(rows) < 2:
+        raise SystemExit(f"too few virial rows in {path}: {len(rows)}")
+    return rows
+
+base = load(root / "00_BASE")
+arm = load(root / "01_F5")
+n = min(len(base), len(arm))
+max_abs = 0.0
+max_pe = 0.0
+for i in range(n):
+    sb, sa = base[i], arm[i]
+    dpe = abs(sa[1] - sb[1])
+    max_pe = max(max_pe, dpe)
+    dw = [abs(sa[j] - sb[j]) for j in range(2, 8)]
+    mx = max(dw)
+    max_abs = max(max_abs, mx)
+    print(
+        f"N56_VIRIAL_STEP step={int(sb[0])} dPE={dpe:.6e} "
+        f"dW={mx:.6e} {' '.join(f'{x:.6e}' for x in dw)}",
+        flush=True,
+    )
+ok = max_abs <= bar and max_pe <= pe_bar
+print(
+    f"N56_VIRIAL max_abs_eV={max_abs:.6e} bar={bar:.0e} "
+    f"max_dPE={max_pe:.6e} pe_bar={pe_bar:.0e} pass={int(ok)}",
+    flush=True,
+)
+if not ok:
+    raise SystemExit("N56_VIRIAL over bar")
+PY
+echo "N56_VIRIAL_DONE fail=${fail} ${OUTROOT}"
+exit "${fail}"
