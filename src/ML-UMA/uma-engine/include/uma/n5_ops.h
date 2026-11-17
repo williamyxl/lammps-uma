@@ -8,6 +8,6 @@
 #define UMA_N5_F1_SCHEMA "f1(Tensor x) -> Tensor"
 #define UMA_N5_F2_SCHEMA "f2(Tensor g, Tensor x, Tensor expand) -> Tensor"
 #define UMA_N5_F3_SCHEMA "f3(Tensor x) -> Tensor"
-#define UMA_N5_F4_SCHEMA "f4(Tensor x) -> Tensor"
+#define UMA_N5_F4_SCHEMA "f4(Tensor x, Tensor edge_index, Tensor wigner) -> Tensor"
 #define UMA_N5_F5_SCHEMA "f5(Tensor x) -> Tensor"
 #define UMA_N5_OP_LIST "f1,f2,f3,f4,f5"

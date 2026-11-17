@@ -27,6 +27,13 @@ def schemas() -> dict[str, str]:
     return found
 
 
+def _f4_eager(x, edge, wigner):
+    """Stock gather + rotate. Tracing records uma_n5::f4; C++ runs it."""
+    import torch
+
+    return torch.bmm(wigner, torch.cat((x[edge[0]], x[edge[1]]), dim=2))
+
+
 def _f2_eager(g, x, expand):
     """Stock GateActivation math. Tracing records uma_n5::f2; C++ runs it."""
     import torch
@@ -49,6 +56,9 @@ def register() -> Library:
         lib.define(schema)
         if name == "f2":
             impl(lib, name, "CompositeExplicitAutograd")(_f2_eager)
+            continue
+        if name == "f4":
+            impl(lib, name, "CompositeExplicitAutograd")(_f4_eager)
             continue
 
         def _eager(x, _name=name):

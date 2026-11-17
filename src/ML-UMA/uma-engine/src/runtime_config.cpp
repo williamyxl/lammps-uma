@@ -23,6 +23,9 @@ extern "C" void uma_n5_ops_linked_anchor();
 #ifdef UMA_F2_LINKED
 extern "C" void uma_f2_gate_anchor();
 #endif
+#ifdef UMA_F4_LINKED
+extern "C" void uma_f4_permute_anchor();
+#endif
 
 namespace uma {
 namespace {
@@ -86,6 +89,9 @@ void log_nitro_flags_once()
 #endif
 #ifdef UMA_F2_LINKED
     uma_f2_gate_anchor();
+#endif
+#ifdef UMA_F4_LINKED
+    uma_f4_permute_anchor();
 #endif
     if (!log_from_this_rank()) return;
     std::vector<std::string> flags;
