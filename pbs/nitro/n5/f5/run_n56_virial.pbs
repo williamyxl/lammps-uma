@@ -63,7 +63,7 @@ neighbor        2.0 bin
 neigh_modify    delay 0 every 1 check yes
 compute         pv all pressure NULL pair
 thermo          1
-thermo_style    custom step pe vol nktv2p c_pv[1] c_pv[2] c_pv[3] c_pv[4] c_pv[5] c_pv[6]
+thermo_style    custom step pe vol c_pv[1] c_pv[2] c_pv[3] c_pv[4] c_pv[5] c_pv[6]
 thermo_modify   norm no format float %.16e
 velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
 fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0
@@ -110,21 +110,25 @@ bar = 1e-7
 pe_bar = 1e-8
 
 def load(slot):
-    path = slot / "lmp.npt.log"
+    # LAMMPS metal nktv2p (src/units.cpp). Not a thermo_style keyword.
+    nktv2p = 1.6021765e6
+    path = slot / "log.npt"
+    if not path.is_file():
+        path = slot / "lmp.npt.log"
     rows = []
     for line in path.read_text().splitlines():
         parts = line.split()
-        if len(parts) != 10:
+        if len(parts) != 9:
             continue
         try:
             step = int(float(parts[0]))
             vals = [float(x) for x in parts]
         except ValueError:
             continue
-        pe, vol, nktv2p = vals[1], vals[2], vals[3]
-        if not (1e5 < nktv2p < 1e8) or vol <= 0:
+        pe, vol = vals[1], vals[2]
+        if not (0 <= step <= 10) or vol <= 1e4:
             continue
-        w = [-p * vol / nktv2p for p in vals[4:10]]
+        w = [-p * vol / nktv2p for p in vals[3:9]]
         rows.append([step, pe] + w)
     if len(rows) < 2:
         raise SystemExit(f"too few virial rows in {path}: {len(rows)}")
