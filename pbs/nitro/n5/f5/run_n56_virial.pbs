@@ -62,18 +62,11 @@ pair_coeff      * * \${uma_art} ${SYS_ELEMENTS}
 neighbor        2.0 bin
 neigh_modify    delay 0 every 1 check yes
 compute         pv all pressure NULL pair
-variable        wxx equal -c_pv[1]*vol/nktv2p
-variable        wyy equal -c_pv[2]*vol/nktv2p
-variable        wzz equal -c_pv[3]*vol/nktv2p
-variable        wxy equal -c_pv[4]*vol/nktv2p
-variable        wxz equal -c_pv[5]*vol/nktv2p
-variable        wyz equal -c_pv[6]*vol/nktv2p
 thermo          1
-thermo_style    custom step temp pe etotal press vol
+thermo_style    custom step pe vol nktv2p c_pv[1] c_pv[2] c_pv[3] c_pv[4] c_pv[5] c_pv[6]
 thermo_modify   norm no format float %.16e
 velocity        all create 300.0 4928459 mom yes rot yes dist gaussian
 fix             1 all npt temp 300.0 300.0 0.1 iso 1.01325 1.01325 1.0
-fix             wdump all print 1 "\${step} \${pe} \${wxx} \${wyy} \${wzz} \${wxy} \${wxz} \${wyz}" file virial.dat screen no title "# step pe wxx wyy wzz wxy wxz wyz"
 timestep        0.001
 run             ${NSTEPS}
 EOF
@@ -117,15 +110,22 @@ bar = 1e-7
 pe_bar = 1e-8
 
 def load(slot):
-    path = slot / "virial.dat"
+    path = slot / "lmp.npt.log"
     rows = []
     for line in path.read_text().splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
+        parts = line.split()
+        if len(parts) != 10:
             continue
-        parts = [float(x) for x in line.split()]
-        if len(parts) < 8:
-            raise SystemExit(f"bad virial row in {path}: {line}")
-        rows.append(parts[:8])
+        try:
+            step = int(float(parts[0]))
+            vals = [float(x) for x in parts]
+        except ValueError:
+            continue
+        pe, vol, nktv2p = vals[1], vals[2], vals[3]
+        if not (1e5 < nktv2p < 1e8) or vol <= 0:
+            continue
+        w = [-p * vol / nktv2p for p in vals[4:10]]
+        rows.append([step, pe] + w)
     if len(rows) < 2:
         raise SystemExit(f"too few virial rows in {path}: {len(rows)}")
     return rows
