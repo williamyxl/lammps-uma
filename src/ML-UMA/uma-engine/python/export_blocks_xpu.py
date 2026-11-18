@@ -851,6 +851,47 @@ def _nitro_fused_request():
     return ops, layers
 
 
+def _install_f1(backbone, layers):
+    """Replace RadialMLP LN+SiLU pairs with uma_n5::f1."""
+    chosen = None if layers == "all" else {
+        int(part) for part in layers.split(",") if part.strip()
+    }
+    n = 0
+    for i, block in enumerate(backbone.blocks):
+        if chosen is not None and i not in chosen:
+            continue
+        for mlp in block.modules():
+            net = getattr(mlp, "net", None)
+            if not isinstance(net, torch.nn.Sequential) or len(net) != 7:
+                continue
+            lin0, ln0, act0, lin1, ln1, act1, lin2 = net
+            if not (
+                isinstance(lin0, torch.nn.Linear)
+                and isinstance(ln0, torch.nn.LayerNorm)
+                and isinstance(act0, torch.nn.SiLU)
+                and isinstance(lin1, torch.nn.Linear)
+                and isinstance(ln1, torch.nn.LayerNorm)
+                and isinstance(act1, torch.nn.SiLU)
+                and isinstance(lin2, torch.nn.Linear)
+            ):
+                continue
+            if ln0.weight is None or ln0.bias is None or ln1.weight is None or ln1.bias is None:
+                raise SystemExit("f1: LayerNorm must be affine")
+
+            def forward(inputs, _lin0=lin0, _ln0=ln0, _lin1=lin1, _ln1=ln1, _lin2=lin2):
+                x = _lin0(inputs)
+                x = torch.ops.uma_n5.f1(x, _ln0.weight, _ln0.bias, float(_ln0.eps))
+                x = _lin1(x)
+                x = torch.ops.uma_n5.f1(x, _ln1.weight, _ln1.bias, float(_ln1.eps))
+                return _lin2(x)
+
+            mlp.forward = forward
+            n += 1
+    if n == 0:
+        raise SystemExit("f1: no RadialMLP LN+SiLU pair found on the selected layers")
+    print(f"N57_F1_PATCH mlps={n} of {len(backbone.blocks)} blocks", flush=True)
+
+
 def _install_f2(backbone, layers):
     """Replace GateActivation on the selected blocks with uma_n5::f2."""
     chosen = None if layers == "all" else {
@@ -1086,6 +1127,8 @@ def main() -> int:
     else:
         wrapper = make_traced_export_wrapper(model, task).eval().to(trace_dev)
     backbone = wrapper.inner.backbone
+    if "f1" in fused_ops:
+        _install_f1(backbone, fused_layers)
     if "f2" in fused_ops:
         _install_f2(backbone, fused_layers)
     if "f4" in fused_ops:
@@ -1591,19 +1634,20 @@ def main() -> int:
         n_block = allgraphs.count("uma_ckpt::block")
         n_chunk = allgraphs.count("uma_ckpt::chunk")
         n_edeg = allgraphs.count("uma_ckpt::edge_degree")
+        n_f1 = allgraphs.count("uma_n5::f1")
         n_f2 = allgraphs.count("uma_n5::f2")
         n_f4 = allgraphs.count("uma_n5::f4")
         n_f5 = allgraphs.count("uma_n5::f5")
         report["graph_check"] = {
             "all_gather_nodes": n_gather, "block": n_block,
             "chunk": n_chunk, "edge_degree": n_edeg,
-            "uma_n5_f2": n_f2, "uma_n5_f4": n_f4, "uma_n5_f5": n_f5,
+            "uma_n5_f1": n_f1, "uma_n5_f2": n_f2, "uma_n5_f4": n_f4, "uma_n5_f5": n_f5,
             "expected_gather_per_block": world > 1,
             "top_frozen_opaque": bool(top_opaque),
         }
         print(f"[graph-check] all_gather_nodes={n_gather} block={n_block} "
-              f"chunk={n_chunk} edge_degree={n_edeg} uma_n5_f2={n_f2} "
-              f"uma_n5_f4={n_f4} uma_n5_f5={n_f5} (num_layers="
+              f"chunk={n_chunk} edge_degree={n_edeg} uma_n5_f1={n_f1} "
+              f"uma_n5_f2={n_f2} uma_n5_f4={n_f4} uma_n5_f5={n_f5} (num_layers="
               f"{int(backbone.num_layers)})"
               f"{' [top frozen: block/edge_degree counts N/A]' if top_opaque else ''}",
               flush=True)
@@ -1646,6 +1690,10 @@ def main() -> int:
     if "gp_structure_ok" in gc and gc.get("gp_structure_ok") is not True:
         print("EXPORT FAIL: GP graph-structure check did not PASS "
               f"(gp_structure_ok={gc.get('gp_structure_ok')})", flush=True)
+        fail = True
+    if "f1" in fused_ops and gc.get("uma_n5_f1", 0) < 1:
+        print("EXPORT FAIL: UMA_NITRO_FUSED includes f1 but the traced graph "
+              "has no uma_n5::f1", flush=True)
         fail = True
     if "f2" in fused_ops and gc.get("uma_n5_f2", 0) < 1:
         print("EXPORT FAIL: UMA_NITRO_FUSED includes f2 but the traced graph "

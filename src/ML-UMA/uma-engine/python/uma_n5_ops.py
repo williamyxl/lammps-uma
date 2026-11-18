@@ -27,6 +27,15 @@ def schemas() -> dict[str, str]:
     return found
 
 
+def _f1_eager(x, weight, bias, eps):
+    """Stock LayerNorm then SiLU. Tracing records uma_n5::f1."""
+    import torch
+
+    return torch.nn.functional.silu(
+        torch.nn.functional.layer_norm(x, (x.shape[-1],), weight, bias, eps)
+    )
+
+
 def _f5_eager(x, wigner_inv, edge, n_nodes, node_offset):
     """Stock inverse rotation and scatter. Tracing records uma_n5::f5."""
     import torch
@@ -66,6 +75,9 @@ def register() -> Library:
     lib = Library("uma_n5", "DEF")
     for name, schema in schemas().items():
         lib.define(schema)
+        if name == "f1":
+            impl(lib, name, "CompositeExplicitAutograd")(_f1_eager)
+            continue
         if name == "f2":
             impl(lib, name, "CompositeExplicitAutograd")(_f2_eager)
             continue

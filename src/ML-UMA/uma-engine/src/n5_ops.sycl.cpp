@@ -30,6 +30,5 @@ TORCH_LIBRARY(uma_n5, m) {
 }
 
 TORCH_LIBRARY_IMPL(uma_n5, CompositeExplicitAutograd, m) {
-  m.impl("f1", &n5_not_in_model);
   m.impl("f3", &n5_not_in_model);
 }
