@@ -259,6 +259,24 @@ if(UMA_ENGINE_USE_XPU)
     target_compile_definitions(uma_engine PRIVATE UMA_F1_LINKED)
     message(STATUS "uma-engine: libuma_f1.so linked")
 
+    # Step 27 (N5.8). Work-group 32 radial chain, same shared-library link.
+    set(_f3_src "${CMAKE_CURRENT_SOURCE_DIR}/src/f3_engine.sycl.cpp")
+    set(_f3_so "${CMAKE_CURRENT_BINARY_DIR}/libuma_f3.so")
+    add_custom_command(
+      OUTPUT ${_f3_so}
+      COMMAND ${UMA_ICPX} -fsycl -fPIC -shared -O2 -std=c++17
+              -fp-model=precise -D_GLIBCXX_USE_CXX11_ABI=1
+              ${_n5_incs}
+              ${_f3_src} -o ${_f3_so}
+      DEPENDS ${_f3_src} ${CMAKE_CURRENT_SOURCE_DIR}/include/uma/n5_ops.h
+      COMMENT "icpx -fsycl -shared libuma_f3.so"
+      VERBATIM)
+    add_custom_target(uma_f3_so DEPENDS ${_f3_so})
+    add_dependencies(uma_engine uma_f3_so)
+    target_link_libraries(uma_engine PUBLIC ${_f3_so})
+    target_compile_definitions(uma_engine PRIVATE UMA_F3_LINKED)
+    message(STATUS "uma-engine: libuma_f3.so linked")
+
     # Step 25 (N5.6). Work-group 64 scatter, same shared-library link.
     set(_f5_src "${CMAKE_CURRENT_SOURCE_DIR}/src/f5_engine.sycl.cpp")
     set(_f5_so "${CMAKE_CURRENT_BINARY_DIR}/libuma_f5.so")

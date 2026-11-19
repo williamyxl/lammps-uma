@@ -23,6 +23,9 @@ extern "C" void uma_n5_ops_linked_anchor();
 #ifdef UMA_F1_LINKED
 extern "C" void uma_f1_ln_silu_anchor();
 #endif
+#ifdef UMA_F3_LINKED
+extern "C" void uma_f3_radial_anchor();
+#endif
 #ifdef UMA_F2_LINKED
 extern "C" void uma_f2_gate_anchor();
 #endif
@@ -95,6 +98,9 @@ void log_nitro_flags_once()
 #endif
 #ifdef UMA_F1_LINKED
     uma_f1_ln_silu_anchor();
+#endif
+#ifdef UMA_F3_LINKED
+    uma_f3_radial_anchor();
 #endif
 #ifdef UMA_F2_LINKED
     uma_f2_gate_anchor();

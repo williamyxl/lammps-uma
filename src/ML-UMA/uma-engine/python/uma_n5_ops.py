@@ -36,6 +36,27 @@ def _f1_eager(x, weight, bias, eps):
     )
 
 
+def _f3_eager(x, W1, b1, ln1_w, ln1_b, W2, b2, ln2_w, ln2_b, W3, b3, eps):
+    """Stock RadialMLP chain. Tracing records uma_n5::f3. y is [N, E, out]."""
+    import torch
+
+    n = int(ln1_w.shape[0])
+    h = int(ln1_w.shape[1])
+    h_all = torch.nn.functional.linear(x, W1, b1)
+    ys = []
+    for i in range(n):
+        h0 = h_all[:, i * h : (i + 1) * h]
+        s1 = torch.nn.functional.silu(
+            torch.nn.functional.layer_norm(h0, (h,), ln1_w[i], ln1_b[i], eps)
+        )
+        h1 = torch.nn.functional.linear(s1, W2[i], b2[i])
+        s2 = torch.nn.functional.silu(
+            torch.nn.functional.layer_norm(h1, (h,), ln2_w[i], ln2_b[i], eps)
+        )
+        ys.append(torch.nn.functional.linear(s2, W3[i], b3[i]))
+    return torch.stack(ys, 0)
+
+
 def _f5_eager(x, wigner_inv, edge, n_nodes, node_offset):
     """Stock inverse rotation and scatter. Tracing records uma_n5::f5."""
     import torch
@@ -77,6 +98,9 @@ def register() -> Library:
         lib.define(schema)
         if name == "f1":
             impl(lib, name, "CompositeExplicitAutograd")(_f1_eager)
+            continue
+        if name == "f3":
+            impl(lib, name, "CompositeExplicitAutograd")(_f3_eager)
             continue
         if name == "f2":
             impl(lib, name, "CompositeExplicitAutograd")(_f2_eager)

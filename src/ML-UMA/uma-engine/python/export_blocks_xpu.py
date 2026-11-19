@@ -892,6 +892,70 @@ def _install_f1(backbone, layers):
     print(f"N57_F1_PATCH mlps={n} of {len(backbone.blocks)} blocks", flush=True)
 
 
+def _install_f3(backbone, layers):
+    """Replace each selected RadialMLP with uma_n5::f3 (N=1 chain).
+
+    x_edge is layer-specific (distance + source/target embeddings), so the
+    four-layer W1 merge is N independent chains, not one shared-x GEMM.
+    """
+    chosen = None if layers == "all" else {
+        int(part) for part in layers.split(",") if part.strip()
+    }
+    n = 0
+    for i, block in enumerate(backbone.blocks):
+        if chosen is not None and i not in chosen:
+            continue
+        for mlp in block.modules():
+            net = getattr(mlp, "net", None)
+            if not isinstance(net, torch.nn.Sequential) or len(net) != 7:
+                continue
+            lin0, ln0, act0, lin1, ln1, act1, lin2 = net
+            if not (
+                isinstance(lin0, torch.nn.Linear)
+                and isinstance(ln0, torch.nn.LayerNorm)
+                and isinstance(act0, torch.nn.SiLU)
+                and isinstance(lin1, torch.nn.Linear)
+                and isinstance(ln1, torch.nn.LayerNorm)
+                and isinstance(act1, torch.nn.SiLU)
+                and isinstance(lin2, torch.nn.Linear)
+            ):
+                continue
+            if ln0.weight is None or ln0.bias is None or ln1.weight is None or ln1.bias is None:
+                raise SystemExit("f3: LayerNorm must be affine")
+            if float(ln0.eps) != float(ln1.eps):
+                raise SystemExit("f3: LayerNorm eps mismatch inside RadialMLP")
+
+            def forward(
+                inputs,
+                _lin0=lin0,
+                _ln0=ln0,
+                _lin1=lin1,
+                _ln1=ln1,
+                _lin2=lin2,
+            ):
+                y = torch.ops.uma_n5.f3(
+                    inputs,
+                    _lin0.weight,
+                    _lin0.bias,
+                    _ln0.weight.unsqueeze(0),
+                    _ln0.bias.unsqueeze(0),
+                    _lin1.weight.unsqueeze(0),
+                    _lin1.bias.unsqueeze(0),
+                    _ln1.weight.unsqueeze(0),
+                    _ln1.bias.unsqueeze(0),
+                    _lin2.weight.unsqueeze(0),
+                    _lin2.bias.unsqueeze(0),
+                    float(_ln0.eps),
+                )
+                return y[0]
+
+            mlp.forward = forward
+            n += 1
+    if n == 0:
+        raise SystemExit("f3: no RadialMLP found on the selected layers")
+    print(f"N58_F3_PATCH mlps={n} of {len(backbone.blocks)} blocks", flush=True)
+
+
 def _install_f2(backbone, layers):
     """Replace GateActivation on the selected blocks with uma_n5::f2."""
     chosen = None if layers == "all" else {
@@ -1129,6 +1193,8 @@ def main() -> int:
     backbone = wrapper.inner.backbone
     if "f1" in fused_ops:
         _install_f1(backbone, fused_layers)
+    if "f3" in fused_ops:
+        _install_f3(backbone, fused_layers)
     if "f2" in fused_ops:
         _install_f2(backbone, fused_layers)
     if "f4" in fused_ops:
@@ -1636,18 +1702,20 @@ def main() -> int:
         n_edeg = allgraphs.count("uma_ckpt::edge_degree")
         n_f1 = allgraphs.count("uma_n5::f1")
         n_f2 = allgraphs.count("uma_n5::f2")
+        n_f3 = allgraphs.count("uma_n5::f3")
         n_f4 = allgraphs.count("uma_n5::f4")
         n_f5 = allgraphs.count("uma_n5::f5")
         report["graph_check"] = {
             "all_gather_nodes": n_gather, "block": n_block,
             "chunk": n_chunk, "edge_degree": n_edeg,
-            "uma_n5_f1": n_f1, "uma_n5_f2": n_f2, "uma_n5_f4": n_f4, "uma_n5_f5": n_f5,
+            "uma_n5_f1": n_f1, "uma_n5_f2": n_f2, "uma_n5_f3": n_f3,
+            "uma_n5_f4": n_f4, "uma_n5_f5": n_f5,
             "expected_gather_per_block": world > 1,
             "top_frozen_opaque": bool(top_opaque),
         }
         print(f"[graph-check] all_gather_nodes={n_gather} block={n_block} "
               f"chunk={n_chunk} edge_degree={n_edeg} uma_n5_f1={n_f1} "
-              f"uma_n5_f2={n_f2} uma_n5_f4={n_f4} uma_n5_f5={n_f5} (num_layers="
+              f"uma_n5_f2={n_f2} uma_n5_f3={n_f3} uma_n5_f4={n_f4} uma_n5_f5={n_f5} (num_layers="
               f"{int(backbone.num_layers)})"
               f"{' [top frozen: block/edge_degree counts N/A]' if top_opaque else ''}",
               flush=True)
@@ -1694,6 +1762,10 @@ def main() -> int:
     if "f1" in fused_ops and gc.get("uma_n5_f1", 0) < 1:
         print("EXPORT FAIL: UMA_NITRO_FUSED includes f1 but the traced graph "
               "has no uma_n5::f1", flush=True)
+        fail = True
+    if "f3" in fused_ops and gc.get("uma_n5_f3", 0) < 1:
+        print("EXPORT FAIL: UMA_NITRO_FUSED includes f3 but the traced graph "
+              "has no uma_n5::f3", flush=True)
         fail = True
     if "f2" in fused_ops and gc.get("uma_n5_f2", 0) < 1:
         print("EXPORT FAIL: UMA_NITRO_FUSED includes f2 but the traced graph "

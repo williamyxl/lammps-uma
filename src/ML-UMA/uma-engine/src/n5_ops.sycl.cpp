@@ -8,14 +8,6 @@
 
 #include <iostream>
 
-namespace {
-
-at::Tensor n5_not_in_model(const at::Tensor& x) {
-  TORCH_CHECK(false, "uma_n5 op called; the empty flag set does not use it");
-  return x;
-}
-
-}  // namespace
 
 extern "C" void uma_n5_ops_linked_anchor() {
   std::cerr << "N53_LINKED " UMA_N5_OP_LIST "\n" << std::flush;
@@ -29,6 +21,5 @@ TORCH_LIBRARY(uma_n5, m) {
   m.def(UMA_N5_F5_SCHEMA);
 }
 
-TORCH_LIBRARY_IMPL(uma_n5, CompositeExplicitAutograd, m) {
-  m.impl("f3", &n5_not_in_model);
-}
+// f3 is implemented in libuma_f3.so (step 27). The identity stub lived here
+// until that schema gained weights.
