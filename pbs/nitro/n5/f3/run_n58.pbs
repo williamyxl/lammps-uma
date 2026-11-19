@@ -11,7 +11,7 @@
 #PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
 # Step 27 (N5.8). One tile. The binary is compiled on the login node.
 # Submit from pbs/nitro/n5/f3:
-#   qsub -q debug-scaling -v NITRO_TAG=nitro/n5-f3/r1 run_n58.pbs
+#   qsub -q debug-scaling -v NITRO_TAG=nitro/n5-f3/r2 run_n58.pbs
 set -uo pipefail
 HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 REL="$(cd "${HERE}/../../../.." && pwd)"
