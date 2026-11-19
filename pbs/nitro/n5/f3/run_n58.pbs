@@ -1,0 +1,28 @@
+#!/bin/bash -l
+#PBS -N nitro-n58
+#PBS -q debug-scaling
+#PBS -A MatSciAI
+#PBS -l filesystems=flare
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -j oe
+#PBS -k doe
+#PBS -o /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+#PBS -e /lus/flare/projects/MatSciAI/xiaoliyan/workdir/lammps-uma-nitro/pbs/out/
+# Step 27 (N5.8). One tile. The binary is compiled on the login node.
+# Submit from pbs/nitro/n5/f3:
+#   qsub -q debug-scaling -v NITRO_TAG=nitro/n5-f3/r1 run_n58.pbs
+set -uo pipefail
+HERE="${PBS_O_WORKDIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+REL="$(cd "${HERE}/../../../.." && pwd)"
+# shellcheck disable=SC1091
+source "${REL}/pbs/nitro/env.inc"
+export PATH="${MPICH}/bin:${PATH}"
+LIB="${REL}/pbs/out/n58_build/libuma_n5f3.so"
+[[ -f "${LIB}" ]] || { echo "N58_FAIL missing ${LIB}"; exit 1; }
+export F3_LIB="${LIB}"
+echo "N58_JOB host=$(hostname) job=${PBS_JOBID:-none}"
+mpiexec -n 1 --ppn 1 gpu_tile_compact.sh python "${HERE}/f3_bench.py"
+rc=$?
+echo "N58_JOB_DONE rc=${rc}"
+exit "${rc}"
