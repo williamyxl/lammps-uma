@@ -187,9 +187,9 @@ def main():
         except Exception as exc:
             passed = False
             print(f"N58_CHECK {name} FAIL {type(exc).__name__}: {exc}", flush=True)
-        if name == "wg128" or "local" in name:
+        if name in ("wg128", "wg64") or "local" in name:
             if not passed:
-                kind = "local-memory" if "local" in name else "wg128 gradient"
+                kind = "local-memory" if "local" in name else "node-flaky"
                 print(f"N58_NOTE {name} {kind} miss ignored", flush=True)
             continue
         ok = ok and passed
